@@ -1,0 +1,297 @@
+/* Placeholder UI for Milestone 1. Schematic-ish, but this is not the §16 visual
+   language — the real blueprint-phosphor document styling lands in M2. */
+
+:root {
+  --bg: #060a12;
+  --structure: #2a3a52;
+  --ink: #8fa5c0;
+  --ink-bright: #d7e3f2;
+  --white: #ffffff;
+  --thermal: #ffb000;
+  --voltaic: #00e5ff;
+  --void: #b44cff;
+  --signal: #ff2a3c;
+}
+
+#ui {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 12px;
+  color: var(--ink);
+  letter-spacing: 0.04em;
+}
+
+#ui .corner {
+  position: absolute;
+  padding: 10px 14px;
+  line-height: 1.55;
+  white-space: pre;
+}
+
+#hud-tl {
+  top: 6px;
+  left: 0;
+}
+#hud-tc {
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+}
+#hud-tr {
+  top: 6px;
+  right: 0;
+  text-align: right;
+}
+#hud-bl {
+  bottom: 6px;
+  left: 0;
+}
+#hud-bc {
+  bottom: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+}
+#hud-br {
+  bottom: 6px;
+  right: 0;
+  text-align: right;
+  color: #4c6076;
+}
+
+#xpbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 2px;
+  background: var(--white);
+  opacity: 0.85;
+}
+
+.bar {
+  display: inline-block;
+  color: var(--ink-bright);
+}
+.eps {
+  color: var(--white);
+  font-size: 15px;
+}
+.hot {
+  color: var(--signal);
+}
+.thermal {
+  color: var(--thermal);
+}
+.voltaic {
+  color: var(--voltaic);
+}
+.void {
+  color: var(--void);
+}
+
+/* ---- overlays ---- */
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: none;
+  pointer-events: auto;
+  background: rgba(6, 10, 18, 0.72);
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 18px;
+}
+.overlay.open {
+  display: flex;
+}
+
+.overlay h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0.35em;
+  color: var(--ink);
+}
+
+.cards {
+  display: flex;
+  gap: 16px;
+}
+
+.card {
+  width: 250px;
+  min-height: 190px;
+  padding: 16px;
+  border: 1px solid var(--structure);
+  background: rgba(6, 10, 18, 0.95);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  cursor: pointer;
+}
+.card:hover,
+.card:focus {
+  border-color: var(--ink);
+  outline: none;
+}
+.card .tag {
+  font-size: 10px;
+  letter-spacing: 0.25em;
+  color: #56708c;
+}
+.card .title {
+  font-size: 17px;
+  color: var(--ink-bright);
+}
+.card .body {
+  flex: 1;
+  color: var(--ink);
+  line-height: 1.6;
+  white-space: normal;
+}
+.card .slot {
+  font-size: 10px;
+  color: #56708c;
+}
+.card .key {
+  font-size: 10px;
+  color: #56708c;
+}
+.card .purge {
+  pointer-events: auto;
+  border: 1px solid var(--structure);
+  background: none;
+  color: #56708c;
+  font: inherit;
+  font-size: 10px;
+  padding: 3px 6px;
+  cursor: pointer;
+}
+.card .purge:hover:enabled {
+  color: var(--signal);
+  border-color: var(--signal);
+}
+.card .purge:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.rail {
+  display: flex;
+  gap: 22px;
+  color: #56708c;
+  font-size: 11px;
+}
+
+/* ---- editor ---- */
+
+#editor .panel {
+  width: min(1000px, 92vw);
+  max-height: 84vh;
+  overflow: auto;
+  border: 1px solid var(--structure);
+  background: rgba(6, 10, 18, 0.97);
+  padding: 18px 20px;
+}
+#editor .head {
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--structure);
+  padding-bottom: 10px;
+  margin-bottom: 12px;
+  color: var(--ink-bright);
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px dashed rgba(42, 58, 82, 0.6);
+}
+.row .idx {
+  width: 22px;
+  color: #56708c;
+}
+.chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  flex-wrap: wrap;
+}
+.chip {
+  border: 1px solid var(--structure);
+  padding: 4px 9px;
+  color: var(--ink-bright);
+  white-space: nowrap;
+}
+.chip.empty {
+  border-style: dashed;
+  color: #3d5570;
+}
+.chip.trigger {
+  border-color: #4a6a8c;
+}
+.chip.action {
+  border-color: #7a6a3c;
+}
+.arrow {
+  color: #3d5570;
+}
+.row .stats {
+  width: 210px;
+  text-align: right;
+  color: #6b849e;
+  font-size: 11px;
+  white-space: pre;
+}
+.row .ops {
+  display: flex;
+  gap: 5px;
+}
+.row button {
+  pointer-events: auto;
+  border: 1px solid var(--structure);
+  background: none;
+  color: #6b849e;
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 7px;
+  cursor: pointer;
+}
+.row button:hover:enabled {
+  color: var(--ink-bright);
+  border-color: var(--ink);
+}
+.row button.danger:hover:enabled {
+  color: var(--signal);
+  border-color: var(--signal);
+}
+.row button:disabled {
+  opacity: 0.28;
+  cursor: default;
+}
+
+.hint {
+  color: #46586e;
+  font-size: 11px;
+}
+
+#results .panel {
+  width: min(620px, 92vw);
+  border: 1px solid var(--structure);
+  background: rgba(6, 10, 18, 0.97);
+  padding: 22px 26px;
+  line-height: 1.8;
+  white-space: pre;
+}
+#results .headline {
+  color: var(--ink-bright);
+  font-size: 16px;
+  letter-spacing: 0.2em;
+  margin-bottom: 14px;
+}

@@ -1,0 +1,54 @@
+[
+  {
+    "id": "mote",
+    "name": "Mote",
+    "shape": "dot",
+    "hp": 1,
+    "speed": 62,
+    "radius": 5,
+    "contactDamage": 1,
+    "xp": 1,
+    "fuel": 1,
+    "description": "Drifts toward the player in loose flocks. Mass, fuel rain, cascade kindling."
+  },
+  {
+    "id": "drifter",
+    "name": "Drifter",
+    "shape": "circle",
+    "hp": 12,
+    "speed": 74,
+    "radius": 13,
+    "contactDamage": 6,
+    "xp": 2,
+    "fuel": 1,
+    "description": "Steady seek. Baseline pressure."
+  },
+  {
+    "id": "charger",
+    "name": "Charger",
+    "shape": "triangle",
+    "hp": 20,
+    "speed": 58,
+    "radius": 14,
+    "contactDamage": 12,
+    "xp": 3,
+    "fuel": 1,
+    "windup": 0.6,
+    "dashSpeed": 520,
+    "dashDuration": 0.45,
+    "description": "Stops, aims, telegraphed dash. Punishes standing still."
+  },
+  {
+    "id": "splitter",
+    "name": "Splitter",
+    "shape": "hexagon",
+    "hp": 30,
+    "speed": 52,
+    "radius": 18,
+    "contactDamage": 8,
+    "xp": 4,
+    "fuel": 2,
+    "splitsInto": { "enemy": "charger", "count": 2 },
+    "description": "On death splits into 2 Chargers plus bonus fuel. Cascade amplifier."
+  }
+]

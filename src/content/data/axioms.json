@@ -1,0 +1,26 @@
+[
+  {
+    "id": "ignition",
+    "name": "Ignition",
+    "starter": { "trigger": "clock", "modifiers": [], "action": "bolt" },
+    "poolBias": { "thermal": 1.2 },
+    "capacityDelta": 0,
+    "description": "Clock -> Bolt. Thermal +20%."
+  },
+  {
+    "id": "circuit",
+    "name": "Circuit",
+    "starter": { "trigger": "clock", "modifiers": [], "action": "arc" },
+    "poolBias": { "voltaic": 1.2 },
+    "capacityDelta": 0,
+    "description": "Clock -> Arc. Voltaic +20%."
+  },
+  {
+    "id": "feedback",
+    "name": "Feedback",
+    "starter": { "trigger": "on_hit", "modifiers": ["echo"], "action": "bolt" },
+    "poolBias": { "echo": 1.15 },
+    "capacityDelta": -20,
+    "description": "On Hit -> Echo -> Bolt. Echo/Resonate +15%; capacity -20. Hard mode."
+  }
+]

@@ -1,0 +1,87 @@
+[
+  {
+    "id": "opening_drift",
+    "minThreat": 0,
+    "maxThreat": 2,
+    "weight": 10,
+    "entries": [{ "enemy": "drifter", "count": 3, "spread": 80 }],
+    "description": "Opening pressure. Two bolts each."
+  },
+  {
+    "id": "mote_trickle",
+    "minThreat": 0,
+    "maxThreat": 2.5,
+    "weight": 12,
+    "entries": [{ "enemy": "mote", "count": 6, "spread": 110 }],
+    "description": "First cascade kindling. Dies to anything."
+  },
+  {
+    "id": "mote_flock",
+    "minThreat": 1.5,
+    "maxThreat": 99,
+    "weight": 12,
+    "entries": [{ "enemy": "mote", "count": 13, "spread": 150 }],
+    "description": "Swarm flood. Cascade kindling."
+  },
+  {
+    "id": "charger_pair",
+    "minThreat": 2,
+    "maxThreat": 99,
+    "weight": 8,
+    "entries": [{ "enemy": "charger", "count": 2, "spread": 120 }],
+    "description": "Punishes standing still."
+  },
+  {
+    "id": "drift_screen",
+    "minThreat": 3,
+    "maxThreat": 99,
+    "weight": 10,
+    "entries": [
+      { "enemy": "drifter", "count": 6, "spread": 160 },
+      { "enemy": "mote", "count": 7, "spread": 120 }
+    ],
+    "description": "Mixed screen."
+  },
+  {
+    "id": "splitter_cluster",
+    "minThreat": 4.5,
+    "maxThreat": 99,
+    "weight": 7,
+    "entries": [{ "enemy": "splitter", "count": 3, "spread": 100 }],
+    "description": "Splitter cluster. Feeds On Kill builds deliberately."
+  },
+  {
+    "id": "flood",
+    "minThreat": 7,
+    "maxThreat": 99,
+    "weight": 9,
+    "entries": [
+      { "enemy": "mote", "count": 24, "spread": 200 },
+      { "enemy": "drifter", "count": 5, "spread": 140 }
+    ],
+    "description": "Density test."
+  },
+  {
+    "id": "heavy_mix",
+    "minThreat": 10,
+    "maxThreat": 99,
+    "weight": 9,
+    "entries": [
+      { "enemy": "splitter", "count": 4, "spread": 150 },
+      { "enemy": "charger", "count": 4, "spread": 150 },
+      { "enemy": "mote", "count": 16, "spread": 180 }
+    ],
+    "description": "Late build-phase composition."
+  },
+  {
+    "id": "splitter_wall",
+    "minThreat": 14,
+    "maxThreat": 99,
+    "weight": 8,
+    "entries": [
+      { "enemy": "splitter", "count": 7, "spread": 190 },
+      { "enemy": "drifter", "count": 8, "spread": 170 }
+    ],
+    "description": "Cascade fuel at scale."
+  }
+]

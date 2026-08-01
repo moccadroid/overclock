@@ -1,0 +1,29 @@
+[
+  {
+    "id": "amplify",
+    "kind": "modifier",
+    "name": "Amplify",
+    "cycleMult": 1.3,
+    "ops": [{ "target": "output", "add": 0.5 }],
+    "description": "+50% output (flat, applied where it sits in the chain)."
+  },
+  {
+    "id": "split",
+    "kind": "modifier",
+    "name": "Split",
+    "cycleMult": 2.0,
+    "ops": [
+      { "target": "count", "mul": 3 },
+      { "target": "output", "mul": 0.65 }
+    ],
+    "description": "x3 copies, each -35% output."
+  },
+  {
+    "id": "echo",
+    "kind": "modifier",
+    "name": "Echo",
+    "cycleMult": 1.8,
+    "ops": [{ "target": "echo", "add": 1 }],
+    "description": "Repeats everything before it once, 0.2s later, at 70% output."
+  }
+]

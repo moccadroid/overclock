@@ -1,0 +1,38 @@
+[
+  {
+    "id": "bolt",
+    "kind": "action",
+    "name": "Bolt",
+    "hue": "thermal",
+    "cycleCost": 2,
+    "primitive": "projectile",
+    "damage": 10,
+    "speed": 430,
+    "lifetime": 2.2,
+    "pierce": 0,
+    "description": "Single projectile at nearest enemy."
+  },
+  {
+    "id": "nova",
+    "kind": "action",
+    "name": "Nova",
+    "hue": "thermal",
+    "cycleCost": 4,
+    "primitive": "burst",
+    "damage": 8,
+    "radius": 130,
+    "description": "Radial burst around the avatar."
+  },
+  {
+    "id": "arc",
+    "kind": "action",
+    "name": "Arc",
+    "hue": "voltaic",
+    "cycleCost": 3,
+    "primitive": "chain",
+    "damage": 7,
+    "jumps": 3,
+    "range": 230,
+    "description": "Chain lightning, jumps up to 3 targets."
+  }
+]

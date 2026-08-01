@@ -1,0 +1,32 @@
+{
+  "name": "overclock",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Bullet-heaven / build-crafting roguelite. Codename only — see src/branding.ts for player-facing naming.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "sim": "tsx src/harness/headless.ts"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  },
+  "dependencies": {
+    "pixi.js": "^8.19.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.0",
+    "vitest": "^4.1.10"
+  }
+}

@@ -1,0 +1,35 @@
+[
+  {
+    "id": "clock",
+    "kind": "trigger",
+    "name": "Clock",
+    "cycleCost": 1,
+    "listens": "clock",
+    "interval": 1.2,
+    "description": "Fires every 1.2s."
+  },
+  {
+    "id": "on_hit",
+    "kind": "trigger",
+    "name": "On Hit",
+    "cycleCost": 1,
+    "listens": "hit",
+    "description": "Fires when any of your effects damages an enemy."
+  },
+  {
+    "id": "on_kill",
+    "kind": "trigger",
+    "name": "On Kill",
+    "cycleCost": 1,
+    "listens": "kill",
+    "description": "Fires when any enemy dies to your effects."
+  },
+  {
+    "id": "on_pickup",
+    "kind": "trigger",
+    "name": "On Pickup",
+    "cycleCost": 1,
+    "listens": "pickup",
+    "description": "Fires when you collect fuel or XP."
+  }
+]
