@@ -138,6 +138,11 @@ export interface WaveTemplateDef {
   minThreat: number;
   maxThreat: number;
   weight: number;
+  /**
+   * Ambient trickle rather than a wave: drawn continuously between templates to
+   * keep constant pressure. Stream templates should be small (1-2 enemies).
+   */
+  stream?: boolean;
   entries: readonly { enemy: string; count: number; spread: number }[];
   description: string;
 }

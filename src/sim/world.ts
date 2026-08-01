@@ -125,6 +125,22 @@ export interface Fx {
   alive: boolean;
 }
 
+/**
+ * A spawn that has been decided but has not arrived yet. Waves are queued with
+ * staggered arrival times so a template streams in rather than appearing as one
+ * clump (§12.2 — the composition is the design, its delivery should not be a
+ * single instant).
+ */
+interface PendingSpawn {
+  time: number;
+  enemy: string;
+  x: number;
+  y: number;
+  hue: Hue;
+  enriched: boolean;
+  alive: boolean;
+}
+
 interface ScheduledFire {
   time: number;
   programIndex: number;
@@ -210,6 +226,7 @@ export class World {
 
   threat = 0;
   waveTimer = 2;
+  ambientTimer = 1;
   beaconTimer = 20;
   score = 0;
   eps = 0;
@@ -240,6 +257,7 @@ export class World {
 
   private eventQueue: GameEvent[] = [];
   private scheduled: ScheduledFire[] = [];
+  private pendingSpawns: PendingSpawn[] = [];
   private grid: SpatialGrid<Enemy>;
   private flow: FlowField;
   private readonly flowSample = { x: 0, y: 0 };
@@ -281,7 +299,7 @@ export class World {
       alive: true,
     };
 
-    this.xpToNext = TUNABLE.xpBase;
+    this.xpToNext = TUNABLE.xpFirstLevel;
   }
 
   // ---------------------------------------------------------------- main step
@@ -1096,20 +1114,84 @@ export class World {
   private updateDirector(dt: number): void {
     // §12.1 — Threat rises with time and never decreases.
     this.threat += TUNABLE.threatPerSecond * dt;
-    this.waveTimer -= dt;
-    if (this.waveTimer > 0) return;
 
-    this.waveTimer = Math.max(
-      TUNABLE.waveIntervalMin,
-      TUNABLE.waveIntervalBase - this.threat * TUNABLE.waveIntervalPerThreat,
-    );
+    this.releasePendingSpawns();
 
     // Soft population throttle — see TUNABLE.maxAliveBase. Difficulty keeps
     // rising through composition and Threat; only raw pile-up is capped.
     const maxAlive = TUNABLE.maxAliveBase + this.threat * TUNABLE.maxAlivePerThreat;
+
+    // Ambient trickle: constant low pressure so the arena is never empty between
+    // templates. This is the difference between "a clump, then silence" and a
+    // horde that keeps coming.
+    this.ambientTimer -= dt;
+    if (this.ambientTimer <= 0) {
+      this.ambientTimer = Math.max(
+        TUNABLE.ambientIntervalMin,
+        TUNABLE.ambientIntervalBase - this.threat * TUNABLE.ambientIntervalPerThreat,
+      );
+      if (this.enemies.length < maxAlive) this.spawnAmbient();
+    }
+
+    this.waveTimer -= dt;
+    if (this.waveTimer > 0) return;
+    this.waveTimer = Math.max(
+      TUNABLE.waveIntervalMin,
+      TUNABLE.waveIntervalBase - this.threat * TUNABLE.waveIntervalPerThreat,
+    );
     if (this.enemies.length >= maxAlive) return;
 
     this.spawnWave(false);
+  }
+
+  /** Arrive any queued spawns whose time has come. */
+  private releasePendingSpawns(): void {
+    if (this.pendingSpawns.length === 0) return;
+    let due = false;
+    for (const s of this.pendingSpawns) {
+      if (!s.alive || s.time > this.time) continue;
+      s.alive = false;
+      due = true;
+      // Re-assert the off-screen and safe-radius guarantees against where the
+      // player is NOW: they may have run most of a screen's width since this
+      // spawn was queued.
+      const hidden = this.pushOutsideView(s.x, s.y);
+      const safe = this.pushOutsideSafeRadius(hidden.x, hidden.y);
+      const e = this.spawnEnemy(
+        s.enemy,
+        clamp(safe.x, 20, this.arena.width - 20),
+        clamp(safe.y, 20, this.arena.height - 20),
+        s.hue,
+      );
+      if (e) e.enriched = s.enriched;
+    }
+    if (due) {
+      let w = 0;
+      for (let r = 0; r < this.pendingSpawns.length; r++) {
+        const s = this.pendingSpawns[r]!;
+        if (s.alive) this.pendingSpawns[w++] = s;
+      }
+      this.pendingSpawns.length = w;
+    }
+  }
+
+  /** One or two light enemies from a random direction, scaled by Threat. */
+  private spawnAmbient(): void {
+    const stream = WAVES.filter(
+      (w) => w.stream === true && this.threat >= w.minThreat && this.threat <= w.maxThreat,
+    );
+    if (stream.length === 0) return;
+    const template = this.rng.pickWeighted(
+      stream,
+      stream.map((w) => w.weight),
+    );
+    const extra = 1 + Math.floor(this.threat * TUNABLE.ambientPerThreat);
+    for (const entry of template.entries) {
+      for (let i = 0; i < entry.count * extra; i++) {
+        const origin = this.pickSpawnOrigin();
+        this.queueSpawn(entry.enemy, origin.x, origin.y, entry.spread, 0, false);
+      }
+    }
   }
 
   /**
@@ -1119,33 +1201,56 @@ export class World {
    * would get different runs from the same seed.
    */
   private spawnWave(enriched: boolean): void {
-    const eligible = WAVES.filter((w) => this.threat >= w.minThreat && this.threat <= w.maxThreat);
+    const eligible = WAVES.filter(
+      (w) => !w.stream && this.threat >= w.minThreat && this.threat <= w.maxThreat,
+    );
     if (eligible.length === 0) return;
     const template = this.rng.pickWeighted(
       eligible,
       eligible.map((w) => w.weight),
     );
 
-    const { x: ox, y: oy } = this.pickSpawnOrigin();
+    // Several compass slots, not one — a template that all lands in one place is
+    // one Nova away from nothing happening.
+    const slots: { x: number; y: number }[] = [];
+    for (let i = 0; i < TUNABLE.waveCompassSlots; i++) slots.push(this.pickSpawnOrigin());
 
     for (const entry of template.entries) {
       for (let i = 0; i < entry.count; i++) {
-        const rx = ox + this.rng.range(-entry.spread, entry.spread);
-        const ry = oy + this.rng.range(-entry.spread, entry.spread);
-        // The template's spread can drag a cluster member back into view; push
-        // it out again before the hard no-spawn-on-player guarantee.
-        const hidden = this.pushOutsideView(rx, ry);
-        const safe = this.pushOutsideSafeRadius(hidden.x, hidden.y);
-        const e = this.spawnEnemy(
-          entry.enemy,
-          clamp(safe.x, 20, this.arena.width - 20),
-          clamp(safe.y, 20, this.arena.height - 20),
-          this.rng.pick(HUES),
-        );
-        if (e) e.enriched = enriched;
+        const origin = slots[this.rng.int(slots.length)]!;
+        const delay = this.rng.next() * TUNABLE.waveArrivalSpread;
+        this.queueSpawn(entry.enemy, origin.x, origin.y, entry.spread, delay, enriched);
       }
     }
-    this.emit({ type: 'wave', depth: 0, x: ox, y: oy });
+    const first = slots[0]!;
+    this.emit({ type: 'wave', depth: 0, x: first.x, y: first.y });
+  }
+
+  /** Place one spawn around an origin and queue it to arrive after `delay`. */
+  private queueSpawn(
+    enemy: string,
+    ox: number,
+    oy: number,
+    spread: number,
+    delay: number,
+    enriched: boolean,
+  ): void {
+    if (this.pendingSpawns.length >= SAFETY.maxEntities) return;
+    const rx = ox + this.rng.range(-spread, spread);
+    const ry = oy + this.rng.range(-spread, spread);
+    // Spread can drag a cluster member back into view; push it out again before
+    // the hard no-spawn-on-player guarantee.
+    const hidden = this.pushOutsideView(rx, ry);
+    const safe = this.pushOutsideSafeRadius(hidden.x, hidden.y);
+    this.pendingSpawns.push({
+      time: this.time + delay,
+      enemy,
+      x: clamp(safe.x, 20, this.arena.width - 20),
+      y: clamp(safe.y, 20, this.arena.height - 20),
+      hue: this.rng.pick(HUES),
+      enriched,
+      alive: true,
+    });
   }
 
   /**
@@ -1236,7 +1341,9 @@ export class World {
     while (this.xp >= this.xpToNext) {
       this.xp -= this.xpToNext;
       this.level++;
-      this.xpToNext = Math.ceil(TUNABLE.xpBase * Math.pow(TUNABLE.xpGrowth, this.level - 1));
+      // level 2 costs xpBase, and the curve compounds from there. Level 1's cost
+      // was set separately in the constructor.
+      this.xpToNext = Math.ceil(TUNABLE.xpBase * Math.pow(TUNABLE.xpGrowth, this.level - 2));
       if (this.stats.firstLevelTime === 0) this.stats.firstLevelTime = this.time;
       if (this.pendingDrafts < TUNABLE.maxQueuedDrafts) this.pendingDrafts++;
     }

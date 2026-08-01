@@ -19,6 +19,7 @@ import {
 import { MODIFIER_BY_ID, NODE_BY_ID } from '../content/index';
 import type { World } from '../sim/world';
 import { LOADBEARING } from '../sim/tunables';
+import { slotAccepts, type NodeSlot } from '../sim/engine';
 
 export class Overlay {
   readonly el: HTMLElement;
@@ -168,7 +169,10 @@ function previewSlot(world: World, card: DraftCard): string {
 export class EditorOverlay extends Overlay {
   private world: World | null = null;
   /** Node awaiting scrap confirmation. Scrap is permanent and there is no undo. */
-  private pendingScrap: { program: number; slot: 'trigger' | 'action' | number } | null = null;
+  private pendingScrap: { program: number; slot: NodeSlot } | null = null;
+  private dragging: { program: number; slot: NodeSlot } | null = null;
+  /** Transient explanation when a move is refused. */
+  private notice: string | null = null;
 
   constructor(root: HTMLElement) {
     super(root, 'editor');
@@ -268,12 +272,29 @@ export class EditorOverlay extends Overlay {
       const stats = document.createElement('div');
       stats.className = 'stats';
       const share = totalEps > 0 ? (program.recentEvents / totalEps) * 100 : 0;
-      stats.textContent = compiled.live
-        ? `${compiled.staticCost.toFixed(1)} cyc  ` +
-          `x${compiled.ctx.output.toFixed(2)} out  ` +
-          `${Math.round(compiled.ctx.count)}x${compiled.executions.length}\n` +
-          `${program.recentEvents.toFixed(1)} ev/s  ${share.toFixed(0)}% of EPS`
-        : 'not live';
+      if (compiled.live) {
+        // Labelled and plain-worded. The first pass read "4.6 cyc x1.00 out 1x2"
+        // which is four unexplained numbers in a row.
+        const shots = Math.round(compiled.ctx.count) * compiled.executions.length;
+        stats.innerHTML =
+          `<span class="k">costs</span> ${compiled.staticCost.toFixed(1)} cycles<br>` +
+          `<span class="k">damage</span> ×${compiled.ctx.output.toFixed(2)}<br>` +
+          `<span class="k">fires</span> ${shots} per trigger<br>` +
+          `<span class="k">output</span> ${share.toFixed(0)}% of your engine`;
+        stats.title =
+          'costs: Cycles reserved while this row is live.\n' +
+          'damage: multiplier from this row\'s modifier chain.\n' +
+          'fires: how many instances of the Action each trigger produces.\n' +
+          'output: this row\'s share of your total events per second.';
+      } else {
+        stats.innerHTML = `<span class="k">needs a ${
+          !program.triggerId && !program.actionId
+            ? 'trigger and an action'
+            : program.triggerId
+              ? 'action'
+              : 'trigger'
+        }</span>`;
+      }
 
       const ops = document.createElement('div');
       ops.className = 'ops';
@@ -303,11 +324,19 @@ export class EditorOverlay extends Overlay {
       if (this.pendingScrap?.program === i) panel.appendChild(this.confirmBar());
     });
 
+    if (this.notice) {
+      const notice = document.createElement('div');
+      notice.className = 'notice';
+      notice.textContent = this.notice;
+      panel.appendChild(notice);
+    }
+
     const hint = document.createElement('div');
     hint.className = 'hint';
     hint.textContent =
-      'Modifiers apply left to right — use ‹ › to reorder them and watch the output multiplier change. ' +
-      'Rows evaluate top to bottom. Scrapping is permanent and there is no undo. TAB to close.';
+      'Drag any node to any matching slot, in this row or another. Modifiers apply left to right — ' +
+      'moving one changes the damage multiplier. Rows evaluate top to bottom. ' +
+      'Scrapping is permanent and there is no undo. TAB to close.';
     panel.appendChild(hint);
 
     this.el.appendChild(panel);
@@ -377,9 +406,55 @@ export class EditorOverlay extends Overlay {
   }
 
   /** Called by chips: stage a scrap rather than performing one. */
-  requestScrap(program: number, slot: 'trigger' | 'action' | number): void {
+  requestScrap(program: number, slot: NodeSlot): void {
     this.pendingScrap = { program, slot };
     this.render();
+  }
+
+  // ---- drag to move a node anywhere it fits (§19.6) ----
+
+  beginDrag(program: number, slot: NodeSlot): void {
+    this.dragging = { program, slot };
+    this.notice = null;
+  }
+
+  endDrag(): void {
+    this.dragging = null;
+  }
+
+  /** Slots are typed, so only compatible targets should light up. */
+  canDropOn(program: number, slot: NodeSlot): boolean {
+    const world = this.world;
+    const from = this.dragging;
+    if (!world || !from) return false;
+    if (from.program === program && from.slot === slot) return false;
+    const moving = world.engine.read(from.program, from.slot);
+    if (!moving || !slotAccepts(slot, moving)) return false;
+    const displaced = world.engine.read(program, slot);
+    return !displaced || slotAccepts(from.slot, displaced);
+  }
+
+  completeDrag(program: number, slot: NodeSlot): void {
+    const world = this.world;
+    const from = this.dragging;
+    this.dragging = null;
+    if (!world || !from) return;
+
+    const result = world.engine.moveNode(
+      from.program,
+      from.slot,
+      program,
+      slot,
+      world.budget.capacity,
+    );
+    if (result === 'over-capacity') {
+      this.notice =
+        'That move would reserve more Cycles than your capacity. ' +
+        'Draft capacity, or scrap something first.';
+    } else if (result === 'wrong-slot') {
+      this.notice = 'Triggers, modifiers and actions each have their own slots.';
+    }
+    this.afterChange();
   }
 
   private afterChange(): void {
@@ -401,9 +476,11 @@ function arrow(): HTMLElement {
 }
 
 /**
- * A node chip. Clicking the chip itself does nothing destructive — it only
- * shows the node's description. Scrapping requires the small × and then an
- * explicit confirmation.
+ * A node chip, and also a drop target for its slot.
+ *
+ * Every slot accepts a drag — including empty ones and ones in other rows — so a
+ * node can be moved anywhere it legally fits (§19.6). Clicking the chip does
+ * nothing destructive; scrapping needs the × and then a confirmation.
  */
 function chip(
   nodeId: string | null,
@@ -414,27 +491,55 @@ function chip(
 ): HTMLElement {
   const el = document.createElement('span');
   el.className = `chip ${kind}${nodeId ? '' : ' empty'}`;
-  if (!nodeId) {
+  el.dataset['program'] = String(programIndex);
+  el.dataset['slot'] = String(slot);
+
+  if (nodeId) {
+    const node = NODE_BY_ID.get(nodeId);
+    const mult = MODIFIER_BY_ID.get(nodeId)?.cycleMult;
+    const name = document.createElement('span');
+    name.textContent = node ? `${node.name}${mult ? ` ×${mult}` : ''}` : nodeId;
+    el.appendChild(name);
+    el.title = `${node?.description ?? ''}\n\nDrag to move it anywhere it fits.`;
+
+    el.draggable = true;
+    el.addEventListener('dragstart', (ev) => {
+      el.classList.add('dragging');
+      editor.beginDrag(programIndex, slot);
+      ev.dataTransfer?.setData('text/plain', nodeId);
+      if (ev.dataTransfer) ev.dataTransfer.effectAllowed = 'move';
+    });
+    el.addEventListener('dragend', () => {
+      el.classList.remove('dragging');
+      editor.endDrag();
+    });
+
+    const kill = document.createElement('button');
+    kill.className = 'chip-scrap';
+    kill.textContent = '×';
+    kill.title = 'Scrap this node (asks for confirmation)';
+    kill.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      editor.requestScrap(programIndex, slot);
+    });
+    el.appendChild(kill);
+  } else {
     el.textContent = kind === 'modifier' ? '—' : `no ${kind}`;
-    return el;
   }
-  const node = NODE_BY_ID.get(nodeId);
-  const mult = MODIFIER_BY_ID.get(nodeId)?.cycleMult;
 
-  const name = document.createElement('span');
-  name.textContent = node ? `${node.name}${mult ? ` ×${mult}` : ''}` : nodeId;
-  el.appendChild(name);
-  el.title = node?.description ?? '';
-
-  const kill = document.createElement('button');
-  kill.className = 'chip-scrap';
-  kill.textContent = '×';
-  kill.title = 'Scrap this node (asks for confirmation)';
-  kill.addEventListener('click', (ev) => {
-    ev.stopPropagation();
-    editor.requestScrap(programIndex, slot);
+  el.addEventListener('dragover', (ev) => {
+    if (!editor.canDropOn(programIndex, slot)) return;
+    ev.preventDefault();
+    if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
+    el.classList.add('drop-ok');
   });
-  el.appendChild(kill);
+  el.addEventListener('dragleave', () => el.classList.remove('drop-ok'));
+  el.addEventListener('drop', (ev) => {
+    ev.preventDefault();
+    el.classList.remove('drop-ok');
+    editor.completeDrag(programIndex, slot);
+  });
+
   return el;
 }
 

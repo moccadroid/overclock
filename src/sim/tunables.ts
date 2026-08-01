@@ -56,8 +56,15 @@ export const TUNABLE = {
   fueledFireOutputBonus: 0.5,
 
   // ---- §8 leveling & draft ----
-  xpBase: 11,
-  xpGrowth: 1.36,
+  /**
+   * The first level-up has its own cost. §3 demands "a decision every ~30
+   * seconds" and the opening is the one place a starting Engine cannot keep up —
+   * bending the whole curve to fix the first 40 seconds distorts everything after
+   * it, so the opening gets its own lever.
+   */
+  xpFirstLevel: 5,
+  xpBase: 8,
+  xpGrowth: 1.38,
   xpPerShard: 1,
   draftCards: 3,
   rerollsPerRun: 2,
@@ -107,6 +114,22 @@ export const TUNABLE = {
   spawnRingMax: 1480,
   /** Candidate directions considered when placing a wave. */
   spawnCandidates: 12,
+  /**
+   * A wave template's members arrive spread over this long, from 2-3 compass
+   * slots rather than one. A template dumped at a single point produced a clump
+   * that one Nova deleted, followed by silence — pressure has to be continuous
+   * to be pressure.
+   */
+  waveArrivalSpread: 1.6,
+  waveCompassSlots: 3,
+  /**
+   * Ambient trickle: a constant low stream between wave templates, so the arena
+   * is never empty. Interval shortens with Threat.
+   */
+  ambientIntervalBase: 1.5,
+  ambientIntervalMin: 0.34,
+  ambientIntervalPerThreat: 0.045,
+  ambientPerThreat: 0.11,
   /** Seconds an enemy takes to draw itself in (§17.1). Presentation only. */
   spawnFadeTime: 0.28,
 

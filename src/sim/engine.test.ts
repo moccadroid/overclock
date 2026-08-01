@@ -157,6 +157,58 @@ describe('Engine structure', () => {
     expect(e.scrapStacks).toBe(3);
   });
 
+  it('moves a node to another Program, swapping with whatever is there', () => {
+    const e = new Engine();
+    e.programs[0]!.triggerId = 'clock';
+    e.programs[0]!.actionId = 'bolt';
+    e.programs[0]!.modifierIds[0] = 'echo';
+    e.programs[1]!.triggerId = 'on_kill';
+    e.programs[1]!.actionId = 'nova';
+    e.programs[1]!.modifierIds[0] = 'split';
+    e.recompile();
+
+    expect(e.moveNode(0, 0, 1, 0)).toBe('ok');
+    expect(e.programs[1]!.modifierIds[0]).toBe('echo');
+    expect(e.programs[0]!.modifierIds[0]).toBe('split');
+
+    // Into an empty slot, no swap partner.
+    expect(e.moveNode(1, 0, 1, 2)).toBe('ok');
+    expect(e.programs[1]!.modifierIds[2]).toBe('echo');
+    expect(e.programs[1]!.modifierIds[0]).toBe(null);
+  });
+
+  it('refuses to put a node in a slot of the wrong kind', () => {
+    const e = new Engine();
+    e.programs[0]!.triggerId = 'clock';
+    e.programs[0]!.actionId = 'bolt';
+    e.programs[0]!.modifierIds[0] = 'echo';
+    e.recompile();
+
+    expect(e.moveNode(0, 0, 0, 'action')).toBe('wrong-slot');
+    expect(e.moveNode(0, 'trigger', 0, 1)).toBe('wrong-slot');
+    expect(e.programs[0]!.actionId).toBe('bolt');
+    expect(e.programs[0]!.modifierIds[0]).toBe('echo');
+  });
+
+  it('refuses a move that would reserve more Cycles than capacity (§6.1)', () => {
+    const e = new Engine();
+    // Row 0 live and cheap; row 1 parked with an expensive modifier on a dead
+    // row, which costs nothing until it is attached to something live.
+    e.programs[0]!.triggerId = 'clock';
+    e.programs[0]!.actionId = 'nova';
+    e.programs[1]!.modifierIds[0] = 'split';
+    e.recompile();
+
+    const before = e.staticLoad;
+    expect(e.moveNode(1, 0, 0, 0, 5)).toBe('over-capacity');
+    // Rolled back cleanly.
+    expect(e.programs[0]!.modifierIds[0]).toBe(null);
+    expect(e.programs[1]!.modifierIds[0]).toBe('split');
+    expect(e.staticLoad).toBeCloseTo(before, 10);
+
+    expect(e.moveNode(1, 0, 0, 0, 1000)).toBe('ok');
+  });
+
   it('reordering Programs moves their clock accumulators with them', () => {
     const e = new Engine();
     e.autoSlot('clock');

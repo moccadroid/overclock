@@ -147,6 +147,42 @@ describe('navigation (GDD §22 — ruins are cover, not walls that trap)', () =>
   });
 });
 
+describe('the horde is continuous, not lumpy', () => {
+  it('never leaves the arena empty for long', () => {
+    const w = new World({ seed: 'stream', axiomId: 'ignition' });
+    // A deliberately over-powered engine: clears everything it can reach, which
+    // is exactly the case where clumped spawning left dead air.
+    const p = w.engine.programs[1]!;
+    p.triggerId = 'on_kill';
+    p.actionId = 'nova';
+    p.modifierIds[0] = 'amplify';
+    w.engine.recompile();
+    w.syncBudget();
+
+    // Skip the opening, then watch how long the arena sits empty.
+    runPiloted(w, 45);
+
+    let emptyTicks = 0;
+    let longestEmptyRun = 0;
+    let current = 0;
+    const ticks = 60 * 120;
+    for (let i = 0; i < ticks; i++) {
+      w.advance(botInput(w));
+      if (w.enemies.length === 0) {
+        emptyTicks++;
+        current++;
+        longestEmptyRun = Math.max(longestEmptyRun, current);
+      } else {
+        current = 0;
+      }
+    }
+
+    // Under 2% dead air, and never a gap longer than a couple of seconds.
+    expect(emptyTicks / ticks).toBeLessThan(0.02);
+    expect(longestEmptyRun / 60).toBeLessThan(2.5);
+  });
+});
+
 describe('cascade physics (GDD §5.2)', () => {
   it('respects the hard depth cap and terminates a self-feeding loop', () => {
     const w = new World({ seed: 'cascade', axiomId: 'ignition' });

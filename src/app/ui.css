@@ -268,15 +268,32 @@
 .chips {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   flex: 1;
-  flex-wrap: wrap;
+  /* Never wrap: a Program is one left-to-right sentence and must read as one. */
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  min-width: 0;
 }
 .chip {
   border: 1px solid var(--structure);
-  padding: 4px 9px;
+  padding: 4px 8px;
   color: var(--ink-bright);
   white-space: nowrap;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  cursor: grab;
+}
+.chip.empty {
+  cursor: default;
+}
+.chip.dragging {
+  opacity: 0.4;
+}
+.chip.drop-ok {
+  border-color: var(--voltaic);
+  box-shadow: inset 0 0 0 1px var(--voltaic);
 }
 .chip.empty {
   border-style: dashed;
@@ -371,11 +388,23 @@
   cursor: default;
 }
 .row .stats {
-  width: 210px;
+  width: 190px;
+  flex: 0 0 auto;
   text-align: right;
-  color: #6b849e;
+  color: #93aac2;
   font-size: 11px;
-  white-space: pre;
+  line-height: 1.6;
+}
+.row .stats .k {
+  color: #4e657e;
+  margin-right: 6px;
+}
+
+.notice {
+  margin: 8px 0 0 32px;
+  padding: 8px 11px;
+  border: 1px solid #7a5a2a;
+  color: #c9a25e;
 }
 .row .ops {
   display: flex;

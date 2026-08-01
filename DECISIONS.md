@@ -352,6 +352,72 @@ beacon a reward, or an interruption?
 
 ---
 
+## D-21 · SETTLED · The horde is continuous, not clumped
+
+Wave templates dumped their whole composition at one point at one instant. In
+play that read as: a clump appears, one Nova deletes it, nothing happens for
+several seconds. Pressure that arrives in bursts isn't pressure.
+
+Three changes:
+- **Ambient stream.** Small `stream: true` templates draw continuously between
+  waves, on an interval that shortens with Threat. The arena is never empty.
+- **Staggered arrival.** A wave's members are queued with random delays across
+  ~1.6s rather than spawning together.
+- **Multiple compass slots.** Each template picks 3 origins, so a wave surrounds
+  rather than piles.
+
+The queue re-asserts the off-screen and safe-radius guarantees at arrival, not
+just when queued — the player can cross most of a screen in 1.6s. Tested: with a
+deliberately overpowered engine clearing everything it touches, dead air stays
+under 2% and never exceeds 2.5 continuous seconds.
+
+Kills per run went 2130 → 3441 with no change to enemy stats, which is the point:
+§11 bans HP inflation as a difficulty lever, so pressure has to come from density
+and composition.
+
+---
+
+## D-22 · SETTLED · Drag moves a node anywhere it fits
+
+The editor could reorder within a row (‹ ›) and move whole rows (^ v), but
+nothing moved a node *between* rows — the first thing anyone tries. §19.6
+specifies drag, and the buttons were only ever a placeholder.
+
+Any node can now be dragged to any matching slot in any row, swapping with
+whatever is there. Slots are typed, so a Modifier cannot land in the Action slot
+and only legal targets highlight. A move that would push static load past
+capacity is refused and rolled back (§6.1) with an explanation rather than a
+silent no-op. The ‹ › buttons stay for click-only use.
+
+---
+
+## D-23 · SETTLED · The per-row readout says words
+
+It read `4.6 cyc  x1.00 out  1x2 / 1.3 ev/s  30% of EPS` — four unexplained
+numbers and two invented units. Now:
+
+```
+costs   4.6 cycles
+damage  ×1.00
+fires   2 per trigger
+output  30% of your engine
+```
+
+Dead rows say what they are missing ("needs an action") instead of "not live".
+Rows no longer wrap mid-Program: a Program is one left-to-right sentence and has
+to read as one.
+
+---
+
+## D-24 · SETTLED · The first level-up has its own cost
+
+`xpFirstLevel` (5) is separate from the curve. §3 wants a decision every ~30
+seconds, and the opening is the one moment a starting Engine cannot keep pace;
+bending `xpBase`/`xpGrowth` to fix the first 40 seconds distorted everything
+after it. First level is now ~42s, mean cadence ~31s.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

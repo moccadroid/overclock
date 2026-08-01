@@ -92,6 +92,18 @@ export function expandExecutions(echo: number): Execution[] {
   return schedule;
 }
 
+/** Where a node sits in a Program: the Trigger, the Action, or a modifier index. */
+export type NodeSlot = 'trigger' | 'action' | number;
+
+export type MoveResult = 'ok' | 'empty' | 'wrong-slot' | 'over-capacity';
+
+/** Slots are typed — this is what stops a Modifier landing in the Action slot. */
+export function slotAccepts(slot: NodeSlot, nodeId: string): boolean {
+  if (slot === 'trigger') return TRIGGER_BY_ID.has(nodeId);
+  if (slot === 'action') return ACTION_BY_ID.has(nodeId);
+  return MODIFIER_BY_ID.has(nodeId);
+}
+
 export interface Program {
   id: number;
   triggerId: string | null;
@@ -277,6 +289,62 @@ export class Engine {
     p.modifierIds[b] = tmp;
     this.recompile();
     return true;
+  }
+
+  /** A node's home in the Engine: which row, and which slot in that row. */
+  read(programIndex: number, slot: NodeSlot): string | null {
+    const p = this.programs[programIndex];
+    if (!p) return null;
+    if (slot === 'trigger') return p.triggerId;
+    if (slot === 'action') return p.actionId;
+    return p.modifierIds[slot] ?? null;
+  }
+
+  private write(programIndex: number, slot: NodeSlot, value: string | null): void {
+    const p = this.programs[programIndex];
+    if (!p) return;
+    if (slot === 'trigger') p.triggerId = value;
+    else if (slot === 'action') p.actionId = value;
+    else p.modifierIds[slot] = value;
+  }
+
+  /**
+   * Move a node between any two slots, in the same Program or across Programs,
+   * swapping if the destination is occupied.
+   *
+   * Slots are typed — a Modifier cannot live in the Action slot — and the move is
+   * refused if it would push static load past capacity (§6.1: the editor blocks
+   * it). Returns why it failed so the editor can say so rather than silently
+   * dropping the node.
+   */
+  moveNode(
+    fromProgram: number,
+    fromSlot: NodeSlot,
+    toProgram: number,
+    toSlot: NodeSlot,
+    capacity = Infinity,
+  ): MoveResult {
+    if (fromProgram === toProgram && fromSlot === toSlot) return 'ok';
+
+    const moving = this.read(fromProgram, fromSlot);
+    if (!moving) return 'empty';
+    const displaced = this.read(toProgram, toSlot);
+
+    if (!slotAccepts(toSlot, moving)) return 'wrong-slot';
+    if (displaced && !slotAccepts(fromSlot, displaced)) return 'wrong-slot';
+
+    this.write(toProgram, toSlot, moving);
+    this.write(fromProgram, fromSlot, displaced);
+    this.recompile();
+
+    if (this.staticLoad > capacity) {
+      // Roll back — an Engine that reserves more than capacity cannot run.
+      this.write(fromProgram, fromSlot, moving);
+      this.write(toProgram, toSlot, displaced);
+      this.recompile();
+      return 'over-capacity';
+    }
+    return 'ok';
   }
 
   /** §5.7 — Scrap. Returns the Cycles refunded (informational; static load drops). */
