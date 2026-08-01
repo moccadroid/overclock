@@ -178,7 +178,8 @@ function main(): void {
         `   (${deaths.length}/${results.length} died)`,
     );
     console.log(
-      `    draft cadence ${pad(median(allIntervals).toFixed(1), 8)}s median   target 30-45s  [§8.1]`,
+      `    draft cadence ${pad(median(allIntervals).toFixed(1), 8)}s median` +
+        `  ${mean(allIntervals).toFixed(1)}s mean   target 30-45s  [§8.1]`,
     );
     console.log(
       `    first level   ${pad(mean(results.map((r) => r.firstLevelTime)).toFixed(1), 8)}s` +

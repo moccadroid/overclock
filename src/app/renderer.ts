@@ -7,7 +7,7 @@
  * camera over a world larger than the view, viewport culling, and the off-screen
  * indicator layer (§19.4) that only means anything once there is an off-screen.
  */
-import { Application, Container, Graphics } from 'pixi.js';
+import { Application, Container, Graphics, Text } from 'pixi.js';
 import { TUNABLE } from '../sim/tunables';
 import type { Hue } from '../sim/types';
 import type { World } from '../sim/world';
@@ -59,6 +59,7 @@ export class Renderer {
 
   private viewWidth = VIEW_HEIGHT;
   private world!: World;
+  private readonly beaconLabels: Text[] = [];
 
   async init(mount: HTMLElement, world: World): Promise<void> {
     this.world = world;
@@ -155,21 +156,67 @@ export class Renderer {
   private drawBeacons(world: World): void {
     const g = this.gBeacons;
     g.clear();
+    this.syncBeaconLabels(world);
+
     for (const b of world.beacons) {
       const r = TUNABLE.beaconRadius;
       g.rect(b.x - r, b.y - r, r * 2, r * 2).stroke({ width: 2, color: COLOR.beacon, alpha: 0.9 });
-      // Slow radar sweep — a blueprint structure that is clearly interactive.
+      // A sweeping arc on the perimeter, not a hand from the centre — the old
+      // version read as a clock face, which is not what this is.
       const sweep = (b.age * 1.6) % (Math.PI * 2);
-      g.moveTo(b.x, b.y)
-        .lineTo(b.x + Math.cos(sweep) * r, b.y + Math.sin(sweep) * r)
-        .stroke({ width: 1, color: COLOR.beacon, alpha: 0.55 });
-      g.circle(b.x, b.y, r + 12).stroke({ width: 1, color: COLOR.beacon, alpha: 0.25 });
-      if (b.progress > 0) {
-        g.arc(b.x, b.y, r + 12, -Math.PI / 2, -Math.PI / 2 + b.progress * Math.PI * 2).stroke({
-          width: 4,
-          color: COLOR.beacon,
-        });
+      arcSegment(g, b.x, b.y, r + 12, sweep, sweep + 0.9);
+      g.stroke({ width: 2, color: COLOR.beacon, alpha: 0.5 });
+      // Corner ticks: blueprint annotation, and it reads as a target, not a dial.
+      for (const [sx, sy] of [
+        [-1, -1],
+        [1, -1],
+        [-1, 1],
+        [1, 1],
+      ] as const) {
+        g.moveTo(b.x + sx * r, b.y + sy * r).lineTo(b.x + sx * (r + 7), b.y + sy * (r + 7));
       }
+      g.stroke({ width: 1, color: COLOR.beacon, alpha: 0.6 });
+      g.circle(b.x, b.y, r + 12).stroke({ width: 1, color: COLOR.beacon, alpha: 0.2 });
+      if (b.progress > 0) {
+        arcSegment(g, b.x, b.y, r + 12, -Math.PI / 2, -Math.PI / 2 + b.progress * Math.PI * 2);
+        g.stroke({ width: 4, color: COLOR.beacon });
+      }
+    }
+  }
+
+  /**
+   * §16.4 — terminals and beacons carry a label in micro-type. Without one, a
+   * square with a sweep on it is just an unexplained object in the world.
+   */
+  private syncBeaconLabels(world: World): void {
+    while (this.beaconLabels.length < world.beacons.length) {
+      const label = new Text({
+        text: '',
+        style: {
+          fontFamily: 'monospace',
+          fontSize: 13,
+          fill: COLOR.beacon,
+          letterSpacing: 2,
+        },
+      });
+      label.anchor.set(0.5, 0);
+      this.worldLayer.addChild(label);
+      this.beaconLabels.push(label);
+    }
+    for (let i = 0; i < this.beaconLabels.length; i++) {
+      const label = this.beaconLabels[i]!;
+      const beacon = world.beacons[i];
+      if (!beacon) {
+        label.visible = false;
+        continue;
+      }
+      const near =
+        Math.hypot(world.player.x - beacon.x, world.player.y - beacon.y) <
+        TUNABLE.beaconRadius + TUNABLE.playerRadius;
+      label.visible = true;
+      label.text = near ? 'HOLD  E' : `BEACON_${String(beacon.id).padStart(2, '0')}`;
+      label.alpha = near ? 1 : 0.65;
+      label.position.set(beacon.x, beacon.y + TUNABLE.beaconRadius + 20);
     }
   }
 
@@ -184,7 +231,8 @@ export class Renderer {
       for (let i = 0; i < segments; i += 2) {
         const a0 = (i / segments) * Math.PI * 2 + z.life;
         const a1 = ((i + 1) / segments) * Math.PI * 2 + z.life;
-        g.arc(z.x, z.y, z.radius, a0, a1);
+        // Each dash is its own subpath, or they chain together into a solid ring.
+        arcSegment(g, z.x, z.y, z.radius, a0, a1);
       }
       g.stroke({ width: 2, color: HUE_COLOR[z.hue], alpha: 0.35 + 0.45 * t });
       g.circle(z.x, z.y, z.radius).fill({ color: HUE_COLOR[z.hue], alpha: 0.06 * t });
@@ -211,7 +259,11 @@ export class Renderer {
       if (!this.camera.isVisible(e.x, e.y, e.radius + 20)) continue;
       const def = getEnemy(e.defId);
       const color = e.flash > 0 ? 0xffffff : HUE_COLOR[e.hue];
-      const r = e.radius;
+      // §17.1 — entities draw themselves in. A crude alpha/scale ramp stands in
+      // for the real stroke-trace until the M2 renderer, so nothing ever pops.
+      const born = Math.min(1, e.spawnAge / TUNABLE.spawnFadeTime);
+      const alpha = born;
+      const r = e.radius * (0.55 + 0.45 * born);
 
       switch (def.shape) {
         case 'dot':
@@ -228,14 +280,14 @@ export class Renderer {
           polygon(g, e.x, e.y, r, 6, 0);
           break;
       }
-      g.stroke({ width: 2, color });
+      g.stroke({ width: 2, color, alpha });
 
       const health = e.hp / e.maxHp;
       if (health < 1) {
-        g.circle(e.x, e.y, r * 0.45).fill({ color, alpha: 0.15 + 0.35 * health });
+        g.circle(e.x, e.y, r * 0.45).fill({ color, alpha: (0.15 + 0.35 * health) * alpha });
       }
       if (e.enriched) {
-        g.circle(e.x, e.y, r + 5).stroke({ width: 1, color: COLOR.beacon, alpha: 0.5 });
+        g.circle(e.x, e.y, r + 5).stroke({ width: 1, color: COLOR.beacon, alpha: 0.5 * alpha });
       }
       // §17.1 — every avoidable hit is preceded by a drawn line.
       if (e.state === 'windup') {
@@ -300,14 +352,13 @@ export class Renderer {
 
     const staticArc = world.budget.staticFraction * Math.PI * 2;
     if (staticArc > 0.001) {
-      g.arc(p.x, p.y, ringR, -Math.PI / 2, -Math.PI / 2 + staticArc).stroke({
-        width: 3,
-        color: 0x6f86a8,
-      });
+      arcSegment(g, p.x, p.y, ringR, -Math.PI / 2, -Math.PI / 2 + staticArc);
+      g.stroke({ width: 3, color: 0x6f86a8 });
     }
     const dynArc = world.budget.dynamicFraction * Math.PI * 2;
     if (dynArc > 0.001) {
-      g.arc(p.x, p.y, ringR + 4, -Math.PI / 2, -Math.PI / 2 + dynArc).stroke({
+      arcSegment(g, p.x, p.y, ringR + 4, -Math.PI / 2, -Math.PI / 2 + dynArc);
+      g.stroke({
         width: 2,
         color: heat > 0.4 ? COLOR.signal : 0x00e5ff,
         alpha: 0.9,
@@ -374,6 +425,26 @@ export class Renderer {
       }
     }
   }
+}
+
+/**
+ * Draw an arc as its own subpath.
+ *
+ * Pixi v8 follows canvas path semantics: `arc()` connects from the path's
+ * current point to the arc's start. On a fresh path that current point is
+ * (0, 0) — the world origin — so an unguarded arc trails a line back to the
+ * arena's top-left corner. Always seed the subpath with an explicit moveTo.
+ */
+function arcSegment(
+  g: Graphics,
+  cx: number,
+  cy: number,
+  r: number,
+  start: number,
+  end: number,
+): void {
+  g.moveTo(cx + Math.cos(start) * r, cy + Math.sin(start) * r);
+  g.arc(cx, cy, r, start, end);
 }
 
 function polygon(

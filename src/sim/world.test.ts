@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { World, type InputState } from './world';
+import { NO_INPUT, World, type InputState } from './world';
 import { hashWorld } from './hash';
 import { LOADBEARING, SIM_DT, TUNABLE } from './tunables';
 import { CycleBudget } from './cycles';
@@ -92,6 +92,58 @@ describe('the run actually runs', () => {
         }
       }
     }
+  });
+});
+
+describe('navigation (GDD §22 — ruins are cover, not walls that trap)', () => {
+  /** The Heap's ruin at x 2400..2540, y 980..1320 — a tall block. */
+  it('an enemy walks around a ruin instead of pressing against it', () => {
+    const w = new World({ seed: 'nav', axiomId: 'ignition' });
+    // Player just west of the block, enemy directly east of it: the straight
+    // line between them is fully obstructed.
+    w.player.x = 2330;
+    w.player.y = 1150;
+    w.enemies.length = 0;
+    const e = w.spawnEnemy('drifter', 2610, 1150, 'thermal')!;
+    w.engine.programs.forEach((p) => {
+      p.triggerId = null;
+      p.actionId = null;
+    });
+    w.engine.recompile();
+    w.syncBudget();
+
+    const startDistance = Math.hypot(e.x - w.player.x, e.y - w.player.y);
+    let closest = startDistance;
+    for (let i = 0; i < 60 * 12; i++) {
+      w.advance(NO_INPUT);
+      if (!e.alive) break;
+      closest = Math.min(closest, Math.hypot(e.x - w.player.x, e.y - w.player.y));
+    }
+
+    // Without navigation it would sit against the far face, ~280 units away.
+    expect(closest).toBeLessThan(60);
+  });
+
+  it('leaves open-field pursuit alone', () => {
+    const w = new World({ seed: 'nav-open', axiomId: 'ignition' });
+    w.player.x = 700;
+    w.player.y = 700;
+    w.enemies.length = 0;
+    const e = w.spawnEnemy('drifter', 700, 1150, 'thermal')!;
+    w.engine.programs.forEach((p) => {
+      p.triggerId = null;
+      p.actionId = null;
+    });
+    w.engine.recompile();
+    w.syncBudget();
+
+    for (let i = 0; i < 60 * 4; i++) {
+      w.advance(NO_INPUT);
+      if (!e.alive) break;
+    }
+    // A clear approach should be close to a straight line: no sideways detour.
+    expect(Math.abs(e.x - 700)).toBeLessThan(40);
+    expect(Math.hypot(e.x - w.player.x, e.y - w.player.y)).toBeLessThan(60);
   });
 });
 

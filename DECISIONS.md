@@ -272,6 +272,86 @@ a real decision.
 
 ---
 
+## D-16 · SETTLED · Navigation is a shared flow field, not per-enemy A*
+
+Enemies pressed against the ruins instead of going around them. A* per enemy is
+the wrong tool at this scale — several hundred seekers all heading for the same
+target — so navigation is one Dijkstra outward from the player over a 60-unit
+grid, rebuilt only when the player changes cell, giving every enemy a direction
+to sample. Bilinear interpolation between cells keeps movement smooth rather than
+grid-snapped, and enemies within one cell of the player fall back to a direct
+seek so contact-range motion stays natural.
+
+Deterministic: a pure function of player position and the static ruins. Diagonal
+moves cannot cut between two blocked cells. Tested both ways — an enemy walled
+off by a ruin now closes to under 60 units (it used to stall at ~280), and an
+enemy with a clear approach still travels in a straight line.
+
+---
+
+## D-17 · SETTLED · Wave spawns were materialising in view
+
+Two bugs. The ring was 1050–1350 units, but the largest view's half-diagonal is
+~1051 — so corner-ward spawns were landing right at the screen edge. Worse,
+positions were clamped into the arena, which *collapses them toward the player*
+whenever they hug an edge: standing in a corner, waves appeared in your lap.
+
+Now: the ring is 1180–1480, and the director evaluates 12 candidate directions
+and keeps whichever lands furthest outside a nominal view rectangle, rather than
+clamping one blind guess. Template spread is re-pushed outside the view before
+the hard no-spawn-on-player guarantee. Verified with the player jammed into the
+arena corner — the worst case — 48 spawns, none on-screen, closest still 734
+units beyond the edge.
+
+Enemies also now draw themselves in over ~0.28s (§17.1) instead of appearing at
+full size, which matters for Splitter children, who legitimately arrive nearby.
+
+---
+
+## D-18 · SETTLED · Scrap needed a confirmation, and §19.6 always said so
+
+The first editor scrapped a node on a bare chip click: no confirmation, on the
+same target you click to inspect a node, for an action that is permanent and has
+no undo (§24). §19.6 specifies "drag a node/Program to the scrap margin →
+confirmation showing refund + the permanent +4%" — I had implemented the effect
+and skipped the safeguard.
+
+Now the chip body is inert, a small × appears on hover, and that stages a
+confirmation bar naming the node, the Cycles freed, the permanent output gain,
+and that it cannot be undone. Drag-to-margin remains the shipping interaction for
+the real editor.
+
+---
+
+## D-19 · SETTLED · Pixi arcs need an explicit moveTo
+
+A stray line ran from the arena's top-left corner to the player at all times.
+Cause: Pixi v8 follows canvas path semantics, so `arc()` connects from the path's
+current point to the arc's start — and on a fresh path that point is (0, 0), the
+world origin. The Cycle Ring draws arcs on the avatar every frame, so it trailed
+a line back to the corner of the world forever.
+
+All arcs now go through an `arcSegment()` helper that seeds the subpath with a
+moveTo. Worth remembering for the M2 renderer, which will be mostly arcs and
+dashes — it also silently welded the Field's dashed ring into a solid one.
+
+---
+
+## D-20 · OPEN · Draft cadence is now bimodal, not slow or fast
+
+§8.1 asks for a level-up every 30–45s. With Beacons in, that is no longer a
+single number: channelling one delivers an enriched wave and a cluster of
+level-ups, with longer gaps between. Current Ignition baseline is 26s median
+against a 46s mean — the distribution straddles the band rather than sitting in
+it.
+
+This is arguably the greed mechanic working exactly as §12.3 intends, and I do
+not think it should be tuned flat against a bot that takes every beacon it sees.
+Worth a look once a person has played it: is a burst of three drafts after a
+beacon a reward, or an interruption?
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

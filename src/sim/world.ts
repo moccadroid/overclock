@@ -9,6 +9,7 @@
  */
 import { Rng } from './rng';
 import { SpatialGrid, type SpatialItem } from './spatial';
+import { FlowField } from './flowfield';
 import { CycleBudget } from './cycles';
 import { Engine, type Program } from './engine';
 import { LOADBEARING, SAFETY, SIM_DT, TUNABLE } from './tunables';
@@ -240,6 +241,8 @@ export class World {
   private eventQueue: GameEvent[] = [];
   private scheduled: ScheduledFire[] = [];
   private grid: SpatialGrid<Enemy>;
+  private flow: FlowField;
+  private readonly flowSample = { x: 0, y: 0 };
   private nextId = 1;
   private eventsThisTick = 0;
 
@@ -248,6 +251,7 @@ export class World {
     this.rng = new Rng(config.seed);
     this.arena = getArena(config.arenaId ?? 'heap');
     this.grid = new SpatialGrid<Enemy>(this.arena.width, this.arena.height);
+    this.flow = new FlowField(this.arena);
 
     const ax = getAxiom(config.axiomId);
     this.engine = new Engine();
@@ -292,6 +296,9 @@ export class World {
     this.budget.beginTick(dt);
 
     this.updatePlayer(input, dt);
+    // Rebuild navigation before anything steers. Cheap, and a no-op unless the
+    // player has left their cell.
+    this.flow.update(this.player.x, this.player.y);
     this.updateEnemies(dt);
     this.grid.rebuild(this.enemies);
     this.updateProjectiles(dt);
@@ -678,6 +685,42 @@ export class World {
     }
   }
 
+  /**
+   * Choose where a wave arrives from.
+   *
+   * Naively clamping a ring position into the arena collapses it toward the
+   * player whenever they hug an edge — which is exactly how enemies ended up
+   * materialising in full view. Instead: consider several directions, clamp each
+   * candidate, and keep whichever ends up furthest outside the nominal view
+   * rectangle. Near a corner there may be no fully-hidden option; this picks the
+   * least-visible one available rather than silently doing the worst thing.
+   */
+  private pickSpawnOrigin(): { x: number; y: number } {
+    const halfW = TUNABLE.nominalViewWidth / 2;
+    const halfH = TUNABLE.nominalViewHeight / 2;
+    const offset = this.rng.next() * Math.PI * 2;
+    const dist = this.rng.range(TUNABLE.spawnRingMin, TUNABLE.spawnRingMax);
+
+    let best = { x: this.player.x, y: this.player.y };
+    let bestHidden = -Infinity;
+
+    for (let i = 0; i < TUNABLE.spawnCandidates; i++) {
+      const angle = offset + (i / TUNABLE.spawnCandidates) * Math.PI * 2;
+      const x = clamp(this.player.x + Math.cos(angle) * dist, 30, this.arena.width - 30);
+      const y = clamp(this.player.y + Math.sin(angle) * dist, 30, this.arena.height - 30);
+      // How far outside the nominal view this lands. Positive means off-screen.
+      const hidden = Math.max(
+        Math.abs(x - this.player.x) - halfW,
+        Math.abs(y - this.player.y) - halfH,
+      );
+      if (hidden > bestHidden) {
+        bestHidden = hidden;
+        best = { x, y };
+      }
+    }
+    return best;
+  }
+
   /** A point at a given distance band from the player that is not inside a ruin. */
   private findOpenSpot(minDist: number, maxDist: number): { x: number; y: number } {
     for (let attempt = 0; attempt < 12; attempt++) {
@@ -904,6 +947,7 @@ export class World {
         } else if (e.state === 'windup') {
           e.vx = 0;
           e.vy = 0;
+          // Re-aim at the moment of commitment so the drawn telegraph is honest.
           if (e.timer <= 0) {
             e.state = 'dash';
             e.timer = def.dashDuration ?? 0.4;
@@ -920,8 +964,22 @@ export class World {
         const dx = p.x - e.x;
         const dy = p.y - e.y;
         const len = Math.hypot(dx, dy) || 1;
-        e.vx = (dx / len) * def.speed;
-        e.vy = (dy / len) * def.speed;
+
+        // Steer along the navigation field so ruins get walked around rather
+        // than pressed against. Close in, or where the field is undefined, fall
+        // back to a direct seek — the field's last cells all point at the player
+        // anyway and direct motion reads better at contact range.
+        let sx = dx / len;
+        let sy = dy / len;
+        if (len > this.flow.cellSize) {
+          this.flow.sample(e.x, e.y, this.flowSample);
+          if (this.flowSample.x !== 0 || this.flowSample.y !== 0) {
+            sx = this.flowSample.x;
+            sy = this.flowSample.y;
+          }
+        }
+        e.vx = sx * def.speed;
+        e.vy = sy * def.speed;
       }
 
       if (e.state !== 'windup') {
@@ -1068,16 +1126,16 @@ export class World {
       eligible.map((w) => w.weight),
     );
 
-    const angle = this.rng.next() * Math.PI * 2;
-    const dist = this.rng.range(TUNABLE.spawnRingMin, TUNABLE.spawnRingMax);
-    const ox = clamp(this.player.x + Math.cos(angle) * dist, 30, this.arena.width - 30);
-    const oy = clamp(this.player.y + Math.sin(angle) * dist, 30, this.arena.height - 30);
+    const { x: ox, y: oy } = this.pickSpawnOrigin();
 
     for (const entry of template.entries) {
       for (let i = 0; i < entry.count; i++) {
         const rx = ox + this.rng.range(-entry.spread, entry.spread);
         const ry = oy + this.rng.range(-entry.spread, entry.spread);
-        const safe = this.pushOutsideSafeRadius(rx, ry);
+        // The template's spread can drag a cluster member back into view; push
+        // it out again before the hard no-spawn-on-player guarantee.
+        const hidden = this.pushOutsideView(rx, ry);
+        const safe = this.pushOutsideSafeRadius(hidden.x, hidden.y);
         const e = this.spawnEnemy(
           entry.enemy,
           clamp(safe.x, 20, this.arena.width - 20),
@@ -1097,6 +1155,19 @@ export class World {
    * seed-sensitive), push the point radially away from the player to the safe
    * distance: deterministic, single-pass, and preserves the template's shape.
    */
+  /** Push a point out past the nominal view rectangle, if it falls inside it. */
+  private pushOutsideView(x: number, y: number): { x: number; y: number } {
+    const halfW = TUNABLE.nominalViewWidth / 2;
+    const halfH = TUNABLE.nominalViewHeight / 2;
+    const dx = x - this.player.x;
+    const dy = y - this.player.y;
+    if (Math.abs(dx) > halfW || Math.abs(dy) > halfH) return { x, y };
+
+    const scale =
+      Math.max(halfW / Math.max(1e-3, Math.abs(dx)), halfH / Math.max(1e-3, Math.abs(dy))) * 1.06;
+    return { x: this.player.x + dx * scale, y: this.player.y + dy * scale };
+  }
+
   private pushOutsideSafeRadius(x: number, y: number): { x: number; y: number } {
     const dx = x - this.player.x;
     const dy = y - this.player.y;

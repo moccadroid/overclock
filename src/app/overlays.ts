@@ -167,6 +167,8 @@ function previewSlot(world: World, card: DraftCard): string {
 
 export class EditorOverlay extends Overlay {
   private world: World | null = null;
+  /** Node awaiting scrap confirmation. Scrap is permanent and there is no undo. */
+  private pendingScrap: { program: number; slot: 'trigger' | 'action' | number } | null = null;
 
   constructor(root: HTMLElement) {
     super(root, 'editor');
@@ -176,11 +178,35 @@ export class EditorOverlay extends Overlay {
     this.world = world;
     const next = !this.open;
     this.setOpen(next);
+    this.pendingScrap = null;
     if (next) this.render();
   }
 
   close(): void {
     this.setOpen(false);
+    this.pendingScrap = null;
+  }
+
+  /** Refund a scrap would return, for the confirmation copy (§19.6). */
+  private refundFor(program: number, slot: 'trigger' | 'action' | number): number {
+    const world = this.world;
+    if (!world) return 0;
+    const p = world.engine.programs[program];
+    if (!p) return 0;
+    const before = world.engine.compiled[program]?.staticCost ?? 0;
+
+    const saved = { t: p.triggerId, a: p.actionId, m: [...p.modifierIds] };
+    if (slot === 'trigger') p.triggerId = null;
+    else if (slot === 'action') p.actionId = null;
+    else p.modifierIds[slot] = null;
+    world.engine.recompile();
+    const after = world.engine.compiled[program]?.staticCost ?? 0;
+
+    p.triggerId = saved.t;
+    p.actionId = saved.a;
+    p.modifierIds = saved.m;
+    world.engine.recompile();
+    return Math.max(0, before - after);
   }
 
   private render(): void {
@@ -214,9 +240,7 @@ export class EditorOverlay extends Overlay {
 
       const chips = document.createElement('div');
       chips.className = 'chips';
-      chips.appendChild(
-        chip(program.triggerId, 'trigger', this.scrapAnd(() => world.engine.scrapNode(i, 'trigger'))),
-      );
+      chips.appendChild(chip(program.triggerId, 'trigger', i, 'trigger', this));
       for (let s = 0; s < LOADBEARING.modifierSlotsPerProgram; s++) {
         chips.appendChild(arrow());
         const id = program.modifierIds[s] ?? null;
@@ -224,22 +248,22 @@ export class EditorOverlay extends Overlay {
         group.className = 'slot-group';
         // Walk a modifier along the chain — §5.5's ordering axis, made operable.
         group.appendChild(
-          slotButton('‹', s > 0 && id !== null, this.scrapAnd(() => world.engine.swapModifiers(i, s, s - 1))),
+          slotButton('‹', s > 0 && id !== null, () => {
+            world.engine.swapModifiers(i, s, s - 1);
+            this.afterChange();
+          }),
         );
-        group.appendChild(chip(id, 'modifier', this.scrapAnd(() => world.engine.scrapNode(i, s))));
+        group.appendChild(chip(id, 'modifier', i, s, this));
         group.appendChild(
-          slotButton(
-            '›',
-            s < LOADBEARING.modifierSlotsPerProgram - 1 && id !== null,
-            this.scrapAnd(() => world.engine.swapModifiers(i, s, s + 1)),
-          ),
+          slotButton('›', s < LOADBEARING.modifierSlotsPerProgram - 1 && id !== null, () => {
+            world.engine.swapModifiers(i, s, s + 1);
+            this.afterChange();
+          }),
         );
         chips.appendChild(group);
       }
       chips.appendChild(arrow());
-      chips.appendChild(
-        chip(program.actionId, 'action', this.scrapAnd(() => world.engine.scrapNode(i, 'action'))),
-      );
+      chips.appendChild(chip(program.actionId, 'action', i, 'action', this));
 
       const stats = document.createElement('div');
       stats.className = 'stats';
@@ -256,44 +280,113 @@ export class EditorOverlay extends Overlay {
       ops.append(
         button('^', i > 0, () => {
           world.engine.moveProgram(i, i - 1);
-          world.syncBudget();
-          this.render();
+          this.afterChange();
         }),
         button('v', i < world.engine.programs.length - 1, () => {
           world.engine.moveProgram(i, i + 1);
-          world.syncBudget();
-          this.render();
+          this.afterChange();
         }),
-        button('SCRAP ROW', compiled.live || hasAnyNode(program), () => {
-          world.engine.scrapProgram(i);
-          world.syncBudget();
-          this.render();
-        }, true),
+        button(
+          'SCRAP ROW',
+          hasAnyNode(program),
+          () => {
+            this.pendingScrap = { program: i, slot: 'row' as unknown as number };
+            this.render();
+          },
+          true,
+        ),
       );
 
       row.append(idx, chips, stats, ops);
       panel.appendChild(row);
+
+      if (this.pendingScrap?.program === i) panel.appendChild(this.confirmBar());
     });
 
     const hint = document.createElement('div');
     hint.className = 'hint';
     hint.textContent =
       'Modifiers apply left to right — use ‹ › to reorder them and watch the output multiplier change. ' +
-      'Click a node chip to scrap it: refunds its Cycles and grants +4% permanent global output (§5.7). ' +
-      'Rows evaluate top to bottom. TAB to close.';
+      'Rows evaluate top to bottom. Scrapping is permanent and there is no undo. TAB to close.';
     panel.appendChild(hint);
 
     this.el.appendChild(panel);
   }
 
-  /** Wrap a structural mutation so static load and the readout stay in sync. */
-  private scrapAnd(fn: () => void): () => void {
-    return () => {
-      fn();
-      this.world?.syncBudget();
+  /**
+   * §19.6 requires a confirmation showing the refund and the permanent +4%
+   * before a Scrap lands. The first pass scrapped on a bare chip click, with no
+   * confirmation at all, on the same target you click to inspect a node — a
+   * misclick destroyed part of your build irreversibly.
+   */
+  private confirmBar(): HTMLElement {
+    const world = this.world!;
+    const pending = this.pendingScrap!;
+    const bar = document.createElement('div');
+    bar.className = 'confirm';
+
+    const isRow = (pending.slot as unknown as string) === 'row';
+    const program = world.engine.programs[pending.program]!;
+
+    let label: string;
+    let nodes: number;
+    if (isRow) {
+      nodes =
+        (program.triggerId ? 1 : 0) +
+        (program.actionId ? 1 : 0) +
+        program.modifierIds.filter(Boolean).length;
+      label = `whole row (${nodes} node${nodes === 1 ? '' : 's'})`;
+      } else {
+      const id =
+        pending.slot === 'trigger'
+          ? program.triggerId
+          : pending.slot === 'action'
+            ? program.actionId
+            : program.modifierIds[pending.slot as number];
+      nodes = 1;
+      label = NODE_BY_ID.get(id ?? '')?.name ?? String(id);
+    }
+
+    const refund = isRow
+      ? (world.engine.compiled[pending.program]?.staticCost ?? 0)
+      : this.refundFor(pending.program, pending.slot);
+
+    const text = document.createElement('span');
+    text.innerHTML =
+      `SCRAP <b>${label}</b> from Program ${pending.program + 1}?` +
+      `  <span class="gain">+${(nodes * 4).toFixed(0)}% permanent global output</span>` +
+      `  ·  ${refund.toFixed(1)} Cycles freed  ·  <span class="warn">cannot be undone</span>`;
+
+    const confirm = button('CONFIRM', true, () => {
+      if (isRow) world.engine.scrapProgram(pending.program);
+      else world.engine.scrapNode(pending.program, pending.slot);
+      this.pendingScrap = null;
+      this.afterChange();
+    });
+    confirm.className = 'danger';
+    const cancel = button('CANCEL', true, () => {
+      this.pendingScrap = null;
       this.render();
-    };
+    });
+
+    const ops = document.createElement('div');
+    ops.className = 'ops';
+    ops.append(confirm, cancel);
+    bar.append(text, ops);
+    return bar;
   }
+
+  /** Called by chips: stage a scrap rather than performing one. */
+  requestScrap(program: number, slot: 'trigger' | 'action' | number): void {
+    this.pendingScrap = { program, slot };
+    this.render();
+  }
+
+  private afterChange(): void {
+    this.world?.syncBudget();
+    this.render();
+  }
+
 }
 
 function hasAnyNode(program: { triggerId: string | null; actionId: string | null; modifierIds: (string | null)[] }): boolean {
@@ -307,10 +400,17 @@ function arrow(): HTMLElement {
   return el;
 }
 
+/**
+ * A node chip. Clicking the chip itself does nothing destructive — it only
+ * shows the node's description. Scrapping requires the small × and then an
+ * explicit confirmation.
+ */
 function chip(
   nodeId: string | null,
   kind: 'trigger' | 'modifier' | 'action',
-  onScrap: () => void,
+  programIndex: number,
+  slot: 'trigger' | 'action' | number,
+  editor: EditorOverlay,
 ): HTMLElement {
   const el = document.createElement('span');
   el.className = `chip ${kind}${nodeId ? '' : ' empty'}`;
@@ -320,10 +420,21 @@ function chip(
   }
   const node = NODE_BY_ID.get(nodeId);
   const mult = MODIFIER_BY_ID.get(nodeId)?.cycleMult;
-  el.textContent = node ? `${node.name}${mult ? ` x${mult}` : ''}` : nodeId;
+
+  const name = document.createElement('span');
+  name.textContent = node ? `${node.name}${mult ? ` ×${mult}` : ''}` : nodeId;
+  el.appendChild(name);
   el.title = node?.description ?? '';
-  el.style.cursor = 'pointer';
-  el.addEventListener('click', onScrap);
+
+  const kill = document.createElement('button');
+  kill.className = 'chip-scrap';
+  kill.textContent = '×';
+  kill.title = 'Scrap this node (asks for confirmation)';
+  kill.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    editor.requestScrap(programIndex, slot);
+  });
+  el.appendChild(kill);
   return el;
 }
 

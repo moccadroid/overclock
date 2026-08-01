@@ -60,10 +60,13 @@ export class Hud {
 
     this.xpbar.style.width = `${(world.xp / world.xpToNext) * 100}%`;
 
+    const xpPct = Math.floor((world.xp / world.xpToNext) * 100);
     this.tl.innerHTML =
       `INTEGRITY <span class="bar">${bar(p.integrity, p.maxIntegrity, 20)}</span> ` +
       `${Math.ceil(p.integrity)}\n` +
-      `LEVEL ${world.level}   DASH ${p.dashCooldown > 0 ? p.dashCooldown.toFixed(1) + 's' : 'READY'}`;
+      `LEVEL ${world.level} <span class="xp">${bar(world.xp, world.xpToNext, 20)}</span> ` +
+      `${Math.floor(world.xp)}/${world.xpToNext} → ${world.level + 1}  (${xpPct}%)\n` +
+      `DASH ${p.dashCooldown > 0 ? p.dashCooldown.toFixed(1) + 's' : 'READY'}`;
 
     const heat = world.budget.heat;
     const tier = world.budget.tier;

@@ -57,7 +57,7 @@ export const TUNABLE = {
 
   // ---- §8 leveling & draft ----
   xpBase: 11,
-  xpGrowth: 1.3,
+  xpGrowth: 1.36,
   xpPerShard: 1,
   draftCards: 3,
   rerollsPerRun: 2,
@@ -97,10 +97,18 @@ export const TUNABLE = {
   /**
    * §12.2 — spawns arrive off-screen. The sim has no camera (that would make the
    * simulation depend on the viewport and break determinism across window
-   * sizes), so it spawns on a ring sized to sit just outside a nominal view.
+   * sizes), so it reasons about a *nominal* view: the largest field any window
+   * can show. The ring sits outside that rectangle's half-diagonal
+   * (hypot(950, 450) ~= 1051), with margin.
    */
-  spawnRingMin: 1050,
-  spawnRingMax: 1350,
+  nominalViewWidth: 1900,
+  nominalViewHeight: 900,
+  spawnRingMin: 1180,
+  spawnRingMax: 1480,
+  /** Candidate directions considered when placing a wave. */
+  spawnCandidates: 12,
+  /** Seconds an enemy takes to draw itself in (§17.1). Presentation only. */
+  spawnFadeTime: 0.28,
 
   // ---- §12.3 wave beacons ----
   beaconInterval: 75,
