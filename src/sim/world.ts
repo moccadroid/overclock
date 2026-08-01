@@ -111,6 +111,20 @@ export interface Beacon extends SpatialItem {
   age: number;
 }
 
+/**
+ * A death, handed to the renderer so it can decompose the shape into line
+ * segments (§17.1). Derived presentation data: drained by the renderer every
+ * frame, never read by the simulation, and deliberately excluded from the state
+ * hash so it cannot affect determinism.
+ */
+export interface VisualDeath {
+  x: number;
+  y: number;
+  radius: number;
+  shape: string;
+  hue: Hue;
+}
+
 /** Short-lived visual records for instantaneous actions. Sim-owned so replays match. */
 export interface Fx {
   id: number;
@@ -212,6 +226,8 @@ export class World {
   zones: Zone[] = [];
   beacons: Beacon[] = [];
   fx: Fx[] = [];
+  /** Drained by the renderer each frame; capped so a headless run cannot grow it. */
+  visualDeaths: VisualDeath[] = [];
 
   fuel: Record<Hue, number> = { thermal: 0, voltaic: 0, void: 0 };
   xp = 0;
@@ -814,6 +830,17 @@ export class World {
     this.stats.kills++;
 
     const def = getEnemy(enemy.defId);
+
+    if (this.visualDeaths.length < 512) {
+      this.visualDeaths.push({
+        x: enemy.x,
+        y: enemy.y,
+        radius: enemy.radius,
+        shape: def.shape,
+        hue: enemy.hue,
+      });
+    }
+
     // §12.3 — beacon-called waves drop enriched.
     const bonus = enemy.enriched ? 1 + TUNABLE.beaconDropBonus : 1;
     const fuelDrops = Math.round(def.fuel * bonus);

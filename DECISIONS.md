@@ -418,6 +418,55 @@ after it. First level is now ~42s, mean cadence ~31s.
 
 ---
 
+## D-25 · SETTLED · The renderer is two layers, because §16.1 says so
+
+"Emissives bloom, structure doesn't." So the grid and ruins draw straight to the
+screen, and everything that emits light renders into a texture that is composited
+twice — once flat, once blurred and additive. The emissive container is
+deliberately *not* a child of the stage; it is rendered manually into the target
+each frame, or everything would draw twice.
+
+Chromatic aberration (ladder step 2) is two more additive copies of that texture,
+tinted and offset. The Overheat tear (step 4) is currently a whole-scene
+horizontal displacement rather than true per-band tearing — that wants a shader
+and can come with the Meltdown ladder.
+
+`src/app/visual.ts` holds every visual constant, including
+`degradationIntensity`, which scales the entire §16.7 ladder at once. That is the
+hook for §20.4's photosensitivity master toggle: §21 calls photosensitivity a
+first-class constraint, not a switch bolted on afterwards, so the scaling exists
+from the first version of the ladder.
+
+---
+
+## D-26 · SETTLED · Draw calls are batched by colour, not by entity
+
+The naive phosphor trail issued one `stroke()` per trail segment per projectile —
+five draw calls each, four thousand a frame at chaos. Trails are now batched by
+(hue × trail band) and decomposition debris by (colour × fade bucket), quantising
+the fade into four steps, which is invisible in motion.
+
+Measured on a synthetic worst case of **2817 entities** (1417 enemies, 1400
+projectiles with trails, plus debris): **4.73ms/frame, ~211fps**. Before
+batching, half that entity count cost 9ms. §17.3 calls 60fps a design feature and
+§16.1 wants legibility at 3000 entities, so this is the budget that has to hold.
+
+Enemy outlines are still one stroke each, since the draw-in trace and kill flash
+differ per entity. That is the next batching target if the roster grows.
+
+---
+
+## D-27 · OPEN · Balance is deliberately untouched
+
+Reported from play: deleting everything on screen by level 11. Not addressed —
+this milestone was the look, and §11 forbids the cheap fix. HP inflation is
+banned as a difficulty lever, so the answer is Interceptors punishing projectile
+spam, adaptive resistance taxing mono-hue, Suppressors switching triggers off,
+and the Mirror. All of that is M4. Expect the game to be trivially easy until
+then.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

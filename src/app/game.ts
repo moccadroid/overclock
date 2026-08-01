@@ -13,6 +13,7 @@ import { Input } from './input';
 import { NO_INPUT, World, type RunConfig } from '../sim/world';
 import { SIM_DT } from '../sim/tunables';
 import { BRANDING } from '../branding';
+import { VISUAL } from './visual';
 
 type Mode = 'running' | 'draft' | 'editor' | 'paused' | 'dead';
 
@@ -29,6 +30,11 @@ export class Game {
   private accumulator = 0;
   private lastFrame = 0;
   private uiTimer = 0;
+  /** §17.2 — hitstop, and the per-second budget that keeps it a stutter, not a freeze. */
+  private hitstop = 0;
+  private hitstopSpent = 0;
+  private hitstopWindow = 0;
+  private lastKills = 0;
 
   constructor(config: RunConfig) {
     this.world = new World(config);
@@ -107,7 +113,16 @@ export class Game {
     const elapsed = Math.min(0.25, (now - this.lastFrame) / 1000);
     this.lastFrame = now;
 
-    if (this.mode === 'running') {
+    // §17.2 — hitstop freezes the simulation for 20-30ms on significant kills.
+    // Budgeted per second so a cascade reads as a stutter-roar, not a freeze.
+    this.hitstopWindow += elapsed;
+    if (this.hitstopWindow >= 1) {
+      this.hitstopWindow = 0;
+      this.hitstopSpent = 0;
+    }
+    if (this.hitstop > 0) this.hitstop = Math.max(0, this.hitstop - elapsed);
+
+    if (this.mode === 'running' && this.hitstop <= 0) {
       this.accumulator += elapsed;
       let steps = 0;
       // Cap catch-up steps so a stalled tab cannot spiral (still deterministic:
@@ -116,6 +131,7 @@ export class Game {
         this.world.advance(this.input.consume(), SIM_DT);
         this.accumulator -= SIM_DT;
         steps++;
+        this.applyImpactFeedback();
 
         if (!this.world.player.alive) {
           this.onDeath();
@@ -141,6 +157,30 @@ export class Game {
     }
 
     requestAnimationFrame((t) => this.frame(t));
+  }
+
+  /**
+   * §17.2 — impact grammar. Kills add screenshake and, when the budget allows,
+   * a few frames of hitstop. Only a burst of kills in one tick earns a stop, so
+   * the hundredth mote of a cascade doesn't cost the frame that the elite did.
+   */
+  private applyImpactFeedback(): void {
+    const kills = this.world.stats.kills;
+    const delta = kills - this.lastKills;
+    this.lastKills = kills;
+    if (delta <= 0) return;
+
+    this.renderer.addShake(Math.min(2.5, delta * VISUAL.shakePerKill * 0.35));
+
+    const significant = delta >= 3;
+    if (!significant) return;
+    if (this.hitstopSpent >= VISUAL.hitstopBudgetPerSec) return;
+    const stop = Math.min(
+      VISUAL.hitstopSeconds,
+      VISUAL.hitstopBudgetPerSec - this.hitstopSpent,
+    );
+    this.hitstop += stop;
+    this.hitstopSpent += stop;
   }
 
   private onDeath(): void {

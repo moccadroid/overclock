@@ -239,9 +239,10 @@
 /* ---- editor ---- */
 
 #editor .panel {
-  width: min(1000px, 92vw);
-  max-height: 84vh;
-  overflow: auto;
+  width: min(1240px, 97vw);
+  max-height: 88vh;
+  overflow-y: auto;
+  overflow-x: hidden;
   border: 1px solid var(--structure);
   background: rgba(6, 10, 18, 0.97);
   padding: 18px 20px;
@@ -268,22 +269,31 @@
 .chips {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 3px;
   flex: 1;
-  /* Never wrap: a Program is one left-to-right sentence and must read as one. */
+  /* Never wrap: a Program is one left-to-right sentence and must read as one.
+     It must also fit without a scrollbar per row — chips shrink instead. */
   flex-wrap: nowrap;
-  overflow-x: auto;
   min-width: 0;
+  overflow: visible;
 }
 .chip {
   border: 1px solid var(--structure);
-  padding: 4px 8px;
+  padding: 4px 7px;
   color: var(--ink-bright);
   white-space: nowrap;
-  flex: 0 0 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 0 1 auto;
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   cursor: grab;
+}
+.chip.empty {
+  flex: 0 0 auto;
+  min-width: 26px;
+  justify-content: center;
 }
 .chip.empty {
   cursor: default;
@@ -375,10 +385,11 @@
   background: none;
   color: #4a627e;
   font: inherit;
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1;
-  padding: 2px 3px;
+  padding: 2px 1px;
   cursor: pointer;
+  flex: 0 0 auto;
 }
 .slot-move:hover:enabled {
   color: var(--voltaic);
