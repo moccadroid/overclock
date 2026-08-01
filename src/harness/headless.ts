@@ -10,7 +10,7 @@
  * Reported against the design targets in §2.2 and §8.1.
  */
 import { World } from '../sim/world';
-import { SIM_DT, TUNABLE } from '../sim/tunables';
+import { SIM_DT } from '../sim/tunables';
 import { applyDraft, rollDraft } from '../sim/draft';
 import { botDraftChoice, botInput } from './bot';
 import { AXIOMS } from '../content/index';
@@ -56,6 +56,11 @@ interface RunResult {
   kills: number;
   maxDepth: number;
   overheats: number;
+  /** Fraction of the run spent in each Heat tier. */
+  tierShare: [number, number, number, number];
+  cyclesPerSec: number;
+  peakHeat: number;
+  firstLevelTime: number;
   peakEnemies: number;
   misfireRate: number;
   safetyTrips: number;
@@ -114,6 +119,15 @@ function simulateRun(seed: string, axiomId: string, minutes: number): RunResult 
     kills: world.stats.kills,
     maxDepth: world.stats.maxDepth,
     overheats: world.stats.overheats,
+    tierShare: world.stats.tierSeconds.map((s) => (world.time > 0 ? s / world.time : 0)) as [
+      number,
+      number,
+      number,
+      number,
+    ],
+    cyclesPerSec: world.time > 0 ? world.stats.cyclesSpent / world.time : 0,
+    peakHeat: world.stats.peakHeat,
+    firstLevelTime: world.stats.firstLevelTime,
     peakEnemies: world.stats.peakConcurrentEnemies,
     misfireRate: world.stats.fires > 0 ? world.stats.misfires / world.stats.fires : 0,
     safetyTrips: world.stats.safetyTrips,
@@ -164,8 +178,11 @@ function main(): void {
         `   (${deaths.length}/${results.length} died)`,
     );
     console.log(
-      `    draft cadence ${pad(median(allIntervals).toFixed(1), 8)}s median` +
-        `   target ${TUNABLE.xpBase ? '30-45' : '?'}s  [§8.1]`,
+      `    draft cadence ${pad(median(allIntervals).toFixed(1), 8)}s median   target 30-45s  [§8.1]`,
+    );
+    console.log(
+      `    first level   ${pad(mean(results.map((r) => r.firstLevelTime)).toFixed(1), 8)}s` +
+        `   (the opening must not stall — §3)`,
     );
     console.log(`    level reached ${pad(mean(results.map((r) => r.level)).toFixed(1), 8)}`);
     console.log(`    peak EPS      ${pad(mean(results.map((r) => r.peakEps)).toFixed(1), 8)}`);
@@ -173,6 +190,18 @@ function main(): void {
     console.log(`    kills         ${pad(mean(results.map((r) => r.kills)).toFixed(0), 8)}`);
     console.log(`    max depth     ${pad(mean(results.map((r) => r.maxDepth)).toFixed(1), 8)}`);
     console.log(`    overheats     ${pad(mean(results.map((r) => r.overheats)).toFixed(1), 8)}`);
+    console.log(
+      `    cycle demand  ${pad(mean(results.map((r) => r.cyclesPerSec)).toFixed(0), 8)}/s` +
+        `   vs supply ${mean(results.map((r) => r.capacity)).toFixed(0)}/s` +
+        `   (${(mean(results.map((r) => r.cyclesPerSec / r.capacity)) * 100).toFixed(0)}% of budget)`,
+    );
+    console.log(
+      `    heat tiers    ` +
+        `nominal ${(mean(results.map((r) => r.tierShare[0])) * 100).toFixed(0)}%` +
+        `  inst-I ${(mean(results.map((r) => r.tierShare[1])) * 100).toFixed(0)}%` +
+        `  inst-II ${(mean(results.map((r) => r.tierShare[2])) * 100).toFixed(0)}%` +
+        `   peak heat ${mean(results.map((r) => r.peakHeat)).toFixed(0)}`,
+    );
     console.log(`    peak enemies  ${pad(mean(results.map((r) => r.peakEnemies)).toFixed(0), 8)}`);
     console.log(
       `    misfire rate  ${pad((mean(results.map((r) => r.misfireRate)) * 100).toFixed(1), 8)}%`,

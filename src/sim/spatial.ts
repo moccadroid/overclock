@@ -5,8 +5,6 @@
  * so every query resolves ties identically on every run — required for the
  * determinism guarantee (nearest-enemy targeting must never depend on hash order).
  */
-import { ARENA } from './tunables';
-
 export interface SpatialItem {
   x: number;
   y: number;
@@ -19,10 +17,10 @@ export class SpatialGrid<T extends SpatialItem> {
   private readonly rows: number;
   private readonly cells: T[][];
 
-  constructor(cellSize = 80) {
+  constructor(width: number, height: number, cellSize = 90) {
     this.cellSize = cellSize;
-    this.cols = Math.ceil(ARENA.width / cellSize) + 2;
-    this.rows = Math.ceil(ARENA.height / cellSize) + 2;
+    this.cols = Math.ceil(width / cellSize) + 2;
+    this.rows = Math.ceil(height / cellSize) + 2;
     this.cells = Array.from({ length: this.cols * this.rows }, () => []);
   }
 

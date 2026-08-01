@@ -56,7 +56,7 @@ export interface TriggerDef {
   description: string;
 }
 
-export type ActionPrimitive = 'projectile' | 'burst' | 'chain';
+export type ActionPrimitive = 'projectile' | 'burst' | 'chain' | 'zone';
 
 export interface ActionDef {
   id: string;
@@ -76,6 +76,27 @@ export interface ActionDef {
   /** chain */
   jumps?: number;
   range?: number;
+  /** zone — seconds between damage ticks */
+  tickInterval?: number;
+  description: string;
+}
+
+/** GDD §22 — an arena is authored content, not a constant. */
+export interface RuinRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface ArenaDef {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  spawnX: number;
+  spawnY: number;
+  ruins: readonly RuinRect[];
   description: string;
 }
 

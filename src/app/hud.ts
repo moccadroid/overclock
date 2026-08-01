@@ -2,9 +2,9 @@
  * In-run HUD. GDD §19.4 — edge-mounted, minimal, EPS always visible.
  * Placeholder styling; the Ring itself lives on the avatar in the renderer.
  */
-import { ARENA } from '../sim/tunables';
 import type { World } from '../sim/world';
 import { BRANDING } from '../branding';
+import { MODIFIER_BY_ID, NODE_BY_ID } from '../content/index';
 
 function bar(value: number, max: number, width: number): string {
   const filled = Math.max(0, Math.min(width, Math.round((value / max) * width)));
@@ -25,6 +25,7 @@ export class Hud {
   private readonly bc: HTMLElement;
   private readonly br: HTMLElement;
   private readonly xpbar: HTMLElement;
+  private readonly engine: HTMLElement;
 
   constructor(root: HTMLElement) {
     const make = (id: string): HTMLElement => {
@@ -45,6 +46,13 @@ export class Hud {
     this.bc = make('hud-bc');
     this.br = make('hud-br');
     this.br.textContent = `${BRANDING.title} · M1 grammar slice · TAB editor · SPACE dash`;
+
+    // The Engine strip. §19.4 keeps the HUD minimal and puts the pipeline in the
+    // editor, but a build you cannot see is a build you cannot reason about —
+    // pillar 2. Low-brightness, right edge, one line per Program.
+    this.engine = document.createElement('div');
+    this.engine.id = 'hud-engine';
+    root.appendChild(this.engine);
   }
 
   update(world: World): void {
@@ -82,7 +90,56 @@ export class Hud {
 
     this.br.textContent =
       `enemies ${world.enemies.length}  proj ${world.projectiles.length}  ` +
-      `depth ${world.stats.maxDepth}  scrap +${(world.engine.scrapStacks * 4).toFixed(0)}%  ` +
-      `arena ${ARENA.width}x${ARENA.height}`;
+      `zones ${world.zones.length}  depth ${world.stats.maxDepth}  ` +
+      `scrap +${(world.engine.scrapStacks * 4).toFixed(0)}%`;
+
+    this.renderEngineStrip(world);
   }
+
+  /** One line per Program: the chain as written, and its live share of EPS. */
+  private renderEngineStrip(world: World): void {
+    const total = world.engine.programs.reduce((s, p) => s + p.recentEvents, 0);
+    const lines = world.engine.programs.map((program, i) => {
+      const compiled = world.engine.compiled[i]!;
+      if (!compiled.live && !program.triggerId && !program.actionId) {
+        return `<div class="prog dead">${i + 1}  —</div>`;
+      }
+
+      const parts: string[] = [nodeName(program.triggerId) ?? '·'];
+      for (const m of program.modifierIds) if (m) parts.push(nodeName(m) ?? m);
+      parts.push(nodeName(program.actionId) ?? '·');
+      const chain = parts.join(' › ');
+
+      if (!compiled.live) {
+        return `<div class="prog dead">${i + 1}  ${chain}   <span class="warn">not live</span></div>`;
+      }
+
+      const share = total > 0 ? (program.recentEvents / total) * 100 : 0;
+      const meter = '▏'.repeat(Math.max(0, Math.round(share / 10)));
+      return (
+        `<div class="prog">${i + 1}  ${chain}` +
+        `   <span class="num">${compiled.staticCost.toFixed(0)}c</span>` +
+        `<span class="meter">${meter}</span>` +
+        `<span class="pct">${share.toFixed(0)}%</span></div>`
+      );
+    });
+
+    const beacon = world.beacons.find((b) => b.progress > 0);
+    const channel = beacon
+      ? `<div class="channel">CHANNELLING ${'█'.repeat(Math.round(beacon.progress * 10))}${'·'.repeat(
+          10 - Math.round(beacon.progress * 10),
+        )}</div>`
+      : '';
+
+    this.engine.innerHTML =
+      `<div class="prog head">ENGINE — TAB to edit</div>` + lines.join('') + channel;
+  }
+}
+
+function nodeName(id: string | null): string | null {
+  if (!id) return null;
+  const node = NODE_BY_ID.get(id);
+  if (!node) return id;
+  const mult = MODIFIER_BY_ID.get(id)?.cycleMult;
+  return mult ? `${node.name}×${mult}` : node.name;
 }

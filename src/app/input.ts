@@ -24,7 +24,7 @@ const COMMAND_KEYS: Record<string, Command> = {
   Digit2: 'draft2',
   Digit3: 'draft3',
   KeyR: 'reroll',
-  KeyE: 'confirm',
+  // E is held to channel beacons (§4.2), so it cannot double as a confirm key.
   Enter: 'confirm',
 };
 
@@ -69,7 +69,7 @@ export class Input {
       x /= len;
       y /= len;
     }
-    return { moveX: x, moveY: y, dash };
+    return { moveX: x, moveY: y, dash, interact: this.held.has('KeyE') };
   }
 
   clear(): void {

@@ -24,6 +24,19 @@
     "description": "Radial burst around the avatar."
   },
   {
+    "id": "field",
+    "kind": "action",
+    "name": "Field",
+    "hue": "void",
+    "cycleCost": 5,
+    "primitive": "zone",
+    "damage": 4,
+    "radius": 140,
+    "lifetime": 3.5,
+    "tickInterval": 0.35,
+    "description": "Persistent damage zone at the densest nearby enemy cluster."
+  },
+  {
     "id": "arc",
     "kind": "action",
     "name": "Arc",

@@ -19,6 +19,7 @@ function scriptedInput(tick: number): InputState {
     moveX: Math.cos(t * 0.7),
     moveY: Math.sin(t * 0.45),
     dash: tick % 300 === 0,
+    interact: false,
   };
 }
 
@@ -113,60 +114,85 @@ describe('cascade physics (GDD §5.2)', () => {
     expect(w.stats.safetyTrips).toBe(0);
   });
 
-  it('a hotter engine burns Heat and eventually Overheats', () => {
-    const w = new World({ seed: 'heat', axiomId: 'ignition' });
-    // A deliberately over-budget feedback engine: every hit and kill re-enters
-    // the engine, so dynamic demand outruns regen and the deficit becomes Heat.
-    const p1 = w.engine.programs[1]!;
+  it('a greedier engine draws more Cycles and runs hotter', () => {
+    // Asserts the relationship rather than a magic number: Heat is a burst gauge
+    // and its absolute level is a live tuning surface (§23.2), but "more engine
+    // costs more Cycles and produces more Heat" must hold at any tuning.
+    const lean = new World({ seed: 'heat', axiomId: 'ignition' });
+    runPiloted(lean, 150);
+
+    const greedy = new World({ seed: 'heat', axiomId: 'ignition' });
+    const p1 = greedy.engine.programs[1]!;
     p1.triggerId = 'on_hit';
     p1.actionId = 'nova';
     p1.modifierIds[0] = 'split';
     p1.modifierIds[1] = 'echo';
-    const p2 = w.engine.programs[2]!;
+    const p2 = greedy.engine.programs[2]!;
     p2.triggerId = 'on_kill';
     p2.actionId = 'arc';
     p2.modifierIds[0] = 'echo';
     p2.modifierIds[1] = 'split';
-    const p3 = w.engine.programs[3]!;
+    const p3 = greedy.engine.programs[3]!;
     p3.triggerId = 'on_pickup';
-    p3.actionId = 'nova';
+    p3.actionId = 'field';
     p3.modifierIds[0] = 'split';
-    w.engine.recompile();
-    w.syncBudget();
+    greedy.engine.recompile();
+    greedy.syncBudget();
+    runPiloted(greedy, 150);
 
-    runPiloted(w, 150);
-    expect(w.budget.heat).toBeGreaterThan(0);
-    expect(w.stats.overheats).toBeGreaterThan(0);
+    expect(greedy.stats.cyclesSpent).toBeGreaterThan(lean.stats.cyclesSpent * 2);
+    expect(greedy.stats.peakHeat).toBeGreaterThan(lean.stats.peakHeat);
+    expect(greedy.stats.events).toBeGreaterThan(lean.stats.events);
   });
 });
 
 describe('Cycle budget (GDD §6)', () => {
-  it('converts unmet demand into Heat rather than refusing to fire', () => {
-    const b = new CycleBudget(100);
+  /** Drive one tick that draws `cost` Cycles. Returns true if it overheated. */
+  function overdrawTick(b: CycleBudget, cost: number): boolean {
     b.beginTick(SIM_DT);
-    b.spend(1000);
+    b.spend(cost);
+    return b.endTick(SIM_DT);
+  }
+
+  it('never refuses to fire — the deficit becomes Heat instead', () => {
+    const b = new CycleBudget(100);
+    overdrawTick(b, 1000);
     expect(b.available).toBe(0);
     expect(b.heat).toBeGreaterThan(0);
   });
 
   it('decays Heat only while under budget', () => {
     const b = new CycleBudget(100);
-    b.beginTick(SIM_DT);
-    b.spend(140);
-    b.endTick(SIM_DT);
+    for (let i = 0; i < 30; i++) overdrawTick(b, 400);
     const hot = b.heat;
+    expect(hot).toBeGreaterThan(0);
 
     b.beginTick(SIM_DT);
     b.endTick(SIM_DT);
-    expect(b.heat).toBeLessThan(hot);
     expect(b.heat).toBeCloseTo(hot - TUNABLE.heatDecayPerSec * SIM_DT, 6);
   });
 
-  it('overheats at 100, stalls, and resets to 50', () => {
+  it('is a dial, not a line: one huge spike cannot cross the whole band', () => {
+    // The load-bearing property of the Heat model. A single monstrous cascade
+    // tick should register as heat, not teleport the engine into Overheat —
+    // otherwise Instability I and II are doorways rather than places to live.
     const b = new CycleBudget(100);
-    b.beginTick(SIM_DT);
-    b.spend(500);
-    expect(b.endTick(SIM_DT)).toBe(true);
+    expect(overdrawTick(b, 100000)).toBe(false);
+    expect(b.heat).toBeLessThan(40);
+    expect(b.heat).toBeGreaterThan(0);
+  });
+
+  it('overheats after sustained overdraw, stalls, and resets to 50', () => {
+    const b = new CycleBudget(100);
+    let overheated = false;
+    let ticks = 0;
+    while (!overheated && ticks < 60 * 20) {
+      overheated = overdrawTick(b, 400);
+      ticks++;
+    }
+    expect(overheated).toBe(true);
+    // Sustained, not instant: it should take a couple of seconds of greed.
+    expect(ticks).toBeGreaterThan(60);
     expect(b.heat).toBe(TUNABLE.overheatHeatReset);
     expect(b.stalled).toBe(true);
     expect(b.stall).toBeCloseTo(TUNABLE.overheatStallSeconds, 6);

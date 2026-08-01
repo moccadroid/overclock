@@ -62,6 +62,47 @@
   color: #4c6076;
 }
 
+#hud-engine {
+  position: absolute;
+  right: 14px;
+  top: 92px;
+  text-align: right;
+  line-height: 1.75;
+  font-size: 11px;
+  color: #5d7590;
+  pointer-events: none;
+}
+#hud-engine .head {
+  color: #3f5570;
+  letter-spacing: 0.22em;
+  margin-bottom: 3px;
+}
+#hud-engine .prog {
+  white-space: nowrap;
+}
+#hud-engine .prog.dead {
+  color: #37485e;
+}
+#hud-engine .warn {
+  color: #7a5a2a;
+}
+#hud-engine .num {
+  color: #46586e;
+}
+#hud-engine .meter {
+  color: var(--voltaic);
+  margin-left: 6px;
+  letter-spacing: -1px;
+}
+#hud-engine .pct {
+  color: #7f97b2;
+  margin-left: 6px;
+}
+#hud-engine .channel {
+  margin-top: 8px;
+  color: #9fd0ff;
+}
+
 #xpbar {
   position: absolute;
   top: 0;
@@ -241,6 +282,29 @@
 }
 .arrow {
   color: #3d5570;
+}
+.slot-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.slot-move {
+  pointer-events: auto;
+  border: none;
+  background: none;
+  color: #4a627e;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 3px;
+  cursor: pointer;
+}
+.slot-move:hover:enabled {
+  color: var(--voltaic);
+}
+.slot-move:disabled {
+  opacity: 0.18;
+  cursor: default;
 }
 .row .stats {
   width: 210px;

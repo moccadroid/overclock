@@ -86,11 +86,18 @@ export class CycleBudget {
       this.available -= cost;
       return;
     }
-    const deficit = cost - this.available;
+    this.deficitThisTick += cost - this.available;
     this.available = 0;
-    this.heat += deficit * TUNABLE.heatPerCycleDeficit;
-    this.deficitThisTick += deficit;
     this.overdrawn = true;
+  }
+
+  /**
+   * How far over budget this tick ran, as a multiple of the Cycles regen
+   * supplies in that time. 0 = within budget, 1 = drawing twice what you make.
+   */
+  overdrawRatio(dt: number): number {
+    const supply = this.capacity * TUNABLE.cycleRegenPerCapacity * dt;
+    return supply > 0 ? this.deficitThisTick / supply : 0;
   }
 
   /**
@@ -99,7 +106,13 @@ export class CycleBudget {
    */
   endTick(dt: number): boolean {
     if (this.stall > 0) return false;
-    if (!this.overdrawn) {
+    if (this.overdrawn) {
+      const gain = Math.min(
+        TUNABLE.heatGainMaxPerSec,
+        TUNABLE.heatGainPerOverdraw * this.overdrawRatio(dt),
+      );
+      this.heat += gain * dt;
+    } else {
       this.heat = Math.max(0, this.heat - TUNABLE.heatDecayPerSec * dt);
     }
     if (this.heat >= 100) {

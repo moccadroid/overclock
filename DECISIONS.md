@@ -122,14 +122,19 @@ preserves the template's shape and is asserted in `world.test.ts`.
 
 ## D-7 · SIGN-OFF · [T] values changed from the GDD's starting numbers
 
-Measured with the headless harness (`pnpm sim`) against the §8.1 cadence target.
+Measured with the headless harness (`pnpm sim`). Current baseline across Ignition
+and Circuit: draft cadence 37s median, first level at 22–33s, peak EPS 116–140,
+deepest cascade 7–9.
 
 | Tunable | GDD / initial | Now | Why |
 |---|---|---|---|
-| XP curve | base 6, ×1.19 | base 26, ×1.20 | Cadence was 6.8s; target is 30–45s. Now 40.5s median. |
-| Threat rate | 0.055/s | 0.02/s | Puts Threat ≈ 24 at the 20:00 Meltdown line, so wave bands have room to spread across the build phase. |
+| XP curve | base 6, ×1.19 | base 11, ×1.30 | Cadence started at 6.8s against a 30–45s target. Retuned twice, once for the arena change. |
+| Threat rate | 0.055/s | 0.02/s | Puts Threat ≈ 24 at the 20:00 Meltdown line, so wave bands spread across the build phase. |
 | Wave interval | 4.5s base | 7.0s base, −0.2/Threat, min 2.0s | Early waves outpaced the starting Engine. |
-| Wave templates | — | Rebanded to the new Threat scale; early counts reduced | Same reason. |
+| Enemy speeds | 52–74 | 122–168 | Sized for a boxed arena. With a camera the player simply outran everything; see D-11. |
+| Player speed | 260 | 300 | ~3s to cross the visible field, per §4.1. |
+| Collect radius | 46 (§4.1's 1.5× diameter) | 95 | In an open world the player outruns their own drops; the opening starved for 97s before this. |
+| Wave templates | — | Rebanded; early counts reduced | Starting Engine could not out-kill the starting spawn rate. |
 
 Everything else marked [T] is at its documented value. All of it lives in
 `src/sim/tunables.ts`, separated from `LOADBEARING` (unmarked GDD numbers, which
@@ -162,15 +167,120 @@ pay the same for the same demolition.
 
 ---
 
+## D-11 · SETTLED · The arena is a world with a camera — correcting an M1 error
+
+Milestone 1 built The Heap as a fixed 1600×900 field with no camera. That was my
+misreading, and the GDD contradicts it in several places:
+
+- §19.4 puts *off-screen indicators* for Beacons, terminals, the Mirror and
+  Wardens on the screen edges. If the arena fits on screen, nothing is ever
+  off-screen and the entire HUD element is dead.
+- §12.3 has Beacons spawning "somewhere on the arena", §12.4 has the Extract
+  terminal "at a fixed arena landmark", §9.1 has Recompile terminals
+  "edge-indicator marked" — all of which assume travel.
+- §22 describes The Stack as "broad concentric corridors".
+
+The Heap is now 4200×2400 (about 6 view-fields) with 21 authored ruin blocks as
+soft cover, and the camera follows the player with lookahead, smoothed, clamped
+to the arena. Ruins block movement for player and enemies and absorb
+projectiles — rounding a corner bunches a crowd, which is the herding §22 asks
+for.
+
+Done before the visual milestone deliberately: culling, trail buffers and the
+degradation ladder all get built against a viewport, and retrofitting a camera
+after the phosphor pipeline exists is the expensive ordering.
+
+Two consequences that needed new rules, neither in the GDD:
+
+- **Spawn ring.** §12.2 says spawns arrive off-screen, but the simulation must
+  not know the viewport — two players on different monitors would get different
+  runs from the same seed. Waves therefore arrive on a fixed 1050–1350 unit ring
+  around the player, sized to sit outside a nominal view.
+- **Despawn.** Enemies more than 2600 units from the player are silently removed
+  with no drops. Without this, stragglers the player outran accumulate forever
+  and eat the population budget that should be producing pressure nearby.
+
+---
+
+## D-12 · SIGN-OFF · Always-on Engine strip
+
+§19.4 specifies a deliberately minimal HUD and puts the pipeline in the Tab
+editor (§19.6). In play that made the build invisible — the question "where are
+my Programs?" is the one piece of feedback that says pillar 2 is failing.
+
+There is now a low-brightness strip on the right edge: one line per Program
+showing the chain as written and its live share of EPS. It is a real deviation
+from §19.4 and easy to make a setting later.
+
+The editor also gained ‹ › controls to walk a modifier along its chain. §19.6
+specifies drag-to-reorder; the buttons are the placeholder. This matters more
+than it sounds: reordering within a row is the single interaction that teaches
+§5.5, and until now the build did not have it at all.
+
+---
+
+## D-13 · SETTLED · Viewport policy and a fairness note
+
+The visible field is fixed at 900 world units tall; width follows the window's
+aspect ratio, clamped to 1200–1900, then letterboxed. So an ultrawide monitor
+sees a wider field but not an unbounded one.
+
+Flagging it because this is a scoring game: seeing more of the arena is a real
+advantage, and the clamp bounds it rather than eliminating it. If leaderboards
+(§25.5) become competitive, the honest fix is a fixed view with letterboxing on
+every aspect. Not a decision worth making now.
+
+---
+
+## D-14 · SIGN-OFF · Heat accrues from overdraw *rate*, not raw deficit
+
+Originally each unmet Cycle became a Heat point. A single big cascade tick could
+overdraw by 100+ Cycles and cross the entire 0–100 band at once, so the engine
+bounced off Overheat every few seconds — measured at 75–82 Overheats per 12
+minutes, roughly a third of the run spent stalled. That is a wall, not §6.3's
+"dial, not a line", and it made Instability I and II doorways rather than places
+to live.
+
+Heat now accrues at a bounded rate proportional to how far over budget the tick
+ran, measured as a multiple of what regen supplies. Running at 2× budget is
+somewhere you can sit; 10× is not. `world.test.ts` locks in the property that no
+single spike, however large, can cross the band.
+
+Worth knowing for tuning: the harness now reports Cycle demand against supply and
+time spent in each Heat tier. Circuit currently runs at 188% of budget with 11%
+of the run in Instability. Whether that is the right amount of heat is a feel
+question for first-playable, not something I should fit to a bot.
+
+---
+
+## D-15 · SIGN-OFF · Wave Beacons and Field brought forward
+
+Neither was in the agreed M1 scope; both became necessary consequences of the
+arena change.
+
+- **Beacons (§12.3)** — a world map with nothing in it is just a bigger empty
+  box, and §19.4's edge indicators had nothing to point at. Beacons give
+  traversal a purpose and put the greed line in the build phase.
+- **Field (§5.4)** — there was no Void action in the slice at all, so the violet
+  gauge filled up and did nothing. Field adds a `zone` primitive (persistent
+  damage area) and makes the third hue mean something.
+
+Hue is still thin: adaptive resistance (§11.1), the director's hue starvation
+bias (§12.2), Convert (§7.4) and Attune are all unbuilt, so choosing a hue is
+mostly a +50% coin flip. That is the next thing that would make the fuel economy
+a real decision.
+
+---
+
 ## Not built in Milestone 1
 
-Deliberately absent, per the agreed milestone scope: the §16/§17 visual language
-(bloom, phosphor trails, stroke-in spawns, decomposition deaths, the degradation
-ladder, the grid instrument), audio (§18), Recompile (§9), Meltdown and
-Containment (§11.4, §13.2), the Mirror (§10.4), adaptive resistance and
-suppression (§11.1–11.2), Convert and the fuel arbitrage layer (§7.4), Discoveries
-and the Library (§15), menus and Run Setup (§19.1–19.3), the Results run-trace
-chart (§14), and settings (§20).
+Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,
+stroke-in spawns, decomposition deaths, the degradation ladder, the grid
+instrument), audio (§18), Recompile (§9), Meltdown and Containment (§11.4,
+§13.2), the Mirror (§10.4), adaptive resistance and suppression (§11.1–11.2),
+Convert and the fuel arbitrage layer (§7.4), Discoveries and the Library (§15),
+menus and Run Setup (§19.1–19.3), Extraction (§12.4), the Results run-trace chart
+(§14), settings (§20), and The Stack (§25.3, blocked on The Heap playing well).
 
-Present-but-placeholder: the renderer, the HUD, and the editor's interaction model
-(click-to-reorder rather than §19.6's drag).
+Present-but-placeholder: the renderer, the HUD, and the editor's interaction
+model (button-reorder rather than §19.6's drag).

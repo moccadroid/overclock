@@ -52,6 +52,17 @@ export function hashWorld(world: World): string {
     h = fnv(h, q(p.x));
     h = fnv(h, q(p.y));
   }
+  for (const z of world.zones) {
+    h = fnv(h, z.id);
+    h = fnv(h, q(z.x));
+    h = fnv(h, q(z.y));
+    h = fnv(h, q(z.life));
+  }
+  for (const b of world.beacons) {
+    h = fnv(h, b.id);
+    h = fnv(h, q(b.x));
+    h = fnv(h, q(b.progress));
+  }
   for (const state of world.rng.save()) h = fnv(h, state);
 
   return (h >>> 0).toString(16).padStart(8, '0');

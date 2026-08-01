@@ -10,7 +10,7 @@ import { Renderer } from './renderer';
 import { Hud } from './hud';
 import { DraftOverlay, EditorOverlay, MessageOverlay } from './overlays';
 import { Input } from './input';
-import { World, type RunConfig } from '../sim/world';
+import { NO_INPUT, World, type RunConfig } from '../sim/world';
 import { SIM_DT } from '../sim/tunables';
 import { BRANDING } from '../branding';
 
@@ -35,7 +35,7 @@ export class Game {
   }
 
   async start(mount: HTMLElement): Promise<void> {
-    await this.renderer.init(mount);
+    await this.renderer.init(mount, this.world);
 
     const ui = document.createElement('div');
     ui.id = 'ui';
@@ -129,7 +129,9 @@ export class Game {
       if (steps === 8) this.accumulator = 0;
     }
 
-    this.renderer.render(this.world);
+    // The camera only tracks while time is running — a frozen draft or editor
+    // should not drift the view out from under the player.
+    this.renderer.render(this.world, elapsed, this.mode === 'running');
 
     // The HUD is text-heavy; 20Hz is plenty and keeps DOM work off the frame.
     this.uiTimer += elapsed;
@@ -164,10 +166,10 @@ export class Game {
         this.draft.present(this.world, () => {});
         this.draft.handleKey(0);
       }
-      this.world.advance({ moveX: 0, moveY: 0, dash: false }, SIM_DT);
+      this.world.advance(NO_INPUT, SIM_DT);
     }
     this.hud.update(this.world);
-    this.renderer.render(this.world);
+    this.renderer.render(this.world, SIM_DT, true);
     const w = this.world;
     return {
       time: Number(w.time.toFixed(2)),
@@ -188,6 +190,10 @@ export class Game {
 
   get debugWorld(): World {
     return this.world;
+  }
+
+  get debugRenderer(): Renderer {
+    return this.renderer;
   }
 
   private runSummary(): string {

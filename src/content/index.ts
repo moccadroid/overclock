@@ -8,10 +8,12 @@ import modifiersRaw from './data/modifiers.json';
 import enemiesRaw from './data/enemies.json';
 import wavesRaw from './data/waves.json';
 import axiomsRaw from './data/axioms.json';
+import arenasRaw from './data/arenas.json';
 
 import { validateCollection, type Schema, type RegistrySet } from './validate';
 import type {
   ActionDef,
+  ArenaDef,
   AxiomDef,
   EnemyDef,
   ModifierDef,
@@ -49,7 +51,7 @@ const actionSchema: Schema = {
   name: { type: 'string', required: true },
   hue: { type: 'string', required: true, oneOf: ['thermal', 'voltaic', 'void'] },
   cycleCost: { type: 'number', required: true, min: 0 },
-  primitive: { type: 'string', required: true, oneOf: ['projectile', 'burst', 'chain'] },
+  primitive: { type: 'string', required: true, oneOf: ['projectile', 'burst', 'chain', 'zone'] },
   damage: { type: 'number', required: true, min: 0 },
   speed: { type: 'number', min: 0 },
   lifetime: { type: 'number', min: 0 },
@@ -57,6 +59,30 @@ const actionSchema: Schema = {
   radius: { type: 'number', min: 0 },
   jumps: { type: 'number', min: 0 },
   range: { type: 'number', min: 0 },
+  tickInterval: { type: 'number', min: 0.01 },
+  description: { type: 'string', required: true },
+};
+
+const arenaSchema: Schema = {
+  id: { type: 'string', required: true },
+  name: { type: 'string', required: true },
+  width: { type: 'number', required: true, min: 800 },
+  height: { type: 'number', required: true, min: 600 },
+  spawnX: { type: 'number', required: true, min: 0 },
+  spawnY: { type: 'number', required: true, min: 0 },
+  ruins: {
+    type: 'array',
+    required: true,
+    items: {
+      type: 'object',
+      fields: {
+        x: { type: 'number', required: true, min: 0 },
+        y: { type: 'number', required: true, min: 0 },
+        w: { type: 'number', required: true, min: 1 },
+        h: { type: 'number', required: true, min: 1 },
+      },
+    },
+  },
   description: { type: 'string', required: true },
 };
 
@@ -200,6 +226,12 @@ export const AXIOMS = validateCollection<AxiomDef>(
   axiomSchema,
   registries,
 );
+export const ARENAS = validateCollection<ArenaDef>(
+  'arenas.json',
+  arenasRaw,
+  arenaSchema,
+  registries,
+);
 
 function index<T extends { id: string }>(items: readonly T[]): ReadonlyMap<string, T> {
   return new Map(items.map((i) => [i.id, i]));
@@ -211,6 +243,7 @@ export const MODIFIER_BY_ID = index(MODIFIERS);
 export const ENEMY_BY_ID = index(ENEMIES);
 export const WAVE_BY_ID = index(WAVES);
 export const AXIOM_BY_ID = index(AXIOMS);
+export const ARENA_BY_ID = index(ARENAS);
 
 export const ALL_NODES: readonly NodeDef[] = [...TRIGGERS, ...ACTIONS, ...MODIFIERS];
 export const NODE_BY_ID: ReadonlyMap<string, NodeDef> = index(ALL_NODES);
@@ -238,5 +271,10 @@ export function enemy(id: string): EnemyDef {
 export function axiom(id: string): AxiomDef {
   const a = AXIOM_BY_ID.get(id);
   if (!a) throw new Error(`Unknown axiom "${id}"`);
+  return a;
+}
+export function arena(id: string): ArenaDef {
+  const a = ARENA_BY_ID.get(id);
+  if (!a) throw new Error(`Unknown arena "${id}"`);
   return a;
 }

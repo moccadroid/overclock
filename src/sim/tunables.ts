@@ -14,20 +14,34 @@ export const SIM_DT = 1 / SIM_HZ;
 export const TUNABLE = {
   // ---- §4.1 avatar ----
   playerIntegrity: 100,
-  playerMoveSpeed: 260, // arena units/sec; ~2.5s to cross the 1600-wide arena at ~1.5 crossings
+  /** §4.1 — crossing the visible field takes roughly 3s at this speed. */
+  playerMoveSpeed: 300,
   dashDuration: 0.15,
   dashSpeedMult: 3,
   dashIFrames: 0.15,
   dashCooldown: 3,
-  collectRadius: 46, // ~1.5x avatar diameter
+  /**
+   * §4.1 says ~1.5x avatar diameter (=46). That was sized for a boxed arena; in
+   * an open world the player outruns their own drops and the opening starves.
+   */
+  collectRadius: 95,
   playerRadius: 15,
 
   // ---- §6 cycles & heat ----
   cycleCapacityBase: 100,
   /** Regen per second == capacity (GDD §6.1: "regenerating at capacity/sec"). */
   cycleRegenPerCapacity: 1.0,
-  /** Cycles of unmet demand -> Heat points. */
-  heatPerCycleDeficit: 1.0,
+  /**
+   * Heat accrues from how far over budget you are, not from raw unmet Cycles.
+   *
+   * Charging Heat per deficit-Cycle made a single big cascade tick cross the
+   * whole 0-100 band, so Overheat became a wall the engine bounced off every few
+   * seconds — the opposite of §6.3's "dial, not a line". Instead: overdraw is
+   * measured as a multiple of what regen supplies, and Heat climbs at a bounded
+   * rate. Running at 2x budget is a place you can live; running at 10x is not.
+   */
+  heatGainPerOverdraw: 22,
+  heatGainMaxPerSec: 45,
   heatDecayPerSec: 8,
   overheatStallSeconds: 3,
   overheatHeatReset: 50,
@@ -42,8 +56,8 @@ export const TUNABLE = {
   fueledFireOutputBonus: 0.5,
 
   // ---- §8 leveling & draft ----
-  xpBase: 26,
-  xpGrowth: 1.2,
+  xpBase: 11,
+  xpGrowth: 1.3,
   xpPerShard: 1,
   draftCards: 3,
   rerollsPerRun: 2,
@@ -69,10 +83,32 @@ export const TUNABLE = {
   maxAliveBase: 70,
   maxAlivePerThreat: 16,
   /**
+   * Enemies this far from the player are silently removed, with no drops. Not in
+   * the GDD, but required once the arena is bigger than the view: without it,
+   * stragglers the player has outrun accumulate forever and eat the population
+   * budget that should be producing pressure where the player actually is.
+   */
+  despawnRadius: 2600,
+  /**
    * §12.2 — "No spawn-on-top-of-player, ever." The guarantee is load-bearing;
    * only the radius is tunable. Enforced in World.updateDirector.
    */
   spawnSafeRadius: 260,
+  /**
+   * §12.2 — spawns arrive off-screen. The sim has no camera (that would make the
+   * simulation depend on the viewport and break determinism across window
+   * sizes), so it spawns on a ring sized to sit just outside a nominal view.
+   */
+  spawnRingMin: 1050,
+  spawnRingMax: 1350,
+
+  // ---- §12.3 wave beacons ----
+  beaconInterval: 75,
+  beaconChannelTime: 1.5,
+  beaconDropBonus: 0.5,
+  beaconThreatBump: 1.0,
+  beaconRadius: 34,
+  maxBeacons: 2,
 
   // ---- §13 scoring ----
   epsSmoothingWindow: 5,
@@ -102,8 +138,17 @@ export const SAFETY = {
   maxScheduledFires: 8000,
 } as const;
 
-/** §22 — The Heap. Fixed arena, no camera in M1. */
-export const ARENA = {
-  width: 1600,
-  height: 900,
+/**
+ * Camera. The arena is authored content (src/content/data/arenas.json), far
+ * larger than the viewport — §19.4's off-screen edge indicators and §12.3's
+ * beacons only mean anything if there is somewhere to be that you cannot see.
+ */
+export const CAMERA = {
+  /** Design width of the visible field. The view scales to fit the window. */
+  viewWidth: 1600,
+  viewHeight: 900,
+  /** How far the view leads the player's movement, in world units. */
+  lookahead: 130,
+  /** Seconds for the camera to close most of the distance to its target. */
+  smoothing: 0.12,
 } as const;

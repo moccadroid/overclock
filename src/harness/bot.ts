@@ -5,7 +5,7 @@
  * rather than the operator. It kites the nearest threat, drifts toward the
  * densest pickup, and dashes off cooldown when something is close.
  */
-import { ARENA, TUNABLE } from '../sim/tunables';
+import { TUNABLE } from '../sim/tunables';
 import type { InputState, World } from '../sim/world';
 import type { DraftCard } from '../sim/draft';
 import { NODE_BY_ID } from '../content/index';
@@ -44,11 +44,30 @@ export function botInput(world: World): InputState {
   }
 
   // Stay off the walls — being cornered is an operator failure, not a build one.
-  const margin = 140;
+  const margin = 200;
+  const { width, height } = world.arena;
   if (p.x < margin) ax += (margin - p.x) / margin;
-  if (p.x > ARENA.width - margin) ax -= (p.x - (ARENA.width - margin)) / margin;
+  if (p.x > width - margin) ax -= (p.x - (width - margin)) / margin;
   if (p.y < margin) ay += (margin - p.y) / margin;
-  if (p.y > ARENA.height - margin) ay -= (p.y - (ARENA.height - margin)) / margin;
+  if (p.y > height - margin) ay -= (p.y - (height - margin)) / margin;
+
+  // Route to a beacon when one is reasonably close — the greed line is part of
+  // what the harness should be exercising (§12.3).
+  let channelling = false;
+  const beacon = world.beacons[0];
+  // Only take the greed line while healthy — a bot that channels every beacon
+  // measures a reckless pilot, not the game.
+  const greedy = p.integrity > p.maxIntegrity * 0.6;
+  if (beacon && greedy) {
+    const dx = beacon.x - p.x;
+    const dy = beacon.y - p.y;
+    const d = Math.hypot(dx, dy);
+    if (d < 900 && threatDist > 150) {
+      ax += (dx / (d || 1)) * 1.4;
+      ay += (dy / (d || 1)) * 1.4;
+    }
+    if (d < TUNABLE.beaconRadius) channelling = true;
+  }
 
   const len = Math.hypot(ax, ay);
   if (len > 1) {
@@ -57,9 +76,10 @@ export function botInput(world: World): InputState {
   }
 
   return {
-    moveX: ax,
-    moveY: ay,
+    moveX: channelling ? 0 : ax,
+    moveY: channelling ? 0 : ay,
     dash: threatDist < 90 && p.dashCooldown <= 0,
+    interact: channelling,
   };
 }
 
@@ -70,7 +90,9 @@ export function botInput(world: World): InputState {
 export function botDraftChoice(world: World, cards: readonly DraftCard[]): number {
   const needsTrigger = world.engine.programs.some((p) => p.triggerId === null && p.actionId);
   const needsAction = world.engine.programs.some((p) => p.actionId === null && p.triggerId);
-  const headroomTight = world.engine.staticLoad > world.budget.capacity * 0.75;
+  // Capacity is the only lever this pilot has against Heat — it never scraps.
+  const headroomTight =
+    world.engine.staticLoad > world.budget.capacity * 0.45 || world.budget.heat > 35;
 
   let bestIndex = 0;
   let bestScore = -Infinity;

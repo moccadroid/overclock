@@ -263,6 +263,22 @@ export class Engine {
     return null;
   }
 
+  /**
+   * Swap two modifier slots within a Program. This is the interaction that
+   * teaches §5.5 — reordering is free, unlimited, and changes the numbers.
+   * Empty slots participate, so a modifier can be walked along the chain.
+   */
+  swapModifiers(programIndex: number, a: number, b: number): boolean {
+    const p = this.programs[programIndex];
+    if (!p) return false;
+    if (a < 0 || b < 0 || a >= p.modifierIds.length || b >= p.modifierIds.length) return false;
+    const tmp = p.modifierIds[a] ?? null;
+    p.modifierIds[a] = p.modifierIds[b] ?? null;
+    p.modifierIds[b] = tmp;
+    this.recompile();
+    return true;
+  }
+
   /** §5.7 — Scrap. Returns the Cycles refunded (informational; static load drops). */
   scrapNode(programIndex: number, slot: 'trigger' | 'action' | number): number {
     const p = this.programs[programIndex];

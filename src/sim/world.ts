@@ -11,13 +11,14 @@ import { Rng } from './rng';
 import { SpatialGrid, type SpatialItem } from './spatial';
 import { CycleBudget } from './cycles';
 import { Engine, type Program } from './engine';
-import { ARENA, LOADBEARING, SAFETY, SIM_DT, TUNABLE } from './tunables';
-import { HUES, type EventType, type GameEvent, type Hue } from './types';
+import { LOADBEARING, SAFETY, SIM_DT, TUNABLE } from './tunables';
+import { HUES, type ArenaDef, type EventType, type GameEvent, type Hue } from './types';
 import {
   ACTION_BY_ID,
   ENEMY_BY_ID,
   TRIGGER_BY_ID,
   WAVES,
+  arena as getArena,
   axiom as getAxiom,
   enemy as getEnemy,
 } from '../content/index';
@@ -26,9 +27,11 @@ export interface InputState {
   moveX: number;
   moveY: number;
   dash: boolean;
+  /** Hold-to-channel for beacons and terminals (§4.2, §21). */
+  interact: boolean;
 }
 
-export const NO_INPUT: InputState = { moveX: 0, moveY: 0, dash: false };
+export const NO_INPUT: InputState = { moveX: 0, moveY: 0, dash: false, interact: false };
 
 export type EnemyState = 'seek' | 'windup' | 'dash';
 
@@ -48,6 +51,8 @@ export interface Enemy extends SpatialItem {
   /** Render hint: seconds of kill-flash remaining (§17.2). */
   flash: number;
   spawnAge: number;
+  /** §12.3 — spawned by a channelled Beacon, so it drops more. */
+  enriched: boolean;
 }
 
 export interface Projectile extends SpatialItem {
@@ -76,6 +81,32 @@ export interface Pickup extends SpatialItem {
   value: number;
   vx: number;
   vy: number;
+  age: number;
+}
+
+/** GDD §5.4 Field — a persistent damage zone. The Void archetype's space control. */
+export interface Zone extends SpatialItem {
+  id: number;
+  hue: Hue;
+  radius: number;
+  life: number;
+  maxLife: number;
+  damage: number;
+  tickInterval: number;
+  tickTimer: number;
+  depth: number;
+  programIndex: number;
+}
+
+/**
+ * GDD §12.3 Wave Beacon. Channel it to pull the next wave in early and enriched,
+ * permanently ticking Threat up. Ignoring beacons is safe and slow; chaining them
+ * is the greed line. This is what makes traversing the arena a decision.
+ */
+export interface Beacon extends SpatialItem {
+  id: number;
+  /** 0..1 channel progress. Resets if the player leaves or stops holding. */
+  progress: number;
   age: number;
 }
 
@@ -121,6 +152,7 @@ export interface Player {
 export interface RunConfig {
   seed: string;
   axiomId: string;
+  arenaId?: string;
 }
 
 export interface RunStats {
@@ -134,6 +166,14 @@ export interface RunStats {
   peakConcurrentEnemies: number;
   overheats: number;
   damageTaken: number;
+  beaconsChannelled: number;
+  /** Seconds spent in each Heat tier — the instrument for tuning §6.3. */
+  tierSeconds: [number, number, number, number];
+  /** Total Cycles the engine asked for. Compare against capacity x time. */
+  cyclesSpent: number;
+  peakHeat: number;
+  /** Seconds until the first level-up — §3's "a decision every ~30 seconds". */
+  firstLevelTime: number;
   /** Times a runtime safety valve fired. Non-zero means investigate, not tune. */
   safetyTrips: number;
 }
@@ -141,6 +181,7 @@ export interface RunStats {
 export class World {
   readonly rng: Rng;
   readonly config: RunConfig;
+  readonly arena: ArenaDef;
   time = 0;
   tickCount = 0;
 
@@ -151,6 +192,8 @@ export class World {
   enemies: Enemy[] = [];
   projectiles: Projectile[] = [];
   pickups: Pickup[] = [];
+  zones: Zone[] = [];
+  beacons: Beacon[] = [];
   fx: Fx[] = [];
 
   fuel: Record<Hue, number> = { thermal: 0, voltaic: 0, void: 0 };
@@ -166,6 +209,7 @@ export class World {
 
   threat = 0;
   waveTimer = 2;
+  beaconTimer = 20;
   score = 0;
   eps = 0;
 
@@ -180,6 +224,11 @@ export class World {
     peakConcurrentEnemies: 0,
     overheats: 0,
     damageTaken: 0,
+    beaconsChannelled: 0,
+    tierSeconds: [0, 0, 0, 0],
+    cyclesSpent: 0,
+    peakHeat: 0,
+    firstLevelTime: 0,
     safetyTrips: 0,
   };
 
@@ -190,13 +239,15 @@ export class World {
 
   private eventQueue: GameEvent[] = [];
   private scheduled: ScheduledFire[] = [];
-  private grid = new SpatialGrid<Enemy>(80);
+  private grid: SpatialGrid<Enemy>;
   private nextId = 1;
   private eventsThisTick = 0;
 
   constructor(config: RunConfig) {
     this.config = config;
     this.rng = new Rng(config.seed);
+    this.arena = getArena(config.arenaId ?? 'heap');
+    this.grid = new SpatialGrid<Enemy>(this.arena.width, this.arena.height);
 
     const ax = getAxiom(config.axiomId);
     this.engine = new Engine();
@@ -212,8 +263,8 @@ export class World {
     this.budget.setStaticLoad(this.engine.staticLoad);
 
     this.player = {
-      x: ARENA.width / 2,
-      y: ARENA.height / 2,
+      x: this.arena.spawnX,
+      y: this.arena.spawnY,
       vx: 0,
       vy: 0,
       integrity: TUNABLE.playerIntegrity,
@@ -244,8 +295,10 @@ export class World {
     this.updateEnemies(dt);
     this.grid.rebuild(this.enemies);
     this.updateProjectiles(dt);
+    this.updateZones(dt);
     this.updatePickups(dt);
     this.updateFx(dt);
+    this.updateBeacons(input, dt);
     this.updateDirector(dt);
 
     if (!this.budget.stalled) {
@@ -259,6 +312,10 @@ export class World {
       this.emit({ type: 'overheat', depth: 0, x: this.player.x, y: this.player.y });
       if (!this.budget.stalled) this.drainEvents();
     }
+
+    this.stats.tierSeconds[this.budget.tier] += dt;
+    this.stats.cyclesSpent += this.budget.spentThisTick;
+    if (this.budget.heat > this.stats.peakHeat) this.stats.peakHeat = this.budget.heat;
 
     this.compact();
     this.updateScore(dt);
@@ -409,6 +466,9 @@ export class World {
         case 'chain':
           this.doChain(def.id, damage, depth, index, x, y);
           break;
+        case 'zone':
+          this.dropZone(def.id, damage, depth, index, x, y, compiled.ctx.area, compiled.ctx.duration);
+          break;
       }
     }
   }
@@ -506,6 +566,130 @@ export class World {
     if (points.length > 2) this.pushFx('chain', def.hue, x, y, 0, points, 0.14);
   }
 
+  /**
+   * §5.4 Field — a persistent zone placed on the densest nearby enemy cluster.
+   * "Densest" is sampled from a handful of live enemies rather than solved
+   * exactly: cheap, deterministic, and it reads correctly in play.
+   */
+  private dropZone(
+    actionId: string,
+    damage: number,
+    depth: number,
+    programIndex: number,
+    x: number,
+    y: number,
+    area: number,
+    duration: number,
+  ): void {
+    if (this.zones.length >= SAFETY.maxEntities) return;
+    const def = ACTION_BY_ID.get(actionId)!;
+    const radius = (def.radius ?? 130) * Math.max(0.1, area);
+
+    let bestX = x;
+    let bestY = y;
+    let bestCount = -1;
+    const samples = Math.min(6, this.enemies.length);
+    for (let i = 0; i < samples; i++) {
+      const candidate = this.enemies[this.rng.int(this.enemies.length)]!;
+      if (!candidate.alive) continue;
+      let count = 0;
+      this.grid.queryRadius(candidate.x, candidate.y, radius, () => {
+        count++;
+      });
+      if (count > bestCount) {
+        bestCount = count;
+        bestX = candidate.x;
+        bestY = candidate.y;
+      }
+    }
+
+    this.zones.push({
+      id: this.nextId++,
+      hue: def.hue,
+      x: bestX,
+      y: bestY,
+      radius,
+      life: (def.lifetime ?? 3) * Math.max(0.1, duration),
+      maxLife: (def.lifetime ?? 3) * Math.max(0.1, duration),
+      damage,
+      tickInterval: def.tickInterval ?? 0.35,
+      tickTimer: 0,
+      depth,
+      programIndex,
+      alive: true,
+    });
+  }
+
+  private updateZones(dt: number): void {
+    for (const z of this.zones) {
+      if (!z.alive) continue;
+      z.life -= dt;
+      if (z.life <= 0) {
+        z.alive = false;
+        continue;
+      }
+      z.tickTimer -= dt;
+      if (z.tickTimer > 0) continue;
+      z.tickTimer = z.tickInterval;
+      this.grid.queryRadius(z.x, z.y, z.radius, (enemy) => {
+        this.damageEnemy(enemy, z.damage, z.depth, z.programIndex, z.hue);
+      });
+    }
+  }
+
+  // ------------------------------------------------------------------ beacons
+
+  /**
+   * §12.3 — hold Interact inside a Beacon to pull the next wave in early and
+   * enriched, permanently bumping Threat. Channelling is interruptible and
+   * resumes from zero, with visible progress (§21).
+   */
+  private updateBeacons(input: InputState, dt: number): void {
+    this.beaconTimer -= dt;
+    if (this.beaconTimer <= 0 && this.beacons.length < TUNABLE.maxBeacons) {
+      this.beaconTimer = TUNABLE.beaconInterval;
+      const spot = this.findOpenSpot(TUNABLE.spawnRingMin * 0.5, TUNABLE.spawnRingMax);
+      this.beacons.push({
+        id: this.nextId++,
+        x: spot.x,
+        y: spot.y,
+        progress: 0,
+        age: 0,
+        alive: true,
+      });
+    }
+
+    for (const b of this.beacons) {
+      if (!b.alive) continue;
+      b.age += dt;
+      const near =
+        Math.hypot(this.player.x - b.x, this.player.y - b.y) < TUNABLE.beaconRadius + TUNABLE.playerRadius;
+      if (near && input.interact) {
+        b.progress += dt / TUNABLE.beaconChannelTime;
+        if (b.progress >= 1) {
+          b.alive = false;
+          this.stats.beaconsChannelled++;
+          this.threat += TUNABLE.beaconThreatBump;
+          this.spawnWave(true);
+        }
+      } else if (b.progress > 0) {
+        b.progress = Math.max(0, b.progress - dt / TUNABLE.beaconChannelTime);
+      }
+    }
+  }
+
+  /** A point at a given distance band from the player that is not inside a ruin. */
+  private findOpenSpot(minDist: number, maxDist: number): { x: number; y: number } {
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const angle = this.rng.next() * Math.PI * 2;
+      const dist = this.rng.range(minDist, maxDist);
+      const x = clamp(this.player.x + Math.cos(angle) * dist, 60, this.arena.width - 60);
+      const y = clamp(this.player.y + Math.sin(angle) * dist, 60, this.arena.height - 60);
+      if (!this.insideRuin(x, y, 40)) return { x, y };
+    }
+    return { x: this.arena.spawnX, y: this.arena.spawnY };
+  }
+
   private pushFx(
     kind: Fx['kind'],
     hue: Hue,
@@ -569,18 +753,22 @@ export class World {
     this.stats.kills++;
 
     const def = getEnemy(enemy.defId);
-    for (let i = 0; i < def.fuel; i++) this.dropPickup('fuel', enemy.x, enemy.y, enemy.hue, 1);
-    this.dropPickup('xp', enemy.x, enemy.y, enemy.hue, def.xp);
+    // §12.3 — beacon-called waves drop enriched.
+    const bonus = enemy.enriched ? 1 + TUNABLE.beaconDropBonus : 1;
+    const fuelDrops = Math.round(def.fuel * bonus);
+    for (let i = 0; i < fuelDrops; i++) this.dropPickup('fuel', enemy.x, enemy.y, enemy.hue, 1);
+    this.dropPickup('xp', enemy.x, enemy.y, enemy.hue, def.xp * bonus);
 
     if (def.splitsInto) {
       for (let i = 0; i < def.splitsInto.count; i++) {
         const a = (i / def.splitsInto.count) * Math.PI * 2;
-        this.spawnEnemy(
+        const child = this.spawnEnemy(
           def.splitsInto.enemy,
           enemy.x + Math.cos(a) * 24,
           enemy.y + Math.sin(a) * 24,
           enemy.hue,
         );
+        if (child) child.enriched = enemy.enriched;
       }
     }
 
@@ -643,8 +831,54 @@ export class World {
       p.vx = p.dirX * speed;
       p.vy = p.dirY * speed;
     }
-    p.x = clamp(p.x + p.vx * dt, TUNABLE.playerRadius, ARENA.width - TUNABLE.playerRadius);
-    p.y = clamp(p.y + p.vy * dt, TUNABLE.playerRadius, ARENA.height - TUNABLE.playerRadius);
+    p.x = clamp(p.x + p.vx * dt, TUNABLE.playerRadius, this.arena.width - TUNABLE.playerRadius);
+    p.y = clamp(p.y + p.vy * dt, TUNABLE.playerRadius, this.arena.height - TUNABLE.playerRadius);
+    this.resolveRuins(p, TUNABLE.playerRadius);
+  }
+
+  /**
+   * Circle-vs-rect pushout against the arena's structure ruins (§22, The Heap:
+   * "structure ruins as soft cover for herding"). Bodies slide along faces rather
+   * than sticking, which is what turns a corner into a herding tool.
+   */
+  private resolveRuins(body: { x: number; y: number }, radius: number): boolean {
+    let touched = false;
+    for (const r of this.arena.ruins) {
+      const nx = clamp(body.x, r.x, r.x + r.w);
+      const ny = clamp(body.y, r.y, r.y + r.h);
+      const dx = body.x - nx;
+      const dy = body.y - ny;
+      const d2 = dx * dx + dy * dy;
+      if (d2 >= radius * radius) continue;
+      touched = true;
+      if (d2 > 1e-6) {
+        const d = Math.sqrt(d2);
+        body.x = nx + (dx / d) * radius;
+        body.y = ny + (dy / d) * radius;
+      } else {
+        // Centre is inside the rect — eject through the nearest face.
+        const left = body.x - r.x;
+        const right = r.x + r.w - body.x;
+        const top = body.y - r.y;
+        const bottom = r.y + r.h - body.y;
+        const min = Math.min(left, right, top, bottom);
+        if (min === left) body.x = r.x - radius;
+        else if (min === right) body.x = r.x + r.w + radius;
+        else if (min === top) body.y = r.y - radius;
+        else body.y = r.y + r.h + radius;
+      }
+    }
+    return touched;
+  }
+
+  /** True if the point sits inside any ruin — used for projectiles and spawns. */
+  insideRuin(x: number, y: number, pad = 0): boolean {
+    for (const r of this.arena.ruins) {
+      if (x >= r.x - pad && x <= r.x + r.w + pad && y >= r.y - pad && y <= r.y + r.h + pad) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private updateEnemies(dt: number): void {
@@ -693,13 +927,25 @@ export class World {
       if (e.state !== 'windup') {
         e.x += e.vx * dt;
         e.y += e.vy * dt;
+        // Enemies collide with ruins too — that is what makes cover work as a
+        // herding tool rather than a wall the player hides behind forever.
+        if (this.resolveRuins(e, e.radius) && e.state === 'dash') {
+          e.state = 'seek';
+          e.timer = 1.2;
+        }
       }
 
       // Contact damage.
       const dx = p.x - e.x;
       const dy = p.y - e.y;
+      const d2 = dx * dx + dy * dy;
       const r = e.radius + TUNABLE.playerRadius;
-      if (dx * dx + dy * dy < r * r) this.hurtPlayer(def.contactDamage);
+      if (d2 < r * r) this.hurtPlayer(def.contactDamage);
+
+      // Outrun stragglers stop existing — see TUNABLE.despawnRadius.
+      if (d2 > TUNABLE.despawnRadius * TUNABLE.despawnRadius && e.spawnAge > 4) {
+        e.alive = false;
+      }
     }
   }
 
@@ -715,8 +961,9 @@ export class World {
         proj.life <= 0 ||
         proj.x < -40 ||
         proj.y < -40 ||
-        proj.x > ARENA.width + 40 ||
-        proj.y > ARENA.height + 40
+        proj.x > this.arena.width + 40 ||
+        proj.y > this.arena.height + 40 ||
+        this.insideRuin(proj.x, proj.y)
       ) {
         proj.alive = false;
         continue;
@@ -804,6 +1051,16 @@ export class World {
     const maxAlive = TUNABLE.maxAliveBase + this.threat * TUNABLE.maxAlivePerThreat;
     if (this.enemies.length >= maxAlive) return;
 
+    this.spawnWave(false);
+  }
+
+  /**
+   * §12.2 — a wave template arrives from one compass direction, off-screen.
+   * The ring radius is viewport-independent on purpose: the simulation must not
+   * know how big the player's window is, or two players on different monitors
+   * would get different runs from the same seed.
+   */
+  private spawnWave(enriched: boolean): void {
     const eligible = WAVES.filter((w) => this.threat >= w.minThreat && this.threat <= w.maxThreat);
     if (eligible.length === 0) return;
     const template = this.rng.pickWeighted(
@@ -811,31 +1068,23 @@ export class World {
       eligible.map((w) => w.weight),
     );
 
-    // §12.2 — spawn off-screen at an arena edge. Never on top of the player.
-    const edge = this.rng.int(4);
-    const along = this.rng.next();
-    let ox: number;
-    let oy: number;
-    if (edge === 0) {
-      ox = along * ARENA.width;
-      oy = -30;
-    } else if (edge === 1) {
-      ox = along * ARENA.width;
-      oy = ARENA.height + 30;
-    } else if (edge === 2) {
-      ox = -30;
-      oy = along * ARENA.height;
-    } else {
-      ox = ARENA.width + 30;
-      oy = along * ARENA.height;
-    }
+    const angle = this.rng.next() * Math.PI * 2;
+    const dist = this.rng.range(TUNABLE.spawnRingMin, TUNABLE.spawnRingMax);
+    const ox = clamp(this.player.x + Math.cos(angle) * dist, 30, this.arena.width - 30);
+    const oy = clamp(this.player.y + Math.sin(angle) * dist, 30, this.arena.height - 30);
 
     for (const entry of template.entries) {
       for (let i = 0; i < entry.count; i++) {
-        const x = ox + this.rng.range(-entry.spread, entry.spread);
-        const y = oy + this.rng.range(-entry.spread, entry.spread);
-        const safe = this.pushOutsideSafeRadius(x, y);
-        this.spawnEnemy(entry.enemy, safe.x, safe.y, this.rng.pick(HUES));
+        const rx = ox + this.rng.range(-entry.spread, entry.spread);
+        const ry = oy + this.rng.range(-entry.spread, entry.spread);
+        const safe = this.pushOutsideSafeRadius(rx, ry);
+        const e = this.spawnEnemy(
+          entry.enemy,
+          clamp(safe.x, 20, this.arena.width - 20),
+          clamp(safe.y, 20, this.arena.height - 20),
+          this.rng.pick(HUES),
+        );
+        if (e) e.enriched = enriched;
       }
     }
     this.emit({ type: 'wave', depth: 0, x: ox, y: oy });
@@ -883,6 +1132,7 @@ export class World {
       aimY: 0,
       flash: 0,
       spawnAge: 0,
+      enriched: false,
       alive: true,
     };
     this.enemies.push(e);
@@ -916,6 +1166,7 @@ export class World {
       this.xp -= this.xpToNext;
       this.level++;
       this.xpToNext = Math.ceil(TUNABLE.xpBase * Math.pow(TUNABLE.xpGrowth, this.level - 1));
+      if (this.stats.firstLevelTime === 0) this.stats.firstLevelTime = this.time;
       if (this.pendingDrafts < TUNABLE.maxQueuedDrafts) this.pendingDrafts++;
     }
   }
@@ -960,6 +1211,8 @@ export class World {
     compactInPlace(this.enemies);
     compactInPlace(this.projectiles);
     compactInPlace(this.pickups);
+    compactInPlace(this.zones);
+    compactInPlace(this.beacons);
     compactInPlace(this.fx);
   }
 }

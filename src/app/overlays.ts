@@ -220,7 +220,21 @@ export class EditorOverlay extends Overlay {
       for (let s = 0; s < LOADBEARING.modifierSlotsPerProgram; s++) {
         chips.appendChild(arrow());
         const id = program.modifierIds[s] ?? null;
-        chips.appendChild(chip(id, 'modifier', this.scrapAnd(() => world.engine.scrapNode(i, s))));
+        const group = document.createElement('span');
+        group.className = 'slot-group';
+        // Walk a modifier along the chain — §5.5's ordering axis, made operable.
+        group.appendChild(
+          slotButton('‹', s > 0 && id !== null, this.scrapAnd(() => world.engine.swapModifiers(i, s, s - 1))),
+        );
+        group.appendChild(chip(id, 'modifier', this.scrapAnd(() => world.engine.scrapNode(i, s))));
+        group.appendChild(
+          slotButton(
+            '›',
+            s < LOADBEARING.modifierSlotsPerProgram - 1 && id !== null,
+            this.scrapAnd(() => world.engine.swapModifiers(i, s, s + 1)),
+          ),
+        );
+        chips.appendChild(group);
       }
       chips.appendChild(arrow());
       chips.appendChild(
@@ -264,8 +278,9 @@ export class EditorOverlay extends Overlay {
     const hint = document.createElement('div');
     hint.className = 'hint';
     hint.textContent =
+      'Modifiers apply left to right — use ‹ › to reorder them and watch the output multiplier change. ' +
       'Click a node chip to scrap it: refunds its Cycles and grants +4% permanent global output (§5.7). ' +
-      'Order is left-to-right within a row and top-to-bottom across rows. TAB to close.';
+      'Rows evaluate top to bottom. TAB to close.';
     panel.appendChild(hint);
 
     this.el.appendChild(panel);
@@ -309,6 +324,16 @@ function chip(
   el.title = node?.description ?? '';
   el.style.cursor = 'pointer';
   el.addEventListener('click', onScrap);
+  return el;
+}
+
+function slotButton(label: string, enabled: boolean, onClick: () => void): HTMLButtonElement {
+  const el = document.createElement('button');
+  el.className = 'slot-move';
+  el.textContent = label;
+  el.disabled = !enabled;
+  el.title = 'Move this modifier along the chain — order changes the numbers';
+  el.addEventListener('click', onClick);
   return el;
 }
 
