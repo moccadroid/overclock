@@ -19,7 +19,7 @@ import {
 import { MODIFIER_BY_ID, NODE_BY_ID } from '../content/index';
 import type { World } from '../sim/world';
 import { LOADBEARING } from '../sim/tunables';
-import { slotAccepts, type NodeSlot } from '../sim/engine';
+import { inertFields, slotAccepts, type NodeSlot } from '../sim/engine';
 import { renderResults } from './results';
 import { renderPrimer } from './primer';
 
@@ -275,7 +275,7 @@ export class EditorOverlay extends Overlay {
             this.afterChange();
           }),
         );
-        group.appendChild(chip(id, 'modifier', i, s, this));
+        group.appendChild(chip(id, 'modifier', i, s, this, program.actionId));
         group.appendChild(
           slotButton('›', s < LOADBEARING.modifierSlotsPerProgram - 1 && id !== null, () => {
             world.engine.swapModifiers(i, s, s + 1);
@@ -499,6 +499,7 @@ function chip(
   programIndex: number,
   slot: 'trigger' | 'action' | number,
   editor: EditorOverlay,
+  rowActionId: string | null = null,
 ): HTMLElement {
   const el = document.createElement('span');
   el.className = `chip ${kind}${nodeId ? '' : ' empty'}`;
@@ -520,6 +521,24 @@ function chip(
     name.textContent = node ? `${node.name}${mult ? ` ×${mult}` : ''}` : nodeId;
     el.appendChild(name);
     el.title = `${node?.description ?? ''}\n\nDrag to move it anywhere it fits.`;
+
+    // Silent no-ops are the hardest thing to spot in a build: Ricochet on an
+    // Orbital costs Cycles and does nothing. The combination stays legal — the
+    // editor just refuses to let it look like it is working.
+    if (kind === 'modifier') {
+      const dead = inertFields(nodeId, rowActionId);
+      if (dead.length > 0) {
+        el.classList.add('inert');
+        const mark = document.createElement('span');
+        mark.className = 'inert-mark';
+        mark.textContent = 'no effect';
+        el.appendChild(mark);
+        el.title =
+          `${node?.description ?? ''}\n\n` +
+          `NO EFFECT on ${NODE_BY_ID.get(rowActionId ?? '')?.name ?? 'this action'} — ` +
+          `it ignores ${dead.join(', ')}. It still costs Cycles.`;
+      }
+    }
 
     el.draggable = true;
     el.addEventListener('dragstart', (ev) => {

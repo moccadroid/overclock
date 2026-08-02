@@ -564,6 +564,17 @@
   border-color: var(--structure);
   color: #3d5570;
 }
+/* A modifier that does nothing on this row. Legal, priced, and pointless. */
+.chip.inert {
+  border-color: #6b5a2e;
+  color: #7a6a4a;
+}
+.chip .inert-mark {
+  margin-left: 8px;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: #c9a25e;
+}
 .arrow {
   color: #3d5570;
 }

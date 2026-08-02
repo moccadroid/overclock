@@ -540,11 +540,14 @@ export class Renderer {
       if (item.kind !== 'xp') continue;
       if (!this.camera.isVisible(item.x, item.y, 20)) continue;
       const y = item.y + Math.sin(item.age * 3.4 + item.id) * 1.8;
-      g.moveTo(item.x, y - 4)
-        .lineTo(item.x + 3, y)
-        .lineTo(item.x, y + 4)
-        .lineTo(item.x - 3, y)
-        .lineTo(item.x, y - 4);
+      // §7.3 consolidation merges drops into fewer, richer ones — so a merged
+      // shard has to *look* richer, or a big kill reads as loot going missing.
+      const s = pickupScale(item.value);
+      g.moveTo(item.x, y - 4 * s)
+        .lineTo(item.x + 3 * s, y)
+        .lineTo(item.x, y + 4 * s)
+        .lineTo(item.x - 3 * s, y)
+        .lineTo(item.x, y - 4 * s);
       anyXp = true;
     }
     if (anyXp) g.fill({ color: PALETTE.xp, alpha: BAND.inFlight });
@@ -564,11 +567,12 @@ export class Renderer {
         if (!this.camera.isVisible(item.x, item.y, 20)) continue;
         const y = item.y + Math.sin(item.age * 3.4 + item.id) * 1.8;
         const spin = item.age * 1.6 + item.id;
+        const s = pickupScale(item.value);
         for (let i = 0; i < 4; i++) {
           const a = spin + (i / 4) * Math.PI * 2;
-          g.moveTo(item.x + Math.cos(a) * 3, y + Math.sin(a) * 3).lineTo(
-            item.x + Math.cos(a) * 7,
-            y + Math.sin(a) * 7,
+          g.moveTo(item.x + Math.cos(a) * 3 * s, y + Math.sin(a) * 3 * s).lineTo(
+            item.x + Math.cos(a) * 7 * s,
+            y + Math.sin(a) * 7 * s,
           );
         }
         any = true;
@@ -580,7 +584,7 @@ export class Renderer {
         if (item.kind === 'xp' || item.hue !== hue) continue;
         if (!this.camera.isVisible(item.x, item.y, 20)) continue;
         const y = item.y + Math.sin(item.age * 3.4 + item.id) * 1.8;
-        g.circle(item.x, y, 3.2);
+        g.circle(item.x, y, 3.2 * pickupScale(item.value));
         any = true;
       }
       // Band 4, not band 1: §16.2 reserves full luminance for the player alone,
@@ -616,15 +620,40 @@ export class Renderer {
       }
     }
 
+    // Orbitals must not read as enemies. Enemies are *outlined polygons* from a
+    // fixed shape grammar (§10.1); an outlined circle is a Drifter. So orbitals
+    // are drawn as filled four-point stars — a silhouette no enemy owns — riding
+    // a visible orbit track, which also says "this belongs to you".
+    const seenTracks = new Set<number>();
     for (const o of world.orbitals) {
-      if (!this.camera.isVisible(o.x, o.y, o.radius + 20)) continue;
+      const track = Math.round(o.orbitRadius);
+      if (!seenTracks.has(track)) {
+        seenTracks.add(track);
+        g.circle(world.player.x, world.player.y, o.orbitRadius);
+      }
+    }
+    if (seenTracks.size > 0) {
+      g.stroke({ width: 1, color: PALETTE.player, alpha: BAND.structure * 0.9 });
+    }
+
+    for (const o of world.orbitals) {
+      if (!this.camera.isVisible(o.x, o.y, o.radius + 24)) continue;
       const color = HUE_COLOR[o.hue];
       const fade = Math.min(1, o.life / 1.5);
-      // A short arc of its own orbit trails behind it, so the path reads.
-      arcSegment(g, world.player.x, world.player.y, o.orbitRadius, o.angle - 0.5, o.angle);
-      g.stroke({ width: 1, color, alpha: BAND.structure * 1.4 * fade });
-      g.circle(o.x, o.y, o.radius).stroke({ width: 2.5, color, alpha: BAND.entity * fade });
-      g.circle(o.x, o.y, o.radius * 0.4).fill({ color, alpha: BAND.entity * fade });
+      const r = o.radius + 4;
+
+      // Motion trail along the orbit.
+      arcSegment(g, world.player.x, world.player.y, o.orbitRadius, o.angle - 0.42, o.angle);
+      g.stroke({ width: 2, color, alpha: BAND.inFlight * 0.55 * fade });
+
+      // Four-point star: two crossed spikes with a bright core.
+      for (let i = 0; i < 4; i++) {
+        const a = o.angle * 2 + (i / 4) * Math.PI * 2;
+        const long = i % 2 === 0 ? r * 1.5 : r * 0.75;
+        g.moveTo(o.x, o.y).lineTo(o.x + Math.cos(a) * long, o.y + Math.sin(a) * long);
+      }
+      g.stroke({ width: 2.5, color, alpha: BAND.entity * fade });
+      g.circle(o.x, o.y, r * 0.42).fill({ color: PALETTE.player, alpha: BAND.inFlight * fade });
     }
   }
 
@@ -962,6 +991,23 @@ export class Renderer {
       g.stroke({ width: 1, color: 0x8b98a6, alpha: BAND.inFlight });
     }
 
+    // §18.2 — the beat grid, made visible. Quantize pays a bonus for firing on
+    // the beat, which is meaningless if the beat cannot be perceived; until
+    // audio exists the Ring carries it. Shown only when a row actually uses it,
+    // so it is information rather than decoration.
+    if (world.engine.compiled.some((c) => c.live && c.ctx.quantize > 0)) {
+      const step = 60 / TUNABLE.beatsPerMinute / 4;
+      const phase = (world.time % step) / step;
+      const swell = phase < 0.25 ? 1 - phase * 4 : phase > 0.75 ? (phase - 0.75) * 4 : 0;
+      if (swell > 0) {
+        g.circle(p.x, p.y, ringR + 16 + swell * 6).stroke({
+          width: 1.5,
+          color: PALETTE.voltaic,
+          alpha: BAND.inFlight * swell,
+        });
+      }
+    }
+
     // Compass-needle avatar: triangle in a circle, pure white, band 1.
     const angle = Math.atan2(p.dirY, p.dirX);
     polygonPath(g, shapeOutline('triangle', p.x, p.y, TUNABLE.playerRadius, angle));
@@ -1119,6 +1165,12 @@ function desaturate(color: number, amount: number): number {
   const grey = Math.round(0.3 * r + 0.59 * g + 0.11 * b);
   const mixTo = (c: number): number => Math.round(c + (grey - c) * amount);
   return (mixTo(r) << 16) | (mixTo(g) << 8) | mixTo(b);
+}
+
+/** Merged drops carry more value, so they draw bigger. Sub-linear, or a big
+ *  merge would eclipse the player. */
+function pickupScale(value: number): number {
+  return Math.min(2.6, 1 + Math.log2(Math.max(1, value)) * 0.34);
 }
 
 function polygonPath(g: Graphics, points: readonly [number, number][]): void {

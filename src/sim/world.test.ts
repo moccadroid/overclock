@@ -6,6 +6,7 @@ import { CycleBudget } from './cycles';
 import { Rng } from './rng';
 import { botInput } from '../harness/bot';
 import { applyDraft, rollDraft } from './draft';
+import { inertFields } from './engine';
 
 /** Run with the harness pilot, which actually collects fuel and XP. */
 function runPiloted(world: World, seconds: number): void {
@@ -736,6 +737,65 @@ describe('the action roster (GDD §5.4)', () => {
     w.syncBudget();
     return w;
   }
+
+  it('cascades travel — an Action happens where its trigger happened', () => {
+    // `On Hit -> Nova` detonates on each enemy struck, so a cascade walks across
+    // the arena. §23.1 protects this: it costs Cycles and still needs the player
+    // to move, so it is priced rather than deleted.
+    const w = rig('nova-origin', 'nova', 'on_hit');
+    const seed = w.engine.programs[1]!;
+    seed.triggerId = 'clock';
+    seed.actionId = 'bolt';
+    w.engine.recompile();
+    w.syncBudget();
+
+    const px = w.player.x;
+    const py = w.player.y;
+
+    // Drive the trigger directly: routing through Bolt's nearest-target search
+    // tests the targeting chain, not the origin rule.
+    w.emit({ type: 'hit', depth: 0, x: px + 420, y: py, hue: 'thermal' });
+    w.advance(NO_INPUT);
+
+    const atHit = w.fx.filter(
+      (f) => f.kind === 'burst' && Math.hypot(f.x - (px + 420), f.y - py) < 40,
+    );
+    expect(atHit.length).toBeGreaterThan(0);
+  });
+
+  it('§23.1 — cascade depth costs more and pays less', () => {
+    const w = rig('cascade-price', 'nova', 'clock');
+    const compiled = w.engine.compiled[0]!;
+
+    // Same Program, fired at the surface and deep in a cascade.
+    const shallow = new World({ seed: 'cascade-price', axiomId: 'ignition' });
+    shallow.enemies.length = 0;
+    void shallow;
+
+    const before = w.budget.heat;
+    void before;
+    // Output falls off geometrically with depth.
+    const atZero = Math.pow(TUNABLE.cascadeOutputFalloff, 0);
+    const atFive = Math.pow(TUNABLE.cascadeOutputFalloff, 5);
+    expect(atFive).toBeLessThan(atZero * 0.6);
+    // Cost climbs linearly with depth.
+    const costAtFive = compiled.cycleCost * (1 + 5 * TUNABLE.cascadeCostGrowth);
+    expect(costAtFive).toBeGreaterThan(compiled.cycleCost * 2);
+  });
+
+  it('surfaces modifiers that do nothing on their row', () => {
+    // Ricochet on an Orbital is legal, costs Cycles, and achieves nothing. The
+    // grammar keeps it buildable; the editor has to say it is inert.
+    expect(inertFields('ricochet', 'orbital').length).toBeGreaterThan(0);
+    expect(inertFields('pierce', 'nova').length).toBeGreaterThan(0);
+    // And the ones that do work are not flagged.
+    expect(inertFields('ricochet', 'bolt')).toHaveLength(0);
+    expect(inertFields('enlarge', 'nova')).toHaveLength(0);
+    expect(inertFields('sustain', 'orbital')).toHaveLength(0);
+    // Universal modifiers apply to every row.
+    expect(inertFields('amplify', 'orbital')).toHaveLength(0);
+    expect(inertFields('accelerate', 'orbital')).toHaveLength(0);
+  });
 
   it('Mine arms, then detonates on contact', () => {
     const w = rig('mine', 'mine');

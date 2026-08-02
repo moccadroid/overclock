@@ -9,6 +9,7 @@
  */
 import { MODIFIER_BY_ID, ACTION_BY_ID, TRIGGER_BY_ID } from '../content/index';
 import type { FireField, ModifierDef } from './types';
+export type { FireField };
 import { LOADBEARING, SAFETY, TUNABLE } from './tunables';
 
 /** GDD §5.5 Echo: repeats 0.2s later at 70% output. */
@@ -120,6 +121,54 @@ export function expandExecutions(echo: number): Execution[] {
 export type NodeSlot = 'trigger' | 'action' | number;
 
 export type MoveResult = 'ok' | 'empty' | 'wrong-slot' | 'over-capacity';
+
+/**
+ * Which fire-context fields each Action primitive actually reads.
+ *
+ * A modifier that writes a field its Action ignores is a silent no-op — Ricochet
+ * on an Orbital, Pierce on a Nova. The grammar deliberately lets you build those
+ * (pillar 1: combinations stay legal), but the editor has to *say* so, or the
+ * player is left guessing which of their picks are doing nothing.
+ */
+const PRIMITIVE_FIELDS: Record<string, readonly FireField[]> = {
+  projectile: ['output', 'count', 'echo', 'pierce', 'bounce', 'volatile', 'leech'],
+  burst: ['output', 'count', 'echo', 'area', 'leech'],
+  chain: ['output', 'count', 'echo', 'leech'],
+  zone: ['output', 'count', 'echo', 'area', 'duration', 'leech'],
+  vortex: ['output', 'count', 'echo', 'area', 'duration', 'leech'],
+  mine: ['output', 'count', 'echo', 'area', 'duration', 'leech'],
+  delayed: ['output', 'count', 'echo', 'area', 'leech'],
+  beam: ['output', 'count', 'echo', 'area', 'leech'],
+  orbital: ['output', 'count', 'echo', 'area', 'duration', 'leech'],
+  buff: ['count', 'echo', 'duration'],
+  knockback: ['output', 'count', 'echo', 'area', 'leech'],
+  convert: ['count', 'echo'],
+};
+
+/** Fields that apply to the row itself rather than to the Action's shape. */
+const UNIVERSAL_FIELDS: readonly FireField[] = ['rate', 'quantize', 'attune', 'overdrive', 'resonate', 'ground'];
+
+/**
+ * Does this modifier do anything on a row ending in this Action? Returns the
+ * fields it writes that the Action ignores.
+ */
+export function inertFields(modifierId: string, actionId: string | null): FireField[] {
+  const mod = MODIFIER_BY_ID.get(modifierId);
+  if (!mod) return [];
+  const action = actionId ? ACTION_BY_ID.get(actionId) : undefined;
+  if (!action) return [];
+  const supported = PRIMITIVE_FIELDS[action.primitive] ?? [];
+  const dead: FireField[] = [];
+  for (const op of mod.ops) {
+    if (UNIVERSAL_FIELDS.includes(op.target)) continue;
+    if (!supported.includes(op.target) && !dead.includes(op.target)) dead.push(op.target);
+  }
+  // A modifier counts as inert only if *nothing* it writes lands.
+  const writes = mod.ops.filter((op) => !UNIVERSAL_FIELDS.includes(op.target)).length;
+  return dead.length > 0 && dead.length === new Set(mod.ops.map((o) => o.target)).size && writes > 0
+    ? dead
+    : [];
+}
 
 /** Slots are typed — this is what stops a Modifier landing in the Action slot. */
 export function slotAccepts(slot: NodeSlot, nodeId: string): boolean {

@@ -92,6 +92,19 @@ export const TUNABLE = {
   overdriveHeatPerFire: 1.5,
   /** Volatile detonation radius. */
   volatileRadius: 90,
+  /**
+   * Cascade pricing. §23.1: a power break that still costs Cycles and still
+   * requires the player to move is protected content — answer it "by pricing,
+   * never by deleting the interaction". So a cascade that walks across the
+   * arena stays possible, and simply gets more expensive and less rewarding the
+   * further it travels from the thing that started it.
+   *
+   * Output falls off geometrically with depth; Cycle cost climbs linearly. At
+   * depth 5 that is roughly 44% output for 2.25x the price, which throttles a
+   * runaway without ever refusing to run it.
+   */
+  cascadeOutputFalloff: 0.85,
+  cascadeCostGrowth: 0.25,
   /** Orbitals stack, so they need a ceiling and a per-enemy hit cadence. */
   maxOrbitals: 14,
   orbitalHitCooldown: 0.45,
@@ -136,8 +149,14 @@ export const TUNABLE = {
    * dumping fixed waves raised kills per run from ~3.9k to ~26k, so a curve
    * built for the old volume delivered a draft every ten seconds.
    */
-  xpBase: 16,
-  xpGrowth: 1.42,
+  /**
+   * Retuned after §5.4's origin fix. Actions now originate on the avatar rather
+   * than wherever the triggering event happened, which is a large nerf to
+   * cascade builds — `On Hit -> Bolt` used to spawn its projectile *at the
+   * enemy*, granting free range on every rebound.
+   */
+  xpBase: 11,
+  xpGrowth: 1.34,
   xpPerShard: 1,
   draftCards: 3,
   rerollsPerRun: 2,

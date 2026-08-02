@@ -694,7 +694,8 @@ export class World {
       this.engine.lastFired[index] = this.time;
     }
 
-    this.budget.spend(compiled.cycleCost);
+    // §23.1 pricing: the deeper into a cascade this fire is, the more it costs.
+    this.budget.spend(compiled.cycleCost * (1 + depth * TUNABLE.cascadeCostGrowth));
 
     if (this.budget.rollMisfire(this.rng)) {
       this.stats.misfires++;
@@ -785,6 +786,12 @@ export class World {
     // clean answer to adaptive resistance for a mono-hue engine.
     const hue = compiled.ctx.attune > 0 ? this.fullestHue() : def.hue;
 
+    // Actions happen where the triggering event happened, unless they say
+    // otherwise — see ActionDef.origin. This is what lets a cascade travel.
+    const atPlayer = def.origin === 'player';
+    const ox = atPlayer ? this.player.x : x;
+    const oy = atPlayer ? this.player.y : y;
+
     for (let n = 0; n < instances; n++) {
       // §7.2 — fuelled fire consumes 1 fuel of the Action's hue for +50% output.
       let fuelBonus = 1;
@@ -793,20 +800,24 @@ export class World {
         this.fuelBurnTick[hue] += 1;
         fuelBonus = 1 + TUNABLE.fueledFireOutputBonus;
       }
-      const output = compiled.ctx.output * outputMul * fuelBonus * this.engine.globalOutput;
+      // ...and pays less. Together these let a cascade run wild near its source
+      // and run out of steam as it travels, rather than being cut off.
+      const depthFalloff = Math.pow(TUNABLE.cascadeOutputFalloff, depth);
+      const output =
+        compiled.ctx.output * outputMul * fuelBonus * depthFalloff * this.engine.globalOutput;
       const damage = def.damage * output;
       const corrupted =
         this.budget.corruptionChance > 0 && this.rng.chance(this.budget.corruptionChance);
 
       switch (def.primitive) {
         case 'projectile':
-          this.spawnProjectile(def.id, damage, depth, index, x, y, compiled.ctx, corrupted, hue);
+          this.spawnProjectile(def.id, damage, depth, index, ox, oy, compiled.ctx, corrupted, hue);
           break;
         case 'burst':
-          this.doBurst(def.id, damage, depth, index, x, y, compiled.ctx.area, hue, compiled.ctx.leech);
+          this.doBurst(def.id, damage, depth, index, ox, oy, compiled.ctx.area, hue, compiled.ctx.leech);
           break;
         case 'chain':
-          this.doChain(def.id, damage, depth, index, x, y, hue, compiled.ctx.leech);
+          this.doChain(def.id, damage, depth, index, ox, oy, hue, compiled.ctx.leech);
           break;
         case 'zone':
         case 'vortex':
@@ -815,8 +826,8 @@ export class World {
             damage,
             depth,
             index,
-            x,
-            y,
+            ox,
+            oy,
             compiled.ctx.area,
             compiled.ctx.duration,
             hue,
@@ -826,10 +837,10 @@ export class World {
           this.dropMine(def, damage, depth, index, compiled.ctx, hue);
           break;
         case 'delayed':
-          this.markRupture(def, damage, depth, index, x, y, compiled.ctx, hue);
+          this.markRupture(def, damage, depth, index, ox, oy, compiled.ctx, hue);
           break;
         case 'beam':
-          this.fireBeam(def, damage, depth, index, x, y, compiled.ctx, hue);
+          this.fireBeam(def, damage, depth, index, ox, oy, compiled.ctx, hue);
           break;
         case 'orbital':
           this.addOrbital(def, damage, depth, index, compiled.ctx, hue);
@@ -838,7 +849,7 @@ export class World {
           this.applySurge(def, compiled.ctx);
           break;
         case 'knockback':
-          this.doShove(def, damage, depth, index, x, y, compiled.ctx, hue);
+          this.doShove(def, damage, depth, index, ox, oy, compiled.ctx, hue);
           break;
       }
     }

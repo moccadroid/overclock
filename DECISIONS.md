@@ -953,6 +953,67 @@ and those are already batched.
 
 ---
 
+## D-43 · SETTLED · Cascades travel, and are priced for it
+
+`On Hit -> Nova` detonates on each enemy struck, so a cascade walks across the
+arena rather than staying on the avatar. Reported as possibly-a-bug, and my first
+fix was to anchor every Action to the player, which does match §5.4's "radial
+burst around avatar".
+
+That was the wrong call and the design says so. §23.1: a power break that still
+costs Cycles and still requires the player to move is **protected content**, to
+be answered "by *pricing*, or by *pressure* — never by deleting the interaction."
+Anchoring to the player deleted it. Measured, it also cost 84% of the game's
+kills, because `On Hit -> Bolt` had been spawning its projectile at the enemy.
+
+Restored, with the cascade priced by depth instead:
+
+- **Output falls off geometrically** — `0.85^depth`. At depth 5 a fire pays 44%.
+- **Cycle cost climbs linearly** — `×(1 + 0.25 × depth)`. At depth 5 it costs
+  2.25×, which turns a deep cascade into Heat.
+
+So a cascade runs wild near its source and runs out of steam as it travels. The
+reported build now reaches depth 12, draws 119% of capacity, and leaves 47
+enemies alive after two minutes where it used to clear the screen.
+
+Actions that are meaningless anywhere but on the avatar — Mine, Orbital, Surge —
+anchor there regardless, via an explicit `origin` field.
+
+---
+
+## D-44 · SETTLED · Silent no-ops are now labelled
+
+Reported: "ricochet on orbital? ricochet + pierce? it's hard to know if these
+combos actually make sense."
+
+They often don't: a modifier writing a field its Action ignores costs Cycles and
+achieves nothing. Restricting the pairings would fight pillar 1 — combinations
+stay legal — so the editor names them instead. Each Action primitive declares
+which fire-context fields it reads, and a modifier whose every effect is ignored
+is drawn amber with **no effect**, with a tooltip saying what is being ignored
+and that it still costs Cycles.
+
+Universal modifiers (Amplify, Accelerate, Overdrive, Quantize, Attune, and the
+topology pair) are never flagged, since they act on the row rather than the
+Action's shape.
+
+---
+
+## D-45 · SETTLED · Three readability fixes from the same session
+
+- **Orbitals looked like enemies.** An outlined circle *is* a Drifter under the
+  §10.1 shape grammar. They are now filled four-point stars — a silhouette no
+  enemy owns — on a visible orbit track, which also reads as "yours".
+- **Loot appeared to vanish on big kills.** §7.3 consolidation was merging drops
+  correctly, but a merged pickup drew at the same size as a single one, so value
+  was preserved while the *evidence* of it was not. Pickups now scale
+  sub-linearly with value.
+- **The beat grid was invisible**, which made Quantize refer to something the
+  player could not perceive. Until audio exists the Ring carries the pulse, and
+  only when a row actually uses Quantize.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

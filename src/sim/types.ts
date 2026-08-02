@@ -164,6 +164,21 @@ export interface ActionDef extends PoolWeighted {
    * the event grammar that makes cascades work.
    */
   cooldown?: number;
+  /**
+   * Where the Action happens. Default is `event` — wherever the thing that
+   * triggered it happened — so `On Hit -> Nova` detonates on each enemy struck
+   * and cascades walk across the arena.
+   *
+   * §5.4 says Nova is "around avatar", and anchoring everything to the player
+   * does match the letter of it. But that *deletes the interaction*, and §23.1
+   * is explicit: a power break that still costs Cycles and still requires the
+   * player to move is protected content, to be answered "by pricing, never by
+   * deleting". So the cascade stays and the depth pricing pays for it. Actions
+   * that are meaningless anywhere but on the avatar (Mine, Orbital, Surge)
+   * anchor there regardless.
+   */
+  origin?: 'player' | 'event';
+
   /** §7.4 — set when `primitive` is `convert`. */
   convert?: ConvertSpec;
 
