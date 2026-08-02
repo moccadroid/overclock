@@ -116,7 +116,12 @@ void main(void) {
     // more. Reinhard keeps the bright core bright and its colour intact while
     // letting the total roll off, so a screen full of light stays a screen full
     // of *lights*.
-    light = light / (0.55 + light * 0.8);
+    // Plain Reinhard. The previous curve divided by 0.55, which *amplified*
+    // dim light by nearly 2x — so the long soft tail of a big source got pushed
+    // up to the same value as its core, and a Field or a Nova rendered as a flat
+    // disc with a hard edge instead of as a glow. Dark values must pass through
+    // untouched; only the bright end may roll off.
+    light = light / (1.0 + light);
 
     // Surfaces catch it, scaled by their own brightness. A dim grid line near a
     // detonation lifts a little; a bright stroke near one blows out. Multiplying

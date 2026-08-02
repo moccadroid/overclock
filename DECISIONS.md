@@ -1956,6 +1956,64 @@ a bright readout would be lost in it.
 
 ---
 
+## D-96 · SETTLED · There is no saturation stage, and there must never be one
+
+The volume kept rising. Three separate fixes had been attempted and every one of
+them was a *guess* — a trim here, a smaller gain there, each one an estimate of
+how much loudness some change had added. Guesses do not compose: add a layer, add
+an occasion chord, and every previous estimate is wrong again.
+
+The culprit was the master waveshaper. §16.7's ladder wants Overheat to sound
+like the engine coming apart, and a soft clip is the obvious way to do it. It is
+also a trap: the curve `((1+k)x)/(1+k|x|)` has a **small-signal slope of 1+k**,
+so at a useful drive it applies twenty-plus times gain to quiet content. It does
+not add grit, it turns the game up — at the single most stressful moment in a run.
+
+A limiter cannot save it. Limiters hold the *peak*; saturation raises RMS while
+leaving the peak alone, and RMS is what the ear calls loudness. Measured after
+adding one: still 1.9x during Overheat.
+
+So the whole path is gone. What remains:
+
+- **A limiter that is always working.** Driven 12x in and trimmed back after, so
+  it compresses quiet passages as well as loud ones — a threshold the quiet
+  passages never reach only levels the loud ones, which leaves the loud ones
+  louder. The trim is calibrated by measurement, not by arithmetic.
+- **Overheat says its piece without touching level.** The chord resolves down a
+  fourth, the stall drops the music bus into a hole, and the visual degradation
+  ladder does the rest. Both are unmistakable; neither is a gain stage.
+
+Measured across the three cases that matter:
+
+| | RMS | peak |
+|---|---|---|
+| idle | 0.0624 | 0.448 |
+| busy, 135 EPS | 0.0607 | 0.293 |
+| overheating | 0.0631 | 0.394 |
+
+Flat. Busy is fractionally *quieter* than idle.
+
+The file now carries a comment saying why there is no distortion here and what
+the only acceptable future form would be — a filter, a detune, a dropout, a
+bitcrush at fixed gain. Never a gain stage wearing a distortion costume.
+
+## D-97 · BUG · Big lights rendered as flat discs
+
+"The lighting goes wild, but only for some of the effects" — the effects in
+question being the ones with large radii: a Field, a Nova detonation.
+
+The tone map was `light / (0.55 + 0.8 * light)`, which *amplifies* dim values by
+nearly 2x. So the long soft tail of a big source got pushed up to nearly the same
+value as its core, and the whole thing rendered as a solid disc with a hard edge.
+Plain Reinhard — `light / (1 + light)` — leaves dark values untouched and only
+rolls off the bright end, which is the entire point of the curve.
+
+The falloff texture also went from `(1-r)^2.2` to `(1-r)^3.2`. At small radii the
+exponent barely matters; at the 300+ units of a detonation it is the difference
+between a lamp and a painted circle.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

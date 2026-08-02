@@ -167,7 +167,7 @@ export const VIEW_EFFECTS: ViewEffect[] = [
     id: 'lighting',
     name: 'Lighting',
     note: 'everything emits. Shots light the grid they fly over; a Nova floods the room.',
-    values: { lit: 0.22, haze: 0.4, glow: 1.15 },
+    values: { lit: 0.4, haze: 0.7, glow: 1.15 },
   },
   {
     id: 'bloom',

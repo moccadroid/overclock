@@ -66,22 +66,30 @@ const HUE_COLOUR: Record<Hue, number> = { thermal: 1, voltaic: 1.45, void: 0.7 }
 const PHRASE_BARS = 16;
 
 /**
- * Soft clip. 0 is transparent, 1 is coming apart.
+ * **There is no saturation stage in this graph, and there must never be one.**
  *
- * Saturation raises perceived loudness far less than gain does while raising
- * *perceived aggression* far more, which is exactly the trade a game that gets
- * busier should make.
+ * §16.7's degradation ladder wants Overheat to sound like the engine coming
+ * apart, and a waveshaper is the obvious way to do it. It is also a trap, and it
+ * cost several rounds to learn why: a soft-clip curve has a small-signal slope
+ * of `1 + k`, so at any useful drive it applies twenty-plus times gain to quiet
+ * content. It does not merely "add grit" — it turns the game up, by a lot, at
+ * the single most stressful moment in a run.
+ *
+ * A limiter cannot save it either. Limiters hold the *peak*; saturation raises
+ * RMS while leaving the peak alone, and RMS is what the ear calls loudness. Two
+ * different compensation schemes were tried and both were guesses that drifted
+ * the moment anything else changed.
+ *
+ * So the whole path is gone. Overheat degrades *visually* — that ladder is
+ * already built and costs nothing — and the audio says it by going wrong in
+ * pitch and rhythm instead: the Overheat chord resolves down a fourth, and the
+ * stall drops the music bus into a hole. Both are unmistakable and neither
+ * touches the level.
+ *
+ * If a future change wants dirt here, the only acceptable form is one that
+ * cannot raise RMS: a filter, a detune, a dropout, a bitcrush at fixed gain.
+ * Never a gain stage wearing a distortion costume.
  */
-function shape(node: WaveShaperNode, amount: number): void {
-  const k = amount * 40;
-  const n = 256;
-  const curve = new Float32Array(n);
-  for (let i = 0; i < n; i++) {
-    const x = (i / (n - 1)) * 2 - 1;
-    curve[i] = k === 0 ? x : ((1 + k) * x) / (1 + k * Math.abs(x));
-  }
-  node.curve = curve;
-}
 
 export interface AudioState {
   /** 0..1 — how busy the engine is, from EPS. Drives the arrangement. */
@@ -104,7 +112,25 @@ export class Audio {
   /** Bass, pad, hats. Ducked on every kick. */
   private musicBus!: GainNode;
   private engineBus!: GainNode;
-  private shaper!: WaveShaperNode;
+  /**
+   * The guarantee. GDD §18.4.
+   *
+   * Every previous attempt at "the music must not get louder" was a
+   * *correction*: a trim here, a smaller gain there, each one a guess about how
+   * much loudness some change had added. Guesses do not compose. Add a layer,
+   * add a voice, add an occasion chord, and the guesses are wrong again — which
+   * is exactly what kept happening.
+   *
+   * A compressor is not a correction, it is a control loop. Threshold well below
+   * the working level and a high ratio means the output level is set by the
+   * compressor rather than by how many things happen to be playing: forty voices
+   * and four voices arrive at the same loudness, because that is the one job
+   * this device has. Nothing downstream of it can make the game louder, no
+   * matter what anyone adds later.
+   */
+  private limiter!: DynamicsCompressorNode;
+  private limiterDrive!: GainNode;
+  private limiterTrim!: GainNode;
   private lowShelf!: BiquadFilterNode;
   /** Automated across each 16-bar phrase - the genre's build and release. */
   private musicFilter!: BiquadFilterNode;
@@ -124,8 +150,7 @@ export class Audio {
    * climbs here: saturation on the music bus, plus a headroom trim that offsets
    * the extra voices a busy arrangement adds. Same loudness, more teeth.
    */
-  private musicDrive!: WaveShaperNode;
-  private musicTrim!: GainNode;
+
 
   private state: AudioState = {
     intensity: 0,
@@ -150,7 +175,6 @@ export class Audio {
   private lastBassHz = 0;
   private lastLeadHz = 0;
   private lastHover = 0;
-  private masterDrive = 0;
   /**
    * §18.1 — one part per live Program. This is the arrangement, and it is
    * literally the player's Engine. See parts.ts.
@@ -189,10 +213,46 @@ export class Audio {
     this.lowShelf.frequency.value = 110;
     this.lowShelf.gain.value = 5;
 
-    this.shaper = ctx.createWaveShaper();
-    this.setDrive(0);
+    // Deliberately aggressive. This is a leveller, not a mastering compressor —
+    // musical transparency is worth nothing next to the promise that the volume
+    // never rises.
+    this.limiter = ctx.createDynamicsCompressor();
+    this.limiter.threshold.value = -34;
+    this.limiter.knee.value = 4;
+    this.limiter.ratio.value = 20;
+    this.limiter.attack.value = 0.003;
+    this.limiter.release.value = 0.12;
 
-    this.lowShelf.connect(this.shaper).connect(this.master).connect(ctx.destination);
+    // Driven into the limiter rather than merely caught by it, then brought
+    // straight back down.
+    //
+    // A threshold the quiet passages never reach only levels the loud ones,
+    // which leaves the loud ones louder — measured at 2.5x. Pushing everything
+    // above the threshold means the compressor is always working, so quiet and
+    // loud both leave at the level *it* decides rather than at the level the
+    // arrangement happened to produce.
+    //
+    // The trim after it is not optional and not a guess: driving 12x without
+    // taking 12x back out is simply turning the game up, which is the exact
+    // failure this whole graph exists to prevent. The pair has to be read
+    // together — drive in, trim out, limiter deciding what happens between.
+    this.limiterDrive = ctx.createGain();
+    this.limiterDrive.gain.value = 12;
+    this.limiterTrim = ctx.createGain();
+    // Calibrated by measurement, not by arithmetic: with the limiter working
+    // this hard the drive is not what sets the output, so `1/drive` is the
+    // wrong number and produced a game nobody could hear.
+    this.limiterTrim.gain.value = 0.75;
+
+    // Order matters. The drive sits *after* the shaper — feeding 12x into a
+    // waveshaper clips against the ends of its curve, which is hard distortion
+    // rather than the soft saturation the curve exists to provide.
+    this.lowShelf
+      .connect(this.limiterDrive)
+      .connect(this.limiter)
+      .connect(this.limiterTrim)
+      .connect(this.master)
+      .connect(ctx.destination);
 
     this.punchBus = ctx.createGain();
     this.punchBus.gain.value = 0.95;
@@ -204,16 +264,9 @@ export class Audio {
     this.musicFilter.Q.value = 1.1;
     this.musicFilter.connect(this.lowShelf);
 
-    this.musicDrive = ctx.createWaveShaper();
-    this.musicDrive.connect(this.musicFilter);
-
-    this.musicTrim = ctx.createGain();
-    this.musicTrim.gain.value = 1;
-    this.musicTrim.connect(this.musicDrive);
-
     this.musicBus = ctx.createGain();
     this.musicBus.gain.value = 0.9;
-    this.musicBus.connect(this.musicTrim);
+    this.musicBus.connect(this.musicFilter);
 
     // Dotted eighth is the classic dub delay: it lands between the beats rather
     // than on them, so the echoes read as counter-rhythm instead of as a
@@ -264,9 +317,11 @@ export class Audio {
    */
   private applyMaster(): void {
     if (!this.ctx) return;
-    const compensation = 1 - this.masterDrive * 0.42;
+    // No drive compensation here any more: the limiter upstream already holds
+    // the level, and stacking a guess on top of a control loop is how the
+    // volume ended up moving in the first place.
     this.master.gain.setTargetAtTime(
-      this.muted ? 0 : this.volume * compensation,
+      this.muted ? 0 : this.volume,
       this.ctx.currentTime,
       0.05,
     );
@@ -391,16 +446,6 @@ export class Audio {
 
     // Busier means dirtier, not louder. Drive climbs with intensity while the
     // trim comes down to pay for the layers that intensity added.
-    const drive = this.smoothed * 0.55 + state.meltdown * 0.35;
-    shape(this.musicDrive, drive);
-    // Same rule as the master: the trim pays for both the saturation and the
-    // extra layers a busy arrangement brings in.
-    this.musicTrim.gain.setTargetAtTime(
-      (1 - this.smoothed * 0.3) * (1 - drive * 0.35),
-      this.ctx.currentTime,
-      0.4,
-    );
-    this.setDrive(Math.max(state.heat * 0.6, state.meltdown * 0.45));
     this.musicBus.gain.value = state.stalled ? 0.12 : 0.9;
 
     for (const cue of cues) {
@@ -700,11 +745,5 @@ export class Audio {
     return semiHz(tones[clamped % tones.length]! + 24 + octave * 12);
   }
 
-  /** Soft clip. 0 is transparent; 1 is an engine coming apart. */
-  private setDrive(amount: number): void {
-    if (amount === this.masterDrive) return;
-    this.masterDrive = amount;
-    shape(this.shaper, amount);
-    this.applyMaster();
-  }
+
 }

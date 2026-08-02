@@ -58,7 +58,10 @@ function radialTexture(): Texture {
       const dx = (x - half) / half;
       const dy = (y - half) / half;
       const r = Math.min(1, Math.sqrt(dx * dx + dy * dy));
-      const v = Math.pow(1 - r, 2.2);
+      // A sharper core and a longer tail than a plain falloff. At small radii
+      // the exponent barely matters; at the 300+ unit radius of a Field or a
+      // detonation it is the difference between a lamp and a painted circle.
+      const v = Math.pow(1 - r, 3.2);
       const i = (y * size + x) * 4;
       image.data[i] = 255;
       image.data[i + 1] = 255;
