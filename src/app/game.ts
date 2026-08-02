@@ -91,7 +91,7 @@ export class Game {
         const url = new URL(location.href);
         url.searchParams.set('seed', `run-${Math.floor(Math.random() * 1e9).toString(36)}`);
         location.href = url.toString();
-      } else if (cmd === 'library') {
+      } else if (cmd === 'library' || cmd === 'pause') {
         location.href = location.pathname;
       }
       return;

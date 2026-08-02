@@ -19,6 +19,7 @@ import {
 import { MODIFIER_BY_ID, NODE_BY_ID } from '../content/index';
 import type { World } from '../sim/world';
 import { LOADBEARING, TUNABLE } from '../sim/tunables';
+import { ACTION_BY_ID } from '../content/index';
 import { inertFields, slotAccepts, type NodeSlot } from '../sim/engine';
 import { renderResults } from './results';
 import type { Library } from '../meta/profile';
@@ -154,6 +155,42 @@ export class DraftOverlay extends Overlay {
   }
 }
 
+/**
+ * A reading line for whatever the cursor is over.
+ *
+ * The browser's own tooltip is a white box in a system font that appears after a
+ * pause somewhere near the pointer. Every one of those properties is wrong here:
+ * it breaks §16's document, it is slow enough that you stop asking, and it moves.
+ * A fixed line at the foot of the panel is instant, in-world, and always in the
+ * same place, so reading becomes a glance rather than a hunt.
+ *
+ * One delegated listener rather than a handler per element — the editor rebuilds
+ * its whole DOM on every change, and per-node listeners would be re-bound for
+ * dozens of chips each time.
+ */
+export function inspector(scope: HTMLElement): HTMLElement {
+  const el = document.createElement('div');
+  el.className = 'inspector';
+  el.textContent = '';
+
+  const show = (ev: Event): void => {
+    const hit = (ev.target as HTMLElement | null)?.closest<HTMLElement>('[data-detail]');
+    if (hit?.dataset.detail) el.textContent = hit.dataset.detail;
+  };
+  scope.addEventListener('mouseover', show);
+  scope.addEventListener('focusin', show);
+  scope.addEventListener('mouseleave', () => {
+    el.textContent = '';
+  });
+  return el;
+}
+
+/** Damage numbers are for comparing rows, not for accounting. Two digits is plenty. */
+function fmt(n: number): string {
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return n >= 10 ? n.toFixed(0) : n.toFixed(1);
+}
+
 function previewSlot(world: World, card: DraftCard): string {
   if (card.kind === 'capacity') return `Cycles ${world.budget.capacity} -> ${world.budget.capacity + card.amount}`;
   if (card.kind === 'program_slot') {
@@ -234,10 +271,10 @@ export class EditorOverlay extends Overlay {
     head.innerHTML =
       `<span>PIPELINE <span class="helphint">H for what these numbers mean</span></span>` +
       `<span>` +
-      `<span title="Cycles permanently held by your live rows, out of the Cycles you generate each second">` +
+      `<span data-detail="Cycles permanently held by your live rows, out of the Cycles you generate each second.">` +
       `RESERVED ${world.engine.staticLoad.toFixed(1)} of ${world.budget.capacity} CYCLES/s</span>` +
-      `   <span title="Overdrawing your Cycles turns the shortfall into Heat">HEAT ${world.budget.heat.toFixed(0)}</span>` +
-      `   <span title="Permanent output bonus earned by scrapping nodes">SCRAP +${(world.engine.scrapStacks * 4).toFixed(0)}%</span>` +
+      `   <span data-detail="Overdrawing your Cycles turns the shortfall into Heat.">HEAT ${world.budget.heat.toFixed(0)}</span>` +
+      `   <span data-detail="Permanent output bonus earned by scrapping nodes.">SCRAP +${(world.engine.scrapStacks * 4).toFixed(0)}%</span>` +
       `   KERNEL ×${world.engine.kernel.toFixed(2)}</span>`;
     panel.appendChild(head);
 
@@ -295,16 +332,34 @@ export class EditorOverlay extends Overlay {
         // which is the thing you actually scan for; the numbers are detail.
         const shots = Math.round(compiled.ctx.count) * compiled.executions.length;
         const filled = Math.max(0, Math.min(8, Math.round(share / 12.5)));
+
+        // "×1.24 output" is a number you cannot act on without knowing what it
+        // multiplies. The damage one hit actually lands is the question being
+        // asked, so answer it: base × chain × every global multiplier.
+        const def = program.actionId ? ACTION_BY_ID.get(program.actionId) : null;
+        const perHit =
+          (def?.damage ?? 0) *
+          compiled.ctx.output *
+          world.engine.globalOutput *
+          (1 + world.bonuses.power);
+        const volley = perHit * shots;
+
         stats.innerHTML =
           `<span class="share"><span class="on">${'▮'.repeat(filled)}</span>` +
           `<span class="off">${'▮'.repeat(8 - filled)}</span></span>` +
           `<span class="pct">${share.toFixed(0)}%</span>` +
-          `<span class="detail">${compiled.staticCost.toFixed(0)}c · ×${compiled.ctx.output.toFixed(2)} · ${shots}×</span>`;
-        stats.title =
-          `${compiled.staticCost.toFixed(1)} Cycles reserved while this row is live\n` +
-          `×${compiled.ctx.output.toFixed(2)} damage multiplier from this modifier chain\n` +
-          `${shots} instances of the Action per trigger\n` +
-          `${share.toFixed(0)}% of your engine's total events per second`;
+          `<span class="detail">${compiled.staticCost.toFixed(0)}c · ` +
+          (perHit > 0
+            ? `<span class="dmg">${fmt(perHit)}</span> dmg${shots > 1 ? ` ×${shots}` : ''}`
+            : `no damage`) +
+          `</span>`;
+        stats.dataset.detail =
+          (perHit > 0
+            ? `${fmt(perHit)} damage per hit` +
+              (shots > 1 ? `, ${shots} hits per trigger = ${fmt(volley)} per fire.  ` : '.  ')
+            : `${def?.name ?? 'This Action'} deals no damage — it changes the run some other way.  `) +
+          `Reserves ${compiled.staticCost.toFixed(1)} Cycles/s while live. ` +
+          `Producing ${share.toFixed(0)}% of your engine's events.`;
       } else {
         stats.innerHTML = `<span class="needs">needs a ${
           !program.triggerId && !program.actionId
@@ -351,6 +406,7 @@ export class EditorOverlay extends Overlay {
     }
 
     panel.appendChild(this.chassisStrip(world));
+    panel.appendChild(inspector(panel));
 
     const hint = document.createElement('div');
     hint.className = 'hint';
@@ -446,7 +502,7 @@ export class EditorOverlay extends Overlay {
       delta: string,
       title: string,
     ): string =>
-      `<span class="stat" title="${title}"><span class="lbl">${label}</span>` +
+      `<span class="stat" data-detail="${title}"><span class="lbl">${label}</span>` +
       `<span class="val">${value}</span>` +
       (delta ? `<span class="delta">${delta}</span>` : '') +
       `</span>`;
@@ -587,7 +643,7 @@ function chip(
     const name = document.createElement('span');
     name.textContent = node ? `${node.name}${mult ? ` ×${mult}` : ''}` : nodeId;
     el.appendChild(name);
-    el.title = `${node?.description ?? ''}\n\nDrag to move it anywhere it fits.`;
+    el.dataset.detail = `${node?.description ?? ''}  Drag it to any slot that fits.`;
 
     // Silent no-ops are the hardest thing to spot in a build: Ricochet on an
     // Orbital costs Cycles and does nothing. The combination stays legal — the
@@ -600,8 +656,7 @@ function chip(
         mark.className = 'inert-mark';
         mark.textContent = 'no effect';
         el.appendChild(mark);
-        el.title =
-          `${node?.description ?? ''}\n\n` +
+        el.dataset.detail =
           `NO EFFECT on ${NODE_BY_ID.get(rowActionId ?? '')?.name ?? 'this action'} — ` +
           `it ignores ${dead.join(', ')}. It still costs Cycles.`;
       }
@@ -622,7 +677,7 @@ function chip(
     const kill = document.createElement('button');
     kill.className = 'chip-scrap';
     kill.textContent = '×';
-    kill.title = 'Scrap this node (asks for confirmation)';
+    kill.dataset.detail = 'Scrap this node — permanent, and worth +4% global output.';
     kill.addEventListener('click', (ev) => {
       ev.stopPropagation();
       editor.requestScrap(programIndex, slot);
@@ -653,7 +708,7 @@ function slotButton(label: string, enabled: boolean, onClick: () => void): HTMLB
   el.className = 'slot-move';
   el.textContent = label;
   el.disabled = !enabled;
-  el.title = 'Move this modifier along the chain — order changes the numbers';
+  el.dataset.detail = 'Move this modifier along the chain — order changes the numbers.';
   el.addEventListener('click', onClick);
   return el;
 }

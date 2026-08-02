@@ -13,6 +13,41 @@
   --signal: #ff2a3c;
 }
 
+/* The platform scrollbar is a light-grey slab that punches a hole in §16's
+   document. Restyled to a thin phosphor rail — visible enough to say "there is
+   more below", quiet enough to stay inside the drawing. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2f4258 transparent;
+}
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #2f4258;
+  border-radius: 0;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #46586e;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Hover reading, in-world and in a fixed place. See `inspector` in overlays. */
+.inspector {
+  min-height: 1.5em;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #1d3244;
+  color: #8ba3bd;
+  line-height: 1.5;
+}
+
 #ui {
   position: absolute;
   inset: 0;
@@ -871,12 +906,22 @@
 }
 
 /* §14 — Results. The run-trace chart is the hero, everything else annotates it. */
+/* The panel itself does not scroll — only the middle does. The way out of a run
+   must never be something you have to scroll down to find. */
 .results-panel {
   width: min(1000px, 95vw) !important;
   max-height: 92vh;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   white-space: normal !important;
   line-height: 1.6 !important;
+}
+.results-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 6px;
 }
 .results-panel .trace {
   display: block;
@@ -1109,7 +1154,7 @@
   color: #4fbf87;
 }
 .lib-name {
-  flex: 0 0 148px;
+  flex: 0 0 130px;
   color: #46586e;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1126,7 +1171,7 @@
   white-space: nowrap;
 }
 .lib-unlock {
-  flex: 0 0 120px;
+  flex: 0 0 156px;
   color: #6a5730;
   text-align: right;
   overflow: hidden;

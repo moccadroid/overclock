@@ -120,6 +120,21 @@ export const TUNABLE = {
    * bug to fix rather than a power break to protect.
    */
   shoveBudgetPerSecond: 320,
+  /**
+   * §17.1 — "every avoidable hit is preceded by a drawn line." A Lancer beam had
+   * no length limit, so a Lancer you could not see could kill you along a line
+   * you were never shown. The range is now barely past its standoff: if it can
+   * hit you, it is close enough to be on screen and therefore dodgeable.
+   */
+  lancerBeamRange: 900,
+  /**
+   * And a §23.1 guard on the other side of the same problem. Lancers arriving in
+   * numbers turned "the reason to keep moving" into an unavoidable crossfire —
+   * measured at 88% of a whole run's damage. Only this many may charge at once;
+   * the rest wait their turn, so the arena never has more telegraphs than a
+   * player can read.
+   */
+  maxChargingLancers: 2,
   /** §18.2 — the beat grid. Quantize snaps to it; audio will lock to it later. */
   beatsPerMinute: 110,
   quantizeBonus: 0.25,

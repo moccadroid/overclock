@@ -542,6 +542,8 @@ export class World {
   private readonly flowSample = { x: 0, y: 0 };
   private nextId = 1;
   private eventsThisTick = 0;
+  /** §23.1 — Lancers currently mid-telegraph. Recounted each tick. */
+  private chargingLancers = 0;
 
   constructor(config: RunConfig) {
     this.config = config;
@@ -2182,6 +2184,11 @@ export class World {
 
   private updateEnemies(dt: number): void {
     const p = this.player;
+    // Recounted every tick rather than tracked incrementally: a Lancer can die
+    // mid-charge, and a leaked counter would silently mute the whole species.
+    this.chargingLancers = 0;
+    for (const e of this.enemies) if (e.alive && e.beamActive > 0) this.chargingLancers++;
+
     for (const e of this.enemies) {
       if (!e.alive) continue;
       e.spawnAge += dt;
@@ -2437,10 +2444,14 @@ export class World {
       this.resolveRuins(e, e.radius);
 
       e.beamTimer -= dt;
-      if (e.beamTimer <= 0) {
+      // §23.1 — only so many may be charging at once. Lancers arriving in
+      // numbers turned a dodgeable telegraph into an unavoidable crossfire; the
+      // rest simply hold their shot rather than being removed from the fight.
+      if (e.beamTimer <= 0 && this.chargingLancers < TUNABLE.maxChargingLancers) {
         e.beamTimer = (def.windup ?? 0.9) + 2.4;
         e.beamActive = def.windup ?? 0.9;
         e.facing = Math.atan2(dy, dx);
+        this.chargingLancers++;
       }
     }
 
@@ -2452,7 +2463,9 @@ export class World {
       const py = this.player.y - e.y;
       const along = px * ux + py * uy;
       const across = Math.abs(px * -uy + py * ux);
-      if (along > 0 && across < 16 + TUNABLE.playerRadius) {
+      // §17.1 — a finite beam. It used to run the length of the arena, so a
+      // Lancer off screen could kill you along a line you were never shown.
+      if (along > 0 && along < TUNABLE.lancerBeamRange && across < 16 + TUNABLE.playerRadius) {
         this.hurtPlayer(def.beamDamage ?? 16, {
           id: def.id,
           label: def.name,
@@ -2467,7 +2480,7 @@ export class World {
         e.x,
         e.y,
         0,
-        [e.x, e.y, e.x + ux * 2400, e.y + uy * 2400],
+        [e.x, e.y, e.x + ux * TUNABLE.lancerBeamRange, e.y + uy * TUNABLE.lancerBeamRange],
         0.18,
       );
     }

@@ -5,7 +5,9 @@
     "hint": "Scrap a node.",
     "teaches": "Scrapping is not failure. It is the only permanent output bonus in a run.",
     "score": 200,
-    "unlocks": ["convert_bleed"]
+    "unlocks": [
+      "convert_bleed"
+    ]
   },
   {
     "id": "chain_reaction",
@@ -13,7 +15,10 @@
     "hint": "Reach cascade depth 4.",
     "teaches": "A Trigger that fires on your own output makes a loop. That is the whole game.",
     "score": 300,
-    "unlocks": ["resonate"]
+    "unlocks": [
+      "resonate",
+      "circuit"
+    ]
   },
   {
     "id": "depth_six",
@@ -21,7 +26,9 @@
     "hint": "Reach cascade depth 6.",
     "teaches": "Depth costs more and pays less each step. Going deeper is a choice you fund.",
     "score": 600,
-    "unlocks": ["feedback"]
+    "unlocks": [
+      "on_convert"
+    ]
   },
   {
     "id": "deep_six",
@@ -29,7 +36,10 @@
     "hint": "Reach cascade depth 10.",
     "teaches": "The depth cap exists so a loop terminates, not so you never reach it.",
     "score": 1200,
-    "unlocks": ["overdrive"]
+    "unlocks": [
+      "overdrive",
+      "feedback"
+    ]
   },
   {
     "id": "self_sustaining",
@@ -37,7 +47,9 @@
     "hint": "Keep firing for 10s with no Clock row live.",
     "teaches": "An Engine that feeds itself needs no metronome. It needs a first hit.",
     "score": 800,
-    "unlocks": ["on_convert"]
+    "unlocks": [
+      "on_overheat"
+    ]
   },
   {
     "id": "surfing",
@@ -45,7 +57,9 @@
     "hint": "Hold Instability I for 45s without an Overheat.",
     "teaches": "Instability is a place to live, not a doorway. Running hot is a strategy.",
     "score": 700,
-    "unlocks": ["on_overheat"]
+    "unlocks": [
+      "ground"
+    ]
   },
   {
     "id": "deep_water",
@@ -53,7 +67,9 @@
     "hint": "Hold Instability II for 20s without an Overheat.",
     "teaches": "Tier II corrupts your own fire. The damage in the post-mortem is yours.",
     "score": 1000,
-    "unlocks": ["convert_coolant"]
+    "unlocks": [
+      "convert_coolant"
+    ]
   },
   {
     "id": "controlled_burn",
@@ -69,7 +85,9 @@
     "hint": "Resolve 20 conversions in one run.",
     "teaches": "Fuel is not only ammunition. It is a currency with three exchange rates.",
     "score": 700,
-    "unlocks": ["convert_cashout"]
+    "unlocks": [
+      "convert_stim"
+    ]
   },
   {
     "id": "full_tanks",
@@ -77,7 +95,9 @@
     "hint": "Hold all three fuel gauges above 70 at once.",
     "teaches": "A full gauge is fuel nothing you own can spend. Diversify or convert.",
     "score": 400,
-    "unlocks": ["convert_rectify"]
+    "unlocks": [
+      "attune"
+    ]
   },
   {
     "id": "siphoned",
@@ -85,7 +105,9 @@
     "hint": "Reach 60 fuel in a hue while its resistance is above 30%.",
     "teaches": "Overusing one hue taxes it. The world adapts to your build.",
     "score": 500,
-    "unlocks": ["siphon"]
+    "unlocks": [
+      "convert_rectify"
+    ]
   },
   {
     "id": "flank_it",
@@ -101,7 +123,9 @@
     "hint": "Kill a Suppressor while standing inside its zone.",
     "teaches": "Inside the zone your Triggers are dead. Actions already in flight are not.",
     "score": 600,
-    "unlocks": ["mine"]
+    "unlocks": [
+      "mine"
+    ]
   },
   {
     "id": "untouchable",
@@ -117,7 +141,9 @@
     "hint": "Have 120 enemies alive at once.",
     "teaches": "The director never stops. Clearing the screen is not the win condition.",
     "score": 500,
-    "unlocks": ["on_wave"]
+    "unlocks": [
+      "on_wave"
+    ]
   },
   {
     "id": "prestige",
@@ -125,7 +151,9 @@
     "hint": "Complete a Recompile.",
     "teaches": "Burning a working Engine buys a permanent multiplier. Timing is the skill.",
     "score": 800,
-    "unlocks": ["ground"]
+    "unlocks": [
+      "quantize"
+    ]
   },
   {
     "id": "divergence",
@@ -141,7 +169,9 @@
     "hint": "Reach a Meltdown multiplier of x2.00.",
     "teaches": "Every 30s of divergence is worth more than the minute before it.",
     "score": 1500,
-    "unlocks": ["orbital"]
+    "unlocks": [
+      "convert_cashout"
+    ]
   },
   {
     "id": "contained",
@@ -157,7 +187,9 @@
     "hint": "Channel 3 beacons in one run.",
     "teaches": "Standing still is the price. Everything good in this game costs position.",
     "score": 400,
-    "unlocks": ["on_dash"]
+    "unlocks": [
+      "on_dash"
+    ]
   },
   {
     "id": "wide_load",
@@ -165,7 +197,9 @@
     "hint": "Run 5 live Programs at once.",
     "teaches": "Every live row reserves Cycles forever, whether it fires or not.",
     "score": 600,
-    "unlocks": ["quantize"]
+    "unlocks": [
+      "volatile"
+    ]
   },
   {
     "id": "overtuned",
@@ -173,7 +207,7 @@
     "hint": "Have one Program produce 90% of your output, with 3 or more live.",
     "teaches": "A carry row is efficient and fragile. Pressure systems attack the build.",
     "score": 500,
-    "unlocks": ["attune"]
+    "unlocks": []
   },
   {
     "id": "critical_mass",
@@ -181,7 +215,9 @@
     "hint": "Land 200 crits in one run.",
     "teaches": "On Crit is a real trigger once you have fed it Precision.",
     "score": 500,
-    "unlocks": ["rupture"]
+    "unlocks": [
+      "orbital"
+    ]
   },
   {
     "id": "volatile_thinking",
@@ -189,7 +225,9 @@
     "hint": "Reach 400 EPS.",
     "teaches": "Events per second is the score. Everything else is a means to it.",
     "score": 700,
-    "unlocks": ["volatile"]
+    "unlocks": [
+      "rupture"
+    ]
   },
   {
     "id": "bloodletting",
@@ -197,6 +235,8 @@
     "hint": "Convert Integrity into fuel while below 40 Integrity.",
     "teaches": "Health is convertible. The engine does not care whether you survive it.",
     "score": 600,
-    "unlocks": ["convert_stim"]
+    "unlocks": [
+      "siphon"
+    ]
   }
 ]

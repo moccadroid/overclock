@@ -1197,6 +1197,87 @@ already gives for free — the Library lives in storage, so nothing crosses it.
 
 ---
 
+## D-57 · SETTLED · The Lancer was doing 88% of a run's damage
+
+Reported as "when LANCERS enter the game I'm mostly insta dead", and the
+post-mortem agreed exactly: one Lancer entry, 88% of all damage taken. That is
+not a player missing a trick. Two bugs, both structural:
+
+- **The beam had no length.** It ran 2,400 units — the whole arena — so a Lancer
+  you could not see could kill you along a line you were never shown. §17.1 says
+  every avoidable hit is preceded by a *drawn* line, and a line drawn off screen
+  is not drawn. Range is now 900, barely past its 520 standoff: if it can hit
+  you, it is close enough to be on screen.
+- **Nothing capped how many charged at once.** Six Lancers meant six
+  simultaneous telegraphs, which is not a dodge puzzle, it is a crossfire. The
+  §23.1 pattern already used for Shove applies: `maxChargingLancers: 2`, and the
+  rest hold their shot rather than being deleted from the fight.
+
+The telegraph was also redrawn. It used to be a hairline that only thickened at
+the end, which tells you where the beam is going a moment too late to matter.
+It now draws the danger corridor at its true hit width from the first frame,
+with the charge running up the middle as a fill.
+
+## D-58 · SETTLED · Living things rotate; objects hold still
+
+"It's still difficult at times to see what's loot and what is enemies." Loot and
+enemies share the three hues and always will — §16.3 spends colour on
+Thermal/Voltaic/Void and has none left over — so the tell cannot be colour.
+Fill-versus-stroke was the previous answer and it was not enough at small sizes
+under bloom.
+
+The tell is now behaviour, and it is a rule rather than a tweak:
+
+> Living things rotate, and each keeps its own phase.
+> Objects hold their orientation and breathe on a shared clock.
+
+Fuel motes stopped spinning — they are fixed upright crosses, an axis-aligned
+form no §10.1 silhouette owns — and every pickup on screen pulses off one global
+phase. A field of marks blinking in unison is not something the eye reads as a
+swarm, and it separates at a glance even when the screen is full.
+
+## D-59 · SETTLED · No browser tooltips
+
+`title=` renders a white box in a system font, after a delay, somewhere near the
+pointer. Every one of those properties is wrong: it punches a hole in §16's
+document, it is slow enough that you stop asking, and it moves so reading is a
+hunt rather than a glance.
+
+Replaced everywhere with an `inspector` line pinned to the foot of each panel —
+instant, in-world, always in the same place. One delegated listener per panel
+rather than a handler per element, since the editor rebuilds its whole DOM on
+every change.
+
+The scrollbars went the same way: a thin phosphor rail instead of the platform's
+light-grey slab.
+
+## D-60 · SETTLED · Rows report damage, not a multiplier
+
+"×1.24 output" is a number you cannot act on without knowing what it multiplies.
+The question being asked is what one hit lands, so rows now answer it: base ×
+chain × every global multiplier, as `13 dmg ×3`, with the per-fire total in the
+inspector.
+
+## D-61 · SETTLED · One Axiom at the start
+
+§15.2 says three. Three on run one is three ways to be confused at once: an
+Axiom is a *starting Program*, and you cannot evaluate one before you know what
+a Program is. Ignition — the plainest possible `Clock -> Bolt` — is the only
+honest first choice.
+
+Circuit now comes from Chain Reaction (depth 4) and Feedback from Bottomless
+(depth 10), which is the right shape: Circuit for building a loop, and Feedback,
+which is nothing *but* a loop, for taking one deep.
+
+## D-62 · SETTLED · The way out is not below the fold
+
+The Results screen scrolled as one block, so restarting meant scrolling past the
+post-mortem to find the key. The headline and the exits are now outside the
+scroll region, and ESC works alongside L. A way out of a run should never be
+something you have to look for.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

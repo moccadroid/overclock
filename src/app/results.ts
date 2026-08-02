@@ -249,8 +249,11 @@ export function renderResults(world: World, library: Library): string {
         )} would have added ×${TUNABLE.meltdownMultiplierStep}.</div>`
       : '';
 
+  // The headline and the exits live outside `.results-scroll`, so the way out of
+  // a run is never something you have to scroll down to find.
   return `
     <div class="headline">${headline(world)}</div>
+    <div class="results-scroll">
     ${renderTrace(world)}
     <div class="cols">
       <pre class="score">${lines.join('\n')}</pre>
@@ -264,9 +267,10 @@ export function renderResults(world: World, library: Library): string {
       </div>
     </div>
     ${wastedLine}${extractLine}
+    </div>
     <div class="foot">
       <span class="again">RUN AGAIN [ENTER]</span>
-      <span class="again">RUN SETUP &amp; LIBRARY [L]</span>
+      <span class="again">RUN SETUP &amp; LIBRARY [L / ESC]</span>
       <span class="dim">${BRANDING.title} · reload to replay this exact seed</span>
     </div>`;
 }

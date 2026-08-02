@@ -64,14 +64,17 @@ describe('the Library (GDD §15)', () => {
     expect(kinds.filter((n) => n.kind === 'modifier').length).toBeGreaterThanOrEqual(8);
   });
 
-  it('§15.2 — starts with 2 Axioms and unlocks Feedback by depth 6', () => {
+  it('starts with Ignition alone, and earns the other two by playing', () => {
+    // An Axiom is a starting Program, and you cannot evaluate one before you
+    // know what a Program is. Three on run one is three ways to be confused.
     const lib = new Library();
-    expect(lib.availableAxioms).toHaveLength(2);
-    expect(lib.availableAxioms).not.toContain('feedback');
+    expect(lib.availableAxioms).toEqual(['ignition']);
 
-    const unlocked = lib.earn('depth_six');
-    expect(unlocked).toContain('feedback');
-    expect(new Library().availableAxioms).toContain('feedback');
+    // Circuit for building a loop; Feedback — which is nothing but a loop — for
+    // taking one deep.
+    expect(lib.earn('chain_reaction')).toContain('circuit');
+    expect(lib.earn('deep_six')).toContain('feedback');
+    expect(new Library().availableAxioms).toEqual(['ignition', 'circuit', 'feedback']);
   });
 
   it('earning the same Discovery twice unlocks nothing the second time', () => {

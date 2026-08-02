@@ -83,6 +83,8 @@ export class Renderer {
   private shakeX = 0;
   private shakeY = 0;
   private jitterSeed = 1;
+  /** Shared phase for the loot pulse — see drawPickups. Presentation only. */
+  private lootPhase = 0;
 
   async init(mount: HTMLElement, world: World): Promise<void> {
     this.world = world;
@@ -166,6 +168,7 @@ export class Renderer {
     this.drainDeaths(world);
     this.trackDash(world);
     this.particles.update(frameDt);
+    this.lootPhase += frameDt * 3.6;
     this.updateShake(frameDt);
     this.applyTransform();
 
@@ -623,12 +626,22 @@ export class Renderer {
     }
     if (anyXp) g.fill({ color: PALETTE.xp, alpha: BAND.inFlight });
 
-    // Fuel motes: a filled core with a four-point spark, batched per hue.
+    // Fuel motes: a filled core inside an upright cross, batched per hue.
     //
-    // Loot must never be mistakable for a creature. Enemies are *outlined*
-    // polygons that hold still; pickups are *filled* marks that bob and spark.
-    // A stroked circle around a fuel mote read as a small Drifter, which is
-    // exactly the confusion to avoid.
+    // Loot and enemies share the three hues, so hue cannot be the tell — §16.3
+    // spends colour on Thermal/Voltaic/Void and has none left over. The tell is
+    // *behaviour*:
+    //
+    //   Living things rotate and each keeps its own phase.
+    //   Objects hold their orientation and breathe on a shared clock.
+    //
+    // So the spark no longer spins — it is a fixed upright cross, an axis-
+    // aligned form no enemy silhouette in §10.1 owns — and every pickup on
+    // screen pulses together off one global phase. A field of marks blinking in
+    // unison is not something the eye ever reads as a swarm, and it separates
+    // at a glance even when the screen is full.
+    const pulse = 0.78 + 0.22 * Math.sin(this.lootPhase);
+
     for (const hue of HUE_ORDER) {
       const color = HUE_COLOR[hue];
 
@@ -637,25 +650,23 @@ export class Renderer {
         if (item.kind === 'xp' || item.hue !== hue) continue;
         if (!this.camera.isVisible(item.x, item.y, 20)) continue;
         const y = item.y + Math.sin(item.age * 3.4 + item.id) * 1.8;
-        const spin = item.age * 1.6 + item.id;
         const s = pickupScale(item.value);
-        for (let i = 0; i < 4; i++) {
-          const a = spin + (i / 4) * Math.PI * 2;
-          g.moveTo(item.x + Math.cos(a) * 3 * s, y + Math.sin(a) * 3 * s).lineTo(
-            item.x + Math.cos(a) * 7 * s,
-            y + Math.sin(a) * 7 * s,
-          );
-        }
+        const inner = 2.6 * s;
+        const outer = (6.5 + pulse * 1.6) * s;
+        g.moveTo(item.x - outer, y).lineTo(item.x - inner, y);
+        g.moveTo(item.x + inner, y).lineTo(item.x + outer, y);
+        g.moveTo(item.x, y - outer).lineTo(item.x, y - inner);
+        g.moveTo(item.x, y + inner).lineTo(item.x, y + outer);
         any = true;
       }
-      if (any) g.stroke({ width: 1.2, color, alpha: BAND.inFlight * 0.7 });
+      if (any) g.stroke({ width: 1.4, color, alpha: BAND.inFlight * pulse });
 
       any = false;
       for (const item of world.pickups) {
         if (item.kind === 'xp' || item.hue !== hue) continue;
         if (!this.camera.isVisible(item.x, item.y, 20)) continue;
         const y = item.y + Math.sin(item.age * 3.4 + item.id) * 1.8;
-        g.circle(item.x, y, 3.2 * pickupScale(item.value));
+        g.circle(item.x, y, 3.4 * pickupScale(item.value));
         any = true;
       }
       // Band 4, not band 1: §16.2 reserves full luminance for the player alone,
@@ -834,14 +845,34 @@ export class Renderer {
       if (e.beamActive > 0) {
         const windup = def.windup ?? 0.9;
         const charge = 1 - e.beamActive / windup;
-        g.moveTo(e.x, e.y).lineTo(
-          e.x + Math.cos(e.facing) * 2400,
-          e.y + Math.sin(e.facing) * 2400,
-        );
+        const range = TUNABLE.lancerBeamRange;
+        const ux = Math.cos(e.facing);
+        const uy = Math.sin(e.facing);
+        const ex = e.x + ux * range;
+        const ey = e.y + uy * range;
+
+        // The danger corridor, drawn at its true width from the first frame.
+        // A hairline that only thickens at the end tells you where the beam was
+        // going a moment too late to matter — §17.1 asks for a line you can act
+        // on, which means one you can see while there is still time.
+        const half = 16 + TUNABLE.playerRadius;
+        const nx = -uy * half;
+        const ny = ux * half;
+        g.moveTo(e.x + nx, e.y + ny)
+          .lineTo(ex + nx, ey + ny)
+          .lineTo(ex - nx, ey - ny)
+          .lineTo(e.x - nx, e.y - ny)
+          .closePath();
+        g.fill({ color: PALETTE.signal, alpha: BAND.structure * 0.9 * (0.4 + charge * 0.6) });
+        g.stroke({ width: 1, color: PALETTE.signal, alpha: BAND.telegraph * 0.5 });
+
+        // The charge itself runs the corridor: a bright core that fills toward
+        // the far end, so "how long have I got" is readable without a number.
+        g.moveTo(e.x, e.y).lineTo(e.x + ux * range * charge, e.y + uy * range * charge);
         g.stroke({
-          width: 1 + charge * charge * 7,
+          width: 1 + charge * charge * 6,
           color: PALETTE.signal,
-          alpha: BAND.telegraph * (0.35 + charge * 0.65),
+          alpha: BAND.telegraph * (0.55 + charge * 0.45),
         });
       }
 

@@ -52,8 +52,16 @@ const LOCKED_AT_START: readonly string[] = [
   'volatile',
 ];
 
-/** Axioms available before any milestone. §15.2: "3 at start". */
-const STARTING_AXIOMS: readonly string[] = ['ignition', 'circuit'];
+/**
+ * Axioms available before any milestone. §15.2 says three, but three on run one
+ * is three ways to be confused at once: an Axiom is a *starting Program*, and
+ * you cannot evaluate one before you know what a Program is. Ignition — the
+ * plainest possible `Clock -> Bolt` — is the only honest first choice.
+ *
+ * Circuit arrives once you have built a loop; Feedback, which is nothing but a
+ * loop, once you have taken one deep.
+ */
+const STARTING_AXIOMS: readonly string[] = ['ignition'];
 
 export interface LibraryData {
   /** Discovery ids earned, ever. */

@@ -15,6 +15,7 @@ import type { NodeDef } from '../sim/types';
 import type { Library } from '../meta/profile';
 import { BRANDING } from '../branding';
 import { shapeSvg } from './gfx/shapes';
+import { inspector } from './overlays';
 
 type Pane = 'setup' | 'library' | 'codex';
 
@@ -116,6 +117,8 @@ export class TitleScreen {
           : this.renderCodex()) +
       `<div class="title-foot">TAB switch · ENTER start run</div>`;
 
+    // Hover reading, in-world, in a fixed place. See `inspector`.
+    panel.insertBefore(inspector(panel), panel.querySelector('.title-foot'));
     this.el.replaceChildren(panel);
 
     for (const tab of panel.querySelectorAll<HTMLElement>('.tab')) {
@@ -222,7 +225,7 @@ export class TitleScreen {
             ? n.description
             : `${gate ? gate.name + ' — ' : ''}${gate?.hint ?? 'Not yet reachable.'}`;
           return (
-            `<span class="node k-${kind}${open ? '' : ' locked'}" title="${escapeAttr(title)}">` +
+            `<span class="node k-${kind}${open ? '' : ' locked'}" data-detail="${escapeAttr(title)}">` +
             `${open ? n.name : '▢ ' + n.name}</span>`
           );
         })
@@ -233,7 +236,7 @@ export class TitleScreen {
     return (
       `<div class="library">` +
       `<div class="lib-cols">` +
-      `<div class="lib-disc"><div class="k">discoveries — hover a locked node to see its key</div>${discoveries}</div>` +
+      `<div class="lib-disc"><div class="k">discoveries</div>${discoveries}</div>` +
       `<div class="lib-pool">${groups}</div>` +
       `</div>` +
       `</div>`
@@ -248,8 +251,8 @@ export class TitleScreen {
         `<div class="codex-row${known ? '' : ' unknown'}">` +
         shapeSvg(known ? e.shape : undefined, 26, known ? '#8ba3bd' : '#2f4258') +
         `<div class="cx-text">` +
-        `<div class="cx-name">${known ? e.name : 'UNENCOUNTERED'}</div>` +
-        `<div class="cx-desc">${known ? e.description : 'Kill one to fill this entry.'}</div>` +
+        `<div class="cx-name">${known ? e.name : 'NO RECORD'}</div>` +
+        `<div class="cx-desc">${known ? e.description : 'Kill one to open this entry.'}</div>` +
         `</div>` +
         (known
           ? `<div class="cx-stats">${e.hp} hp · ${e.speed} speed` +
