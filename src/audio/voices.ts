@@ -848,3 +848,117 @@ export function gatedChord(
     }
   }
 }
+
+// ------------------------------------------------------------------- chrome
+
+export type UiSound =
+  | 'hover'
+  | 'click'
+  | 'back'
+  | 'confirm'
+  | 'start'
+  | 'death';
+
+/**
+ * Interface sounds. GDD §18.4 — "silence is banned: even the menu hums."
+ *
+ * Two rules, and they pull against each other:
+ *
+ *   **In key, so they never clash with the track.** Every pitch here comes from
+ *   the same pentatonic the rest of the game plays in, so a click during a
+ *   cascade is a note rather than an intrusion.
+ *
+ *   **Off the grid, so they feel immediate.** Everything else in the game waits
+ *   up to 34ms for a sixteenth boundary. A button that waited would feel broken
+ *   — UI has to answer the instant you touch it, and the cost of that is the
+ *   only thing worth spending unquantized time on besides being hurt.
+ *
+ * They are also *quiet*. A hover fires hundreds of times a minute; anything you
+ * would notice individually becomes unbearable in aggregate.
+ */
+export function ui(v: VoiceCtx, at: number, sound: UiSound): void {
+  const { ctx } = v;
+
+  switch (sound) {
+    case 'hover': {
+      // Barely there. If you can describe it, it is too loud.
+      const g = env(ctx, at, 0.001, 0.028, 0.035);
+      const o = osc(ctx, 'sine', noteHz(17), at, at + 0.05);
+      o.connect(g).connect(v.out);
+      return;
+    }
+    case 'click': {
+      const g = env(ctx, at, 0.001, 0.07, 0.12);
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = noteHz(15);
+      bp.Q.value = 3;
+      const o = osc(ctx, 'square', noteHz(15), at, at + 0.1);
+      o.connect(bp).connect(g).connect(v.out);
+      return;
+    }
+    case 'back': {
+      // The same shape as a click, a fifth down. Going back should sound like
+      // the click you already know, resolving downward.
+      const g = env(ctx, at, 0.001, 0.09, 0.1);
+      const o = ctx.createOscillator();
+      o.type = 'triangle';
+      o.frequency.setValueAtTime(noteHz(13), at);
+      o.frequency.exponentialRampToValueAtTime(noteHz(10), at + 0.06);
+      o.start(at);
+      o.stop(at + 0.13);
+      o.connect(g).connect(v.out);
+      return;
+    }
+    case 'confirm': {
+      // Two notes up. A draft pick is the most common decision in the game, so
+      // it gets the smallest possible fanfare that still reads as "yes".
+      for (const [i, degree] of [12, 15].entries()) {
+        const t = at + i * 0.055;
+        const g = env(ctx, t, 0.002, 0.11, 0.09);
+        const o = osc(ctx, 'triangle', noteHz(degree), t, t + 0.14);
+        o.connect(g).connect(v.out);
+      }
+      return;
+    }
+    case 'start': {
+      // A run beginning: the tonic, low and wide, with the fifth over it.
+      for (const [i, degree] of [0, 5, 10].entries()) {
+        const t = at + i * 0.075;
+        const g = env(ctx, t, 0.006, 0.5, 0.13);
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(600, t);
+        filter.frequency.exponentialRampToValueAtTime(3000, t + 0.2);
+        for (const cents of [-8, 8]) {
+          const o = osc(ctx, 'sawtooth', noteHz(degree) * Math.pow(2, cents / 1200), t, t + 0.6);
+          const vg = ctx.createGain();
+          vg.gain.value = 0.4;
+          o.connect(vg).connect(filter);
+        }
+        filter.connect(g).connect(v.out);
+      }
+      return;
+    }
+    case 'death': {
+      // §18.3 says the hurt clip is the only non-musical sound in the game.
+      // Death is its full stop: the same wrongness, pitched down and long, and
+      // the one moment the track is allowed to lose.
+      const dur = 1.4;
+      const g = env(ctx, at, 0.004, dur, 0.4);
+      const o = ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(noteHz(4), at);
+      o.frequency.exponentialRampToValueAtTime(noteHz(0) / 4, at + dur * 0.8);
+      o.start(at);
+      o.stop(at + dur + 0.1);
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(2200, at);
+      filter.frequency.exponentialRampToValueAtTime(180, at + dur);
+      filter.Q.value = 3;
+      o.connect(filter).connect(g).connect(v.out);
+      return;
+    }
+  }
+}

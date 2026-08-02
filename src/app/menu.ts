@@ -72,6 +72,18 @@ export class TitleScreen {
         : (available[0] ?? 'ignition');
 
     this.el.classList.add('open');
+    // §18.4 — the chrome answers when you touch it. Delegated, because the menu
+    // rebuilds its whole DOM on every pane change.
+    this.el.addEventListener('mouseover', (ev) => {
+      if ((ev.target as HTMLElement).closest('button, .tab, .demo, .axiom, .node, .lib-row')) {
+        this.audio.chrome('hover');
+      }
+    });
+    this.el.addEventListener('click', (ev) => {
+      if ((ev.target as HTMLElement).closest('button, .tab, .demo, .axiom')) {
+        this.audio.chrome('click');
+      }
+    });
     window.addEventListener('keydown', this.onKey);
     this.render();
     return new Promise((resolve) => {
@@ -97,6 +109,10 @@ export class TitleScreen {
   }
 
   private start(): void {
+    // The context is created here if it was not already: this click is the user
+    // gesture browsers demand, and a run that starts silent is a miserable bug.
+    this.audio.start();
+    this.audio.chrome('start');
     this.el.classList.remove('open');
     window.removeEventListener('keydown', this.onKey);
     this.resolve?.({ seed: this.seed, axiomId: this.axiomId });

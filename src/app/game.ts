@@ -92,8 +92,20 @@ export class Game {
     this.ceremony = new CeremonyOverlay(ui);
     this.recompileChoice = new RecompileOverlay(ui);
     this.stinger = new Stinger(ui);
+    this.editor.attach(this.library, (cmd) => this.onCommand(cmd));
 
     this.input.onCommand((cmd) => this.onCommand(cmd));
+    // §18.4 — the chrome answers when you touch it. See Audio.chrome.
+    ui.addEventListener('mouseover', (ev) => {
+      if ((ev.target as HTMLElement).closest('button, .card, .chip, .tab, [data-action]')) {
+        this.audio.chrome('hover');
+      }
+    });
+    ui.addEventListener('click', (ev) => {
+      if ((ev.target as HTMLElement).closest('button, .card, .chip, .tab')) {
+        this.audio.chrome('click');
+      }
+    });
 
     // Browsers refuse to start an AudioContext outside a user gesture. Reaching
     // this line means START RUN was clicked or ENTER was pressed, which counts.
@@ -139,10 +151,12 @@ export class Game {
       return;
     }
 
-    if (cmd === 'editor') {
-      if (this.mode === 'draft') return;
-      this.editor.toggle(this.world);
-      this.mode = this.editor.open ? 'editor' : 'running';
+    if (cmd === 'editor' || cmd === 'close') {
+      if (this.mode === 'draft' && cmd === 'editor') return;
+      const open = cmd === 'close' ? (this.editor.close(), false) : this.editor.toggle(this.world, 'pipeline');
+      this.audio.chrome(open ? 'click' : 'back');
+      this.mode = open ? 'editor' : 'running';
+      this.confirmQuit = false;
       this.input.clear();
       return;
     }
@@ -167,7 +181,8 @@ export class Game {
         return;
       }
       this.confirmQuit = true;
-      this.openPause();
+      this.audio.chrome('back');
+      this.editor.setQuitConfirm(true);
       return;
     }
 
@@ -179,25 +194,25 @@ export class Game {
       if (this.mode === 'primer') {
         this.message.hide();
         this.mode = 'running';
-      } else if (this.mode === 'editor') {
-        this.editor.close();
-        this.mode = 'running';
+        this.audio.chrome('back');
       } else if (this.mode === 'draft') {
         // The offer is kept, so resuming returns to the same three cards.
         this.draft.defer();
         this.pausedFromDraft = true;
-        this.openPause();
-      } else if (this.mode === 'paused') {
-        this.message.hide();
+        this.openConsole('run');
+      } else if (this.mode === 'editor') {
+        // ESC out of the pipeline shows the run rather than dumping you back
+        // into the fight; a second ESC closes.
+        const open = this.editor.toggle(this.world, 'run');
+        this.audio.chrome(open ? 'click' : 'back');
+        this.mode = open ? 'editor' : 'running';
         this.confirmQuit = false;
-        if (this.pausedFromDraft) {
+        if (!open && this.pausedFromDraft) {
           this.pausedFromDraft = false;
           this.openDraft();
-        } else {
-          this.mode = 'running';
         }
       } else {
-        this.openPause();
+        this.openConsole('run');
       }
       this.input.clear();
       return;
@@ -217,19 +232,17 @@ export class Game {
     }
   }
 
-  private openPause(): void {
-    this.mode = 'paused';
-    this.message.showPause(this.world, this.library, (cmd) => this.onCommand(cmd));
-    if (this.confirmQuit) {
-      const btn = this.message.el.querySelector<HTMLElement>('[data-action="quit"]');
-      if (btn) btn.textContent = 'QUIT — CLICK AGAIN TO CONFIRM';
-    }
+  private openConsole(pane: 'pipeline' | 'run'): void {
+    this.editor.toggle(this.world, pane);
+    this.mode = 'editor';
+    this.audio.chrome('click');
   }
 
   private openDraft(): void {
     this.mode = 'draft';
     this.draft.present(this.world, () => {
       this.mode = 'running';
+      this.audio.chrome('confirm');
     });
   }
 
@@ -418,6 +431,7 @@ export class Game {
 
     // Anything earned on the killing tick still counts — bank it before the run
     // is read, or the Results screen reports a Discovery the Library never got.
+    this.audio.chrome('death');
     this.bankDiscoveries();
     this.library.see(this.world.stats.killsByEnemy.keys());
     this.library.recordRun({

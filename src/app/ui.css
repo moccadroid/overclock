@@ -396,6 +396,44 @@
   background: rgba(6, 10, 18, 0.97);
   padding: 18px 20px;
 }
+/* The console's two pages. §19.6 and §19.8 turned out to be one screen. */
+.console-tabs {
+  display: flex;
+  gap: 22px;
+  border-bottom: 1px solid var(--structure);
+  padding-bottom: 10px;
+  margin-bottom: 14px;
+}
+.console-tabs .tab {
+  color: #3f5570;
+  letter-spacing: 0.2em;
+  cursor: pointer;
+}
+.console-tabs .tab:hover {
+  color: var(--ink);
+}
+.console-tabs .tab.on {
+  color: var(--voltaic);
+  border-bottom: 1px solid var(--voltaic);
+}
+.console-run {
+  max-height: 66vh;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+.console-foot {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--structure);
+}
+.console-foot .dim {
+  color: #3f5570;
+  margin-left: auto;
+}
+
 #editor .head {
   display: flex;
   justify-content: space-between;
@@ -1463,39 +1501,25 @@
 
 /* §19.8 — pause. Reuses the Results frame: same panel, same pinned foot, so the
    two screens that answer "what now" answer it the same way. */
-.pause-panel .pz-body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
+.console-run .pz-body {
   display: flex;
   gap: 34px;
   align-items: flex-start;
   padding: 4px 6px 0 0;
 }
-.pause-panel .pz-col {
+.console-run .pz-col {
   flex: 1 1 34%;
   min-width: 0;
 }
-.pause-panel .pz-col.wide {
+.console-run .pz-col.wide {
   flex: 1 1 66%;
 }
-.pause-panel .headline {
-  display: flex;
-  align-items: baseline;
-  gap: 16px;
-  margin-bottom: 6px;
-}
-.pause-panel .pz-clock {
-  color: #46586e;
-  font-size: 12px;
-  letter-spacing: 0.14em;
-}
-.pause-panel .k {
+.console-run .k {
   color: #3f5570;
   letter-spacing: 0.22em;
   margin: 18px 0 8px;
 }
-.pause-panel .pz-col > .k:first-child {
+.console-run .pz-col > .k:first-child {
   margin-top: 0;
 }
 .pz-stat {

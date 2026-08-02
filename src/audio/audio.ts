@@ -41,6 +41,8 @@ import {
   semiHz,
   stab,
   sub,
+  ui as uiVoice,
+  type UiSound,
   type VoiceCtx,
 } from './voices';
 import { CHORD_TONES, TRACKS, trackForAxiom, type Track } from './tracks';
@@ -120,6 +122,7 @@ export class Audio {
   /** Previous note, for 303 glide. 0 means "no slide into this one". */
   private lastBassHz = 0;
   private lastLeadHz = 0;
+  private lastHover = 0;
   /**
    * §18.1 — one part per live Program. This is the arrangement, and it is
    * literally the player's Engine. See parts.ts.
@@ -348,6 +351,28 @@ export class Audio {
       }
       if (this.pending.length < 64) this.pending.push(cue);
     }
+  }
+
+  /**
+   * §18.4 — the interface, audible.
+   *
+   * Played the instant it is asked for rather than on the next sixteenth: a
+   * button that waited up to 34ms would feel broken, and immediacy is worth more
+   * than grid alignment for anything the player's hand caused directly.
+   *
+   * Hovers are rate-limited. They fire hundreds of times a minute as a cursor
+   * crosses a list, and without a floor the mix turns into a hiss.
+   */
+  chrome(sound: UiSound): void {
+    if (!this.ctx || this.muted) return;
+    const now = this.ctx.currentTime;
+    if (sound === 'hover') {
+      if (now - this.lastHover < 0.045) return;
+      this.lastHover = now;
+    }
+    // Chrome goes to the punch bus: it must not duck under the kick, because a
+    // click that ducks reads as a click that did not register.
+    uiVoice(this.voice(this.punchBus), now, sound);
   }
 
   /** For the occasions the sim does not model as cues — Discovery, Recompile. */

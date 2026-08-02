@@ -15,7 +15,8 @@ export type Command =
   | 'help'
   | 'library'
   | 'quit'
-  | 'mute';
+  | 'mute'
+  | 'close';
 
 const MOVE_KEYS: Record<string, [number, number]> = {
   KeyW: [0, -1],

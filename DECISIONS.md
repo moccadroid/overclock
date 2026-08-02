@@ -1702,6 +1702,48 @@ better use of the space than a column of adjectives.
 
 ---
 
+## D-83 · SETTLED · The pipeline and the pause screen were one screen
+
+Reported: the run summary is "awkward to access only through ESC instead of TAB
+which is already muscle memory". Correct, and the deeper problem is that they
+were never two things. Both freeze the run, both are read rather than played,
+and both answer "what is my situation". Having them behind different keys meant
+half of what a player wants mid-run was behind the key they were not pressing.
+
+They are tabs of one console now. TAB opens it on PIPELINE, ESC opens it on RUN,
+and pressing the other key while open switches page rather than closing — ESC out
+of the pipeline should show you the run, not dump you back into the fight. A
+second press of the key you came in with closes. RESUME and QUIT live in the foot
+of both pages.
+
+That deletes a mode from the state machine rather than adding one, which is the
+direction these things should go.
+
+## D-84 · SETTLED · Chrome sounds, in key but off the grid
+
+§18.4: "silence is banned: even the menu hums." Two rules that pull against each
+other, and both matter:
+
+- **In key.** Every UI pitch comes from the same pentatonic as everything else,
+  so a click during a cascade is a note rather than an intrusion.
+- **Off the grid.** Everything else waits up to 34ms for a sixteenth. A button
+  that waited would feel broken. Immediacy is worth more than alignment for
+  anything the player's hand caused directly — the same exemption §18.3 gives
+  the hurt clip, for the same reason.
+
+Hovers are rate-limited to 45ms and are the quietest sound in the game: they
+fire hundreds of times a minute as a cursor crosses a list, and anything you
+could describe individually becomes unbearable in aggregate.
+
+Chrome goes to the punch bus rather than the music bus, because a click that
+ducks under the kick reads as a click that did not register.
+
+Death gets the one sound that is allowed to lose to the track: the hurt clip's
+wrongness, pitched down over 1.4 seconds. §18.3 says the hurt clip is the only
+non-musical sound in the game; this is its full stop.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

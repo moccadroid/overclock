@@ -12,16 +12,9 @@ import { ACTION_BY_ID, DISCOVERIES, DISCOVERY_BY_ID, NODE_BY_ID } from '../conte
 import type { Library } from '../meta/profile';
 import { TUNABLE } from '../sim/tunables';
 import type { World } from '../sim/world';
-import { BRANDING } from '../branding';
 
 function esc(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-function clockLabel(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
 function fmt(n: number): string {
@@ -73,7 +66,15 @@ function nodeName(id: string | null): string {
   return NODE_BY_ID.get(id)?.name ?? id;
 }
 
-export function renderPause(world: World, library: Library): string {
+/**
+ * The run, as a readable page.
+ *
+ * Split out from the pause screen because it is the same information wherever
+ * you are standing: TAB opens the console on the pipeline, ESC opens it on this,
+ * and both freeze the run. Two overlays showing the same numbers behind two
+ * different keys was a mode too many.
+ */
+export function renderRunBody(world: World, library: Library): string {
   const b = world.bonuses;
   const damage = (1 + b.power) * world.engine.globalOutput;
   const tierName = ['NOMINAL', 'INSTABILITY I', 'INSTABILITY II', 'OVERHEAT'][world.budget.tier]!;
@@ -88,7 +89,6 @@ export function renderPause(world: World, library: Library): string {
     .filter(Boolean);
 
   return `
-    <div class="headline">PAUSED <span class="pz-clock">${clockLabel(world.time)}</span></div>
     <div class="pz-body">
       <div class="pz-col">
         <div class="k">the run</div>
@@ -131,10 +131,5 @@ export function renderPause(world: World, library: Library): string {
         <div class="k">discovered this run — ${library.earnedDiscoveries.size}/${DISCOVERIES.length} all time</div>
         <div class="pz-found">${found.length > 0 ? found.map((n) => esc(n!)).join(' · ') : 'nothing yet'}</div>
       </div>
-    </div>
-    <div class="foot">
-      <button class="again" data-action="pause">RESUME &nbsp;[ESC]</button>
-      <button class="again danger" data-action="quit">QUIT TO RUN SETUP</button>
-      <span class="dim">${BRANDING.title} · quitting ends this run without scoring it</span>
     </div>`;
 }

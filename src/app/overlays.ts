@@ -22,7 +22,7 @@ import { LOADBEARING, TUNABLE } from '../sim/tunables';
 import { ACTION_BY_ID } from '../content/index';
 import { inertFields, slotAccepts, type NodeSlot } from '../sim/engine';
 import { renderResults } from './results';
-import { renderPause } from './pause';
+import { renderRunBody } from './pause';
 import type { Library } from '../meta/profile';
 import { renderPrimer } from './primer';
 
@@ -238,8 +238,22 @@ function previewSlot(world: World, card: DraftCard): string {
 
 // ------------------------------------------------------------------ editor
 
+/**
+ * The console. §19.6 (pipeline) and §19.8 (pause), which turned out to be one
+ * screen with two pages.
+ *
+ * TAB was already muscle memory for "show me my stuff", and the run summary was
+ * only reachable through ESC — so half of what a player wants mid-run was behind
+ * the key they were not pressing. Both freeze the game and both are read rather
+ * than played, so they are tabs of the same overlay now: TAB opens it on the
+ * pipeline, ESC opens it on the run, and either key closes it.
+ */
 export class EditorOverlay extends Overlay {
   private world: World | null = null;
+  private library: Library | null = null;
+  private pane: 'pipeline' | 'run' = 'pipeline';
+  private onAction: ((cmd: string) => void) | null = null;
+  private quitConfirm = false;
   /** Node awaiting scrap confirmation. Scrap is permanent and there is no undo. */
   private pendingScrap: { program: number; slot: NodeSlot } | null = null;
   private dragging: { program: number; slot: NodeSlot } | null = null;
@@ -250,12 +264,34 @@ export class EditorOverlay extends Overlay {
     super(root, 'editor');
   }
 
-  toggle(world: World): void {
+  attach(library: Library, onAction: (cmd: string) => void): void {
+    this.library = library;
+    this.onAction = onAction;
+  }
+
+  /** Returns true if the console is now open. */
+  toggle(world: World, pane: 'pipeline' | 'run' = 'pipeline'): boolean {
     this.world = world;
-    const next = !this.open;
+    // Pressing the other key while open switches page rather than closing —
+    // ESC out of the pipeline should show the run, not dump you into the fight.
+    const next = !this.open || this.pane !== pane;
+    this.pane = pane;
     this.setOpen(next);
     this.pendingScrap = null;
+    if (!next) this.quitConfirm = false;
     if (next) this.render();
+    return next;
+  }
+
+  /** Quitting a run is two clicks — a misclick throws away twenty minutes. */
+  setQuitConfirm(on: boolean): void {
+    this.quitConfirm = on;
+    if (this.open) this.render();
+  }
+
+  setPane(pane: 'pipeline' | 'run'): void {
+    this.pane = pane;
+    if (this.open) this.render();
   }
 
   close(): void {
@@ -292,6 +328,17 @@ export class EditorOverlay extends Overlay {
 
     const panel = document.createElement('div');
     panel.className = 'panel';
+    panel.appendChild(this.tabBar());
+
+    if (this.pane === 'run') {
+      const body = document.createElement('div');
+      body.className = 'console-run';
+      body.innerHTML = this.library ? renderRunBody(world, this.library) : '';
+      panel.appendChild(body);
+      panel.appendChild(this.consoleFoot());
+      this.el.replaceChildren(panel);
+      return;
+    }
 
     const totalEps = world.engine.programs.reduce((s, p) => s + p.recentEvents, 0);
 
@@ -444,8 +491,42 @@ export class EditorOverlay extends Overlay {
       'moving one changes the damage multiplier. Rows evaluate top to bottom. ' +
       'Scrapping is permanent and there is no undo. TAB to close.';
     panel.appendChild(hint);
+    panel.appendChild(this.consoleFoot());
 
     this.el.appendChild(panel);
+  }
+
+  private tabBar(): HTMLElement {
+    const bar = document.createElement('div');
+    bar.className = 'console-tabs';
+    for (const [pane, label] of [
+      ['pipeline', 'PIPELINE  [TAB]'],
+      ['run', 'RUN  [ESC]'],
+    ] as const) {
+      const tab = document.createElement('span');
+      tab.className = `tab${this.pane === pane ? ' on' : ''}`;
+      tab.textContent = label;
+      tab.addEventListener('click', () => this.setPane(pane));
+      bar.appendChild(tab);
+    }
+    return bar;
+  }
+
+  private consoleFoot(): HTMLElement {
+    const foot = document.createElement('div');
+    foot.className = 'foot console-foot';
+    const resume = button('RESUME', true, () => this.onAction?.('close'));
+    const quit = button(
+      this.quitConfirm ? 'QUIT — CLICK AGAIN TO CONFIRM' : 'QUIT TO RUN SETUP',
+      true,
+      () => this.onAction?.('quit'),
+    );
+    quit.className = 'danger';
+    const note = document.createElement('span');
+    note.className = 'dim';
+    note.textContent = 'quitting ends this run without scoring it';
+    foot.append(resume, quit, note);
+    return foot;
   }
 
   /**
@@ -769,23 +850,6 @@ export class MessageOverlay extends Overlay {
     const b = document.createElement('div');
     b.textContent = body;
     panel.append(h, b);
-    this.el.appendChild(panel);
-    this.setOpen(true);
-  }
-
-  /**
-   * §19.8 — pause. Shares the Results screen's action wiring, because both
-   * answer "what now" and both have to be clickable.
-   */
-  showPause(world: World, library: Library, onAction: (cmd: string) => void): void {
-    this.el.replaceChildren();
-    const panel = document.createElement('div');
-    panel.className = 'panel results-panel pause-panel';
-    panel.innerHTML = renderPause(world, library);
-    panel.addEventListener('click', (ev) => {
-      const hit = (ev.target as HTMLElement | null)?.closest<HTMLElement>('[data-action]');
-      if (hit?.dataset.action) onAction(hit.dataset.action);
-    });
     this.el.appendChild(panel);
     this.setOpen(true);
   }
