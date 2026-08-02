@@ -176,8 +176,15 @@ export const TUNABLE = {
    */
   kernelShareExponent: 1.9,
   /** Rebuild surge: double XP, and the next few drafts widen. */
-  rebuildSurgeTime: 180,
-  rebuildSurgeXpMult: 6,
+  /**
+   * §9.1's documented values. These were briefly raised to 6x/180s while testing
+   * whether rebuild speed was the binding constraint on Recompile (it was not),
+   * and leaving them there turned the surge into the mechanic's real payout:
+   * burning a near-dead row bought 34s of sextupled XP for no meaningful loss.
+   * A reward that large must not be purchasable that cheaply.
+   */
+  rebuildSurgeTime: 120,
+  rebuildSurgeXpMult: 2,
   rebuildSurgeDrafts: 3,
   rebuildSurgeCards: 4,
 

@@ -557,6 +557,26 @@ disproportionately more than the sum of small ones. That is the knob that decide
 whether this mechanic rewards courage or timidity, and it belongs next to the
 Kernel formula on §23.2's sensitive-tuning list.
 
+**That did not fix it either**, and the numbers showed why. Re-measured with the
+exponent in place: burning the weakest row scored 35,780 against hoarding's
+32,040 — while earning a Kernel of ×1.00, i.e. nothing at all. The Kernel was
+never what made nibbling profitable. The **rebuild surge** was: `6× XP for 180s`
+had been left in from the earlier "is rebuild speed the constraint?" experiment,
+so sacrificing a near-dead row bought 34 seconds of sextupled XP for no
+meaningful loss. Reverted to §9.1's documented 2×/120s.
+
+**The standing conclusion.** Across every variant tried, burning the *whole*
+Engine lands at roughly −68% versus hoarding, and no reward curve has moved it,
+because the cost is not output — it is the loss of survival that follows losing
+output. Partial Recompile works as a low-stakes dial. Total commitment, which is
+the feeling §9.2 is actually chasing, does not, and probably cannot while the
+player's only defence is the Engine they just deleted.
+
+If we want commitment to be viable, the remaining lever is not economic but
+protective: a Recompile that clears the arena and grants a few seconds of
+invulnerability — the runtime rebooting around you. That is a mechanic change and
+wants a decision, not another tuning pass.
+
 Note the deliberate deviation already made: Recompile restores the Axiom starter
 rather than leaving the Engine empty. Even if the mechanic is cut or reshaped,
 that change stands — an Engine that cannot generate the XP needed to rebuild
