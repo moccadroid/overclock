@@ -13,7 +13,8 @@ export type Command =
   | 'reroll'
   | 'confirm'
   | 'help'
-  | 'library';
+  | 'library'
+  | 'quit';
 
 const MOVE_KEYS: Record<string, [number, number]> = {
   KeyW: [0, -1],

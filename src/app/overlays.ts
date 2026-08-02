@@ -22,6 +22,7 @@ import { LOADBEARING, TUNABLE } from '../sim/tunables';
 import { ACTION_BY_ID } from '../content/index';
 import { inertFields, slotAccepts, type NodeSlot } from '../sim/engine';
 import { renderResults } from './results';
+import { renderPause } from './pause';
 import type { Library } from '../meta/profile';
 import { renderPrimer } from './primer';
 
@@ -55,12 +56,23 @@ export class DraftOverlay extends Overlay {
     super(root, 'draft');
   }
 
+  /**
+   * A draft you deferred is the *same* draft when you come back to it. Rolling
+   * fresh on every present() made ESC a free infinite reroll, which quietly made
+   * the Reroll economy in §8.3 meaningless — the strongest play was to escape
+   * out of any offer you disliked.
+   */
   present(world: World, onDone: () => void): void {
     this.world = world;
     this.onDone = onDone;
-    this.offer = rollDraft(world);
+    if (!this.offer) this.offer = rollDraft(world);
     this.setOpen(true);
     this.render();
+  }
+
+  /** Close without resolving. The offer is kept for when it reopens. */
+  defer(): void {
+    this.setOpen(false);
   }
 
   /** Keyboard 1/2/3 pick, R rerolls (§19.5 bottom rail). */
@@ -757,6 +769,23 @@ export class MessageOverlay extends Overlay {
     const b = document.createElement('div');
     b.textContent = body;
     panel.append(h, b);
+    this.el.appendChild(panel);
+    this.setOpen(true);
+  }
+
+  /**
+   * §19.8 — pause. Shares the Results screen's action wiring, because both
+   * answer "what now" and both have to be clickable.
+   */
+  showPause(world: World, library: Library, onAction: (cmd: string) => void): void {
+    this.el.replaceChildren();
+    const panel = document.createElement('div');
+    panel.className = 'panel results-panel pause-panel';
+    panel.innerHTML = renderPause(world, library);
+    panel.addEventListener('click', (ev) => {
+      const hit = (ev.target as HTMLElement | null)?.closest<HTMLElement>('[data-action]');
+      if (hit?.dataset.action) onAction(hit.dataset.action);
+    });
     this.el.appendChild(panel);
     this.setOpen(true);
   }

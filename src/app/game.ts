@@ -18,7 +18,6 @@ import {
 import { Input } from './input';
 import { NO_INPUT, World, type RunConfig } from '../sim/world';
 import { SIM_DT } from '../sim/tunables';
-import { BRANDING } from '../branding';
 import { VISUAL } from './visual';
 import { Library } from '../meta/profile';
 import { Stinger } from './stinger';
@@ -54,6 +53,10 @@ export class Game {
   private hitstopSpent = 0;
   private hitstopWindow = 0;
   private lastKills = 0;
+  /** ESC out of a draft returns to that same draft, not to the fight. */
+  private pausedFromDraft = false;
+  /** Quitting a run is two clicks — a misclick throws away twenty minutes. */
+  private confirmQuit = false;
 
   /** §15.2 — the Library is the only thing here that outlives the run. */
   constructor(config: RunConfig, private readonly library: Library) {
@@ -117,26 +120,45 @@ export class Game {
       return;
     }
 
+    if (cmd === 'quit') {
+      // Leaving a run deliberately, rather than by dying. Two clicks, because a
+      // misclick here throws away twenty minutes.
+      if (this.confirmQuit) {
+        location.href = location.pathname;
+        return;
+      }
+      this.confirmQuit = true;
+      this.openPause();
+      return;
+    }
+
     if (cmd === 'pause') {
+      // ESC always lands somewhere with a way out. It used to mean four
+      // different things depending on mode, one of which — deferring a draft —
+      // silently rerolled it, which made escaping any offer you disliked the
+      // strongest play in the game.
       if (this.mode === 'primer') {
         this.message.hide();
         this.mode = 'running';
-        this.input.clear();
-        return;
-      }
-      if (this.mode === 'editor') {
+      } else if (this.mode === 'editor') {
         this.editor.close();
         this.mode = 'running';
       } else if (this.mode === 'draft') {
-        // Defer the draft — it stays queued (§19.4 chevrons).
-        this.draft.setOpen(false);
-        this.mode = 'running';
+        // The offer is kept, so resuming returns to the same three cards.
+        this.draft.defer();
+        this.pausedFromDraft = true;
+        this.openPause();
       } else if (this.mode === 'paused') {
         this.message.hide();
-        this.mode = 'running';
+        this.confirmQuit = false;
+        if (this.pausedFromDraft) {
+          this.pausedFromDraft = false;
+          this.openDraft();
+        } else {
+          this.mode = 'running';
+        }
       } else {
-        this.message.show('PAUSED', this.runSummary());
-        this.mode = 'paused';
+        this.openPause();
       }
       this.input.clear();
       return;
@@ -153,6 +175,15 @@ export class Game {
 
     if (cmd === 'confirm' && this.mode === 'running' && this.world.pendingDrafts > 0) {
       this.openDraft();
+    }
+  }
+
+  private openPause(): void {
+    this.mode = 'paused';
+    this.message.showPause(this.world, this.library, (cmd) => this.onCommand(cmd));
+    if (this.confirmQuit) {
+      const btn = this.message.el.querySelector<HTMLElement>('[data-action="quit"]');
+      if (btn) btn.textContent = 'QUIT — CLICK AGAIN TO CONFIRM';
     }
   }
 
@@ -338,32 +369,4 @@ export class Game {
     return this.renderer;
   }
 
-  private runSummary(): string {
-    const w = this.world;
-    const engine = w.engine.programs
-      .map((p, i) => {
-        if (!w.engine.compiled[i]!.live) return null;
-        const mods = p.modifierIds.filter(Boolean).join(' → ');
-        return `  ${p.triggerId} → ${mods ? mods + ' → ' : ''}${p.actionId}`;
-      })
-      .filter(Boolean)
-      .join('\n');
-
-    return [
-      `time            ${w.time.toFixed(1)}s`,
-      `score (∫EPS)    ${Math.floor(w.score)}`,
-      `peak EPS        ${w.stats.peakEps.toFixed(1)}`,
-      `kills           ${w.stats.kills}`,
-      `events          ${w.stats.events}`,
-      `deepest cascade ${w.stats.maxDepth}`,
-      `overheats       ${w.stats.overheats}`,
-      `misfires        ${w.stats.misfires}`,
-      `level           ${w.level}`,
-      '',
-      'engine:',
-      engine || '  (no live programs)',
-      '',
-      BRANDING.title + ' · M1',
-    ].join('\n');
-  }
 }

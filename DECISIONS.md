@@ -1278,6 +1278,38 @@ something you have to look for.
 
 ---
 
+## D-63 · BUG · Deferring a draft was a free infinite reroll
+
+`present()` called `rollDraft()` every time, so ESC out of a draft and back in
+produced three new cards. The strongest play in the game was therefore to escape
+out of any offer you disliked, which made the entire §8.3 Reroll economy — and
+the Reroll cards added the same day — decoration.
+
+A deferred draft is now the *same* draft when you come back to it. `defer()`
+closes without clearing the offer; `present()` only rolls when there isn't one.
+
+## D-64 · SETTLED · ESC always lands somewhere with a way out
+
+ESC meant four different things depending on mode, and none of them was a menu:
+it closed the primer, closed the editor, silently deferred a draft (see D-63),
+or produced a bare stat dump whose only exit was ESC again. That last one is the
+worst kind of menu — it interrupts you and offers nothing for the interruption.
+
+Pause is now a real screen, and it is the right place for it: a pause is the one
+moment the player has time to read. It carries the whole run — the Engine with
+per-row damage, the chassis, Heat and draw, the draft economy, what has been
+discovered this run — plus the only deliberate way to leave a run.
+
+ESC out of a draft opens it too, and resuming returns to that same draft rather
+than dumping you back into the fight.
+
+Quitting is two clicks: the button relabels to "QUIT — CLICK AGAIN TO CONFIRM".
+A misclick there throws away twenty minutes. It also does not score the run —
+banking a score by quitting would make §12.4's Extraction terminal pointless,
+since walking to it would buy you exactly nothing.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,
