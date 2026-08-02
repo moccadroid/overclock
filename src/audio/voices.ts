@@ -148,11 +148,72 @@ export function playHue(v: VoiceCtx, hue: Hue, at: number, hz: number, gain: num
   HUE_VOICE[hue](v, at, hz, gain);
 }
 
+export type PercVoice = 'clap' | 'snare' | 'rim';
+
 /**
- * Clap on 2 and 4. Three noise bursts a few milliseconds apart, because one
- * burst is a click and a real clap is many hands not quite together.
+ * The backbeat, on 2 and 4. Three instruments, because this is the loudest
+ * recurring sound after the kick and reusing one clap across every track is
+ * most of why they sounded alike.
+ *
+ *   clap   many hands not quite together — three bursts a few ms apart.
+ *   snare  noise over a tuned body. Harder, more forward, rock-adjacent.
+ *   rim    a short woody tick. Almost nothing, which is the dub move.
  */
-export function clap(v: VoiceCtx, at: number, gain: number): void {
+export function perc(v: VoiceCtx, at: number, gain: number, voice: PercVoice = 'clap'): void {
+  if (voice === 'snare') return snare(v, at, gain);
+  if (voice === 'rim') return rim(v, at, gain);
+  return clap(v, at, gain);
+}
+
+function snare(v: VoiceCtx, at: number, gain: number): void {
+  const { ctx } = v;
+  const dur = 0.16;
+
+  const frames = Math.ceil(ctx.sampleRate * (dur + 0.02));
+  const buf = ctx.createBuffer(1, frames, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < frames; i++) {
+    data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / frames, 2.2);
+  }
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const hp = ctx.createBiquadFilter();
+  hp.type = 'highpass';
+  hp.frequency.value = 1800;
+  const ng = ctx.createGain();
+  ng.gain.value = gain * 0.26;
+  src.connect(hp).connect(ng).connect(v.out);
+  src.start(at);
+  src.stop(at + dur + 0.02);
+
+  // The tuned body is what separates a snare from a burst of noise.
+  const bodyGain = env(ctx, at, 0.002, 0.09, gain * 0.18);
+  const o = osc(ctx, 'triangle', 190, at, at + 0.13);
+  const o2 = osc(ctx, 'triangle', 285, at, at + 0.13);
+  const og = ctx.createGain();
+  og.gain.value = 0.5;
+  o.connect(bodyGain);
+  o2.connect(og).connect(bodyGain);
+  bodyGain.connect(v.out);
+}
+
+function rim(v: VoiceCtx, at: number, gain: number): void {
+  const { ctx } = v;
+  const g = env(ctx, at, 0.001, 0.035, gain * 0.3);
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = 1750;
+  bp.Q.value = 7;
+  const o = osc(ctx, 'square', 1750, at, at + 0.06);
+  const o2 = osc(ctx, 'square', 470, at, at + 0.06);
+  const og = ctx.createGain();
+  og.gain.value = 0.5;
+  o.connect(bp);
+  o2.connect(og).connect(bp);
+  bp.connect(g).connect(v.out);
+}
+
+function clap(v: VoiceCtx, at: number, gain: number): void {
   const { ctx } = v;
   const bus = ctx.createGain();
   bus.gain.value = gain * 0.3;
@@ -184,32 +245,58 @@ export function clap(v: VoiceCtx, at: number, gain: number): void {
   }
 }
 
+export type StabVoice = 'organ' | 'saw' | 'dub';
+
 /**
  * The stab: a short, hard chord hit on an offbeat. Detroit's whole personality
  * in one voice — most of what people hear as "the melody" in techno is this.
+ *
+ *   organ  stacked sines at octave and fifth, no filter movement. Hammond by
+ *          way of a drawbar. Warm, and unmistakably not a saw.
+ *   saw    detuned saws through a falling lowpass. Bright, aggressive.
+ *   dub    heavily filtered and short, meant to be fed to a delay and heard
+ *          mostly as its own echoes. See the delay bus in audio.ts.
  */
 export function stab(
   v: VoiceCtx,
   at: number,
   semitones: number[],
   gain: number,
-  wave: OscillatorType = 'sawtooth',
+  voice: StabVoice = 'saw',
 ): void {
   const { ctx } = v;
-  const dur = 0.14;
-  const g = env(ctx, at, 0.003, dur, gain * 0.13);
+
+  if (voice === 'organ') {
+    const dur = 0.17;
+    const g = env(ctx, at, 0.004, dur, gain * 0.1);
+    g.connect(v.out);
+    for (const semi of semitones) {
+      // Drawbar registration: fundamental, octave, and the fifth above that.
+      for (const [mult, level] of [[1, 1], [2, 0.5], [3, 0.28]] as const) {
+        const o = osc(ctx, 'sine', semiHz(semi + 24) * mult, at, at + dur + 0.05);
+        const vg = ctx.createGain();
+        vg.gain.value = level * 0.33;
+        o.connect(vg).connect(g);
+      }
+    }
+    return;
+  }
+
+  const dub = voice === 'dub';
+  const dur = dub ? 0.1 : 0.14;
+  const g = env(ctx, at, 0.003, dur, gain * (dub ? 0.16 : 0.13));
 
   const filter = ctx.createBiquadFilter();
   filter.type = 'lowpass';
-  filter.frequency.setValueAtTime(5200, at);
-  filter.frequency.exponentialRampToValueAtTime(1100, at + dur);
-  filter.Q.value = 4;
+  filter.frequency.setValueAtTime(dub ? 1500 : 5200, at);
+  filter.frequency.exponentialRampToValueAtTime(dub ? 500 : 1100, at + dur);
+  filter.Q.value = dub ? 2 : 4;
   filter.connect(g).connect(v.out);
 
   for (const semi of semitones) {
     const hz = semiHz(semi + 24);
     for (const cents of [-6, 6]) {
-      const o = osc(ctx, wave, hz * Math.pow(2, cents / 1200), at, at + dur + 0.05);
+      const o = osc(ctx, dub ? 'triangle' : 'sawtooth', hz * Math.pow(2, cents / 1200), at, at + dur + 0.05);
       const vg = ctx.createGain();
       vg.gain.value = 0.4;
       o.connect(vg).connect(filter);
@@ -217,12 +304,67 @@ export function stab(
   }
 }
 
-/** One note of the repeating motif. Plucked, bright, sits above the bass. */
-export function motif(v: VoiceCtx, at: number, hz: number, gain: number): void {
+export type LeadVoice = 'pluck' | 'acid' | 'bell';
+
+/**
+ * One note of the repeating motif — the closest this game has to a tune.
+ *
+ *   pluck  saw + octave square through a snappy filter. Bright, percussive.
+ *   acid   the 303 again but an octave up and shorter: reedy and vocal, and it
+ *          slides, which is what makes a line sound *played* rather than
+ *          sequenced.
+ *   bell   two-operator FM at a non-integer ratio. Glassy, long, unhurried.
+ */
+export function motif(
+  v: VoiceCtx,
+  at: number,
+  hz: number,
+  gain: number,
+  voice: LeadVoice = 'pluck',
+  glideFrom = 0,
+): void {
   const { ctx } = v;
+
+  if (voice === 'bell') {
+    const dur = 0.75;
+    const g = env(ctx, at, 0.006, dur, gain * 0.07);
+    const carrier = osc(ctx, 'sine', hz, at, at + dur + 0.1);
+    const mod = osc(ctx, 'sine', hz * 2.41, at, at + dur + 0.1);
+    const depth = ctx.createGain();
+    depth.gain.setValueAtTime(hz * 2.4, at);
+    depth.gain.exponentialRampToValueAtTime(hz * 0.05, at + dur * 0.7);
+    mod.connect(depth);
+    depth.connect(carrier.frequency);
+    carrier.connect(g).connect(v.out);
+    return;
+  }
+
+  if (voice === 'acid') {
+    const dur = 0.22;
+    const g = env(ctx, at, 0.004, dur, gain * 0.075);
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.Q.value = 14;
+    filter.frequency.setValueAtTime(hz * 1.6, at);
+    filter.frequency.exponentialRampToValueAtTime(Math.min(9000, hz * 9), at + 0.02);
+    filter.frequency.exponentialRampToValueAtTime(hz * 2, at + dur * 0.7);
+
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    if (glideFrom > 0) {
+      o.frequency.setValueAtTime(glideFrom, at);
+      o.frequency.exponentialRampToValueAtTime(hz, at + 0.05);
+    } else {
+      o.frequency.setValueAtTime(hz, at);
+    }
+    o.start(at);
+    o.stop(at + dur + 0.06);
+    o.connect(filter).connect(g).connect(v.out);
+    return;
+  }
+
   const dur = 0.19;
   const g = env(ctx, at, 0.004, dur, gain * 0.09);
-
   const filter = ctx.createBiquadFilter();
   filter.type = 'lowpass';
   filter.frequency.setValueAtTime(hz * 6, at);
@@ -240,73 +382,136 @@ export function motif(v: VoiceCtx, at: number, hz: number, gain: number): void {
 
 // -------------------------------------------------------------- the backing
 
-/**
- * Four-on-the-floor kick. Three parts, because one sine is a beep:
- *
- *   - a click transient, so it cuts through a busy mix
- *   - a fast pitch drop, which is what the ear reads as "hit"
- *   - a long body down at 35Hz, which is what the chest reads as "oomph"
- *
- * The body outlasts the transient by an order of magnitude. That ratio is the
- * whole difference between a kick you hear and a kick you feel.
- */
-export function kick(v: VoiceCtx, at: number, gain: number): void {
-  const { ctx } = v;
+export type KickVoice = 'punch' | 'tight' | 'deep';
 
-  const body = env(ctx, at, 0.003, 0.42, gain * 1.15);
+/**
+ * Kicks. Three parts each — a click transient so it cuts a busy mix, a fast
+ * pitch drop the ear reads as "hit", and a body the chest reads as weight — but
+ * the *proportions* are what make them different drums rather than one drum with
+ * a knob on it.
+ *
+ *   punch  classic house. Mid decay, present click, sits forward.
+ *   tight  909-ish. Short, hard, heavily clicked; leaves room for sixteenths.
+ *   deep   dub. Long, soft, almost no click. Felt more than heard.
+ */
+export function kick(v: VoiceCtx, at: number, gain: number, voice: KickVoice = 'punch'): void {
+  const { ctx } = v;
+  const spec = {
+    punch: { from: 190, to: 35, drop: 0.075, decay: 0.42, click: 0.5, clickHz: 900 },
+    tight: { from: 220, to: 44, drop: 0.045, decay: 0.19, click: 0.85, clickHz: 1600 },
+    deep: { from: 120, to: 28, drop: 0.13, decay: 0.85, click: 0.12, clickHz: 420 },
+  }[voice];
+
+  const body = env(ctx, at, 0.003, spec.decay, gain * 1.15);
   const o = ctx.createOscillator();
   o.type = 'sine';
-  o.frequency.setValueAtTime(190, at);
-  o.frequency.exponentialRampToValueAtTime(35, at + 0.075);
+  o.frequency.setValueAtTime(spec.from, at);
+  o.frequency.exponentialRampToValueAtTime(spec.to, at + spec.drop);
   o.start(at);
-  o.stop(at + 0.48);
+  o.stop(at + spec.decay + 0.08);
   o.connect(body).connect(v.out);
 
-  // The click. Almost inaudible alone, and the kick sounds soft without it.
-  const tick = env(ctx, at, 0.001, 0.012, gain * 0.5);
-  const t = osc(ctx, 'triangle', 900, at, at + 0.03);
+  const tick = env(ctx, at, 0.001, 0.012, gain * spec.click);
+  const t = osc(ctx, 'triangle', spec.clickHz, at, at + 0.03);
   const hp = ctx.createBiquadFilter();
   hp.type = 'highpass';
   hp.frequency.value = 400;
   t.connect(hp).connect(tick).connect(v.out);
 }
 
-/**
- * The bassline. A short plucked saw through a resonant lowpass — the sound the
- * whole genre is built on, and the layer that turns a beat into a track.
- */
-export interface BassVoice {
-  wave: OscillatorType;
+export type BassVoice = 'pluck' | 'acid' | 'sub';
+
+export interface BassSpec {
+  voice: BassVoice;
   q: number;
   brightness: number;
+  /** True on accented steps — 303 accents are most of what makes acid move. */
+  accent?: boolean;
+  /** Glide from this frequency, in seconds. 0 for no slide. */
+  glideFrom?: number;
 }
 
+/**
+ * Basslines. Three genuinely different instruments, not one with a filter knob:
+ *
+ *   pluck  saw + octave-down square through a moderate lowpass. Round, warm,
+ *          stays out of the way. The house default.
+ *   acid   a 303: one saw, a *steep* resonant lowpass, and a filter envelope
+ *          per note. The squelch is the envelope, not the resonance — that is
+ *          the part everyone gets wrong. Accents open it further and hit
+ *          harder; glide slurs one note into the next.
+ *   sub    almost a sine. Long, slow, no filter movement at all. Dub bass is a
+ *          pitch you feel arriving and leaving, not a note you hear played.
+ */
 export function bass(
   v: VoiceCtx,
   at: number,
   hz: number,
   gain: number,
-  voice: BassVoice,
+  spec: BassSpec,
   dur = 0.16,
 ): void {
   const { ctx } = v;
-  const g = env(ctx, at, 0.006, dur, gain * 0.6);
 
+  if (spec.voice === 'sub') {
+    const long = dur * 3.2;
+    const g = env(ctx, at, 0.02, long, gain * 0.75);
+    const o = osc(ctx, 'sine', hz, at, at + long + 0.1);
+    const o2 = osc(ctx, 'triangle', hz, at, at + long + 0.1);
+    const og = ctx.createGain();
+    og.gain.value = 0.25;
+    o.connect(g);
+    o2.connect(og).connect(g);
+    g.connect(v.out);
+    return;
+  }
+
+  if (spec.voice === 'acid') {
+    const accented = spec.accent === true;
+    const length = accented ? dur * 1.35 : dur;
+    const g = env(ctx, at, 0.004, length, gain * (accented ? 0.75 : 0.5));
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.Q.value = spec.q;
+    // The envelope is the sound: snap wide open, collapse fast. An accent
+    // opens further and decays slower, which is the whole 303 vocabulary.
+    const peak = Math.min(7000, hz * (accented ? 26 : 15) * spec.brightness);
+    filter.frequency.setValueAtTime(Math.max(90, hz * 1.4), at);
+    filter.frequency.exponentialRampToValueAtTime(peak, at + 0.012);
+    filter.frequency.exponentialRampToValueAtTime(
+      Math.max(80, hz * 1.6),
+      at + length * (accented ? 0.9 : 0.55),
+    );
+
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    if (spec.glideFrom) {
+      o.frequency.setValueAtTime(spec.glideFrom, at);
+      o.frequency.exponentialRampToValueAtTime(hz, at + 0.055);
+    } else {
+      o.frequency.setValueAtTime(hz, at);
+    }
+    o.start(at);
+    o.stop(at + length + 0.06);
+    o.connect(filter).connect(g).connect(v.out);
+    return;
+  }
+
+  const g = env(ctx, at, 0.006, dur, gain * 0.6);
   const filter = ctx.createBiquadFilter();
   filter.type = 'lowpass';
-  filter.frequency.setValueAtTime(Math.min(4200, hz * 14 * voice.brightness), at);
+  filter.frequency.setValueAtTime(Math.min(4200, hz * 14 * spec.brightness), at);
   filter.frequency.exponentialRampToValueAtTime(
-    Math.max(70, hz * 2.2 * voice.brightness),
+    Math.max(70, hz * 2.2 * spec.brightness),
     at + dur * 0.8,
   );
-  filter.Q.value = voice.q;
+  filter.Q.value = spec.q;
 
-  const o = osc(ctx, voice.wave, hz, at, at + dur + 0.06);
-  // An octave-down square under everything, for weight the filter cannot remove.
+  const o = osc(ctx, 'sawtooth', hz, at, at + dur + 0.06);
   const o2 = osc(ctx, 'square', hz / 2, at, at + dur + 0.06);
   const subGain = ctx.createGain();
   subGain.gain.value = 0.5;
-
   o.connect(filter);
   o2.connect(subGain).connect(filter);
   filter.connect(g).connect(v.out);

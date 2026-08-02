@@ -33,6 +33,14 @@
  * Everything is written in semitones from the track's key.
  */
 
+import type {
+  BassVoice,
+  KickVoice,
+  LeadVoice,
+  PercVoice,
+  StabVoice,
+} from './voices';
+
 export type ChordQuality = 'min' | 'maj' | 'sus' | 'min7';
 
 export interface Chord {
@@ -67,13 +75,26 @@ export interface Track {
    * tones across two octaves (0-2 low, 3-5 high); -1 rests.
    */
   motif: number[];
+  /**
+   * Steps the bass accents, as indices into the pattern. 303 accents are most
+   * of what makes an acid line move; ignored by the other bass voices.
+   */
+  accents?: number[];
   /** 0 = straight, ~0.25 = heavy shuffle on offbeat sixteenths. */
   swing: number;
-  bassWave: OscillatorType;
+
+  // ---- instruments. Named voices, not knobs: two tracks sharing a synth with
+  // different parameters still sound like the same band.
+  kickVoice: KickVoice;
+  percVoice: PercVoice;
+  bassVoice: BassVoice;
+  stabVoice: StabVoice;
+  leadVoice: LeadVoice;
+  padWave: OscillatorType;
   bassQ: number;
   bassBrightness: number;
-  padWave: OscillatorType;
-  stabWave: OscillatorType;
+  /** How much of the stab and lead is fed to the dub delay. 0 = dry. */
+  echo: number;
   /** How eagerly hat layers arrive. Low is spacious, high is relentless. */
   drive: number;
 }
@@ -99,11 +120,13 @@ const ROLLING = [
   true, false, false, false, true, false, false, false,
   true, false, false, true, true, false, false, false,
 ];
-/** Third beat missing, so the fourth lands harder. Dubbier, more space. */
-const BROKEN = [
-  true, false, false, false, true, false, false, false,
-  false, false, true, false, true, false, false, false,
-];
+/**
+ * A dropped kick on the third beat reads as a mistake rather than as space —
+ * the body counts four and one of them is missing. Dub techno does not break
+ * the kick; it keeps four on the floor and creates space with a *soft, long*
+ * kick and long silences everywhere else. So the pattern stays whole and the
+ * character moves into the voice.
+ */
 
 /** Clap on 2 and 4. With the kick, this is what the body counts. */
 const BACKBEAT = [
@@ -135,10 +158,10 @@ export const TRACKS: Track[] = [
   {
     id: 'ignition',
     name: 'Ignition',
-    blurb: 'Warm and straight. Offbeat pump, four on the floor, room to breathe.',
+    blurb: 'Warm house. Organ stabs, round bass, four on the floor with room around it.',
     key: 0,
-    // i - VI. Two chords, four bars each: the loop turns over every eight bars,
-    // which is slow enough that the change reads as an event.
+    // i - VI, four bars each: the loop turns over every eight bars, slow enough
+    // that the change reads as an event rather than as churn.
     progression: [
       { root: 0, quality: 'min' },
       { root: 8, quality: 'maj' },
@@ -154,20 +177,24 @@ export const TRACKS: Track[] = [
     ],
     motif: [-1, -1, -1, -1, 3, -1, 4, -1, -1, -1, 3, -1, -1, 5, -1, -1],
     swing: 0,
-    bassWave: 'sawtooth',
+    kickVoice: 'punch',
+    percVoice: 'clap',
+    bassVoice: 'pluck',
+    stabVoice: 'organ',
+    leadVoice: 'pluck',
+    padWave: 'sawtooth',
     bassQ: 8,
     bassBrightness: 1,
-    padWave: 'sawtooth',
-    stabWave: 'sawtooth',
+    echo: 0.12,
     drive: 1,
   },
   {
     id: 'circuit',
     name: 'Circuit',
-    blurb: 'Acid. Rolling sixteenths, a squelching bassline, relentless.',
+    blurb: 'Acid. A 303 that slides and screams, a snare backbeat, and an actual tune.',
     key: 3,
-    // i - VII, two bars each. Rocks back and forth and never resolves, which is
-    // exactly what you want from something meant to run for twenty minutes.
+    // i - VII, two bars each. Rocks and never resolves, which is what you want
+    // from something meant to run for twenty minutes.
     progression: [
       { root: 0, quality: 'min7' },
       { root: 10, quality: 'maj' },
@@ -181,42 +208,58 @@ export const TRACKS: Track[] = [
       [0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 2, 1],
       [0, 0, -1, 0, 0, -1, 0, 0, 1, 0, -1, 1, 2, -1, 2, 1],
     ],
-    motif: [3, -1, 4, -1, 3, -1, 5, -1, 4, -1, 3, -1, 4, 5, -1, -1],
+    // Two bars, so it is a line rather than a cell — the one track here with a
+    // melody you could hum, which is the thing worth leaning into.
+    motif: [
+      3, -1, 4, -1, 3, -1, 5, 4, -1, 3, -1, -1, 4, -1, 5, -1,
+      3, -1, 4, -1, 5, -1, 4, 3, -1, -1, 5, -1, 4, 3, -1, -1,
+    ],
+    accents: [0, 4, 8, 12, 14],
     swing: 0,
-    bassWave: 'sawtooth',
+    kickVoice: 'tight',
+    percVoice: 'snare',
+    bassVoice: 'acid',
+    stabVoice: 'saw',
+    leadVoice: 'acid',
+    padWave: 'square',
     bassQ: 17,
     bassBrightness: 1.6,
-    padWave: 'square',
-    stabWave: 'square',
+    echo: 0.2,
     drive: 1.4,
   },
   {
     id: 'feedback',
     name: 'Feedback',
-    blurb: 'Dub techno. Broken kick, deep sub, chords that hang in the room.',
+    blurb: 'Dub techno. A soft deep kick, a rimshot, and chords that echo away for bars.',
     key: -4,
-    // One chord for eight bars, then a sus for eight. Barely a progression —
-    // the point is the room, not the harmony.
+    // One chord for eight bars, then a sus for eight. Barely a progression: the
+    // point is the room and the decay, not the harmony.
     progression: [
       { root: 0, quality: 'min7' },
       { root: 0, quality: 'sus' },
     ],
     barsPerChord: 8,
-    kick: BROKEN,
+    kick: FOUR_ON_FLOOR,
     clap: BACKBEAT,
     stab: STAB_SPARSE,
     bass: [
       [0, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1],
       [0, -1, -1, -1, -1, -1, -1, -1, 2, -1, -1, -1, -1, -1, -1, -1],
-      [0, -1, -1, 0, -1, -1, 2, -1, 1, -1, -1, 1, -1, -1, 2, -1],
+      [0, -1, -1, -1, -1, -1, 2, -1, 1, -1, -1, -1, -1, -1, 2, -1],
     ],
-    motif: [-1, -1, -1, -1, -1, -1, -1, -1, 3, -1, -1, -1, -1, -1, 5, -1],
+    motif: [-1, -1, -1, -1, -1, -1, -1, -1, 3, -1, -1, -1, -1, -1, -1, -1],
     swing: 0.18,
-    bassWave: 'square',
+    kickVoice: 'deep',
+    percVoice: 'rim',
+    bassVoice: 'sub',
+    stabVoice: 'dub',
+    leadVoice: 'bell',
+    padWave: 'sawtooth',
     bassQ: 4,
     bassBrightness: 0.5,
-    padWave: 'sawtooth',
-    stabWave: 'triangle',
+    // The signature. A stab that is mostly its own echoes is the entire genre,
+    // and naming the Axiom "Feedback" makes it too apt to pass up.
+    echo: 0.85,
     drive: 0.55,
   },
 ];

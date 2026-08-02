@@ -142,7 +142,11 @@ describe('the songs (GDD §18.2)', () => {
       }
       expect(t.clap, `${t.id} clap`).toHaveLength(16);
       expect(t.stab, `${t.id} stab`).toHaveLength(16);
-      expect(t.motif, `${t.id} motif`).toHaveLength(16);
+      // A motif may run one or two bars — Circuit's is two, which is what makes
+      // it a line you could hum rather than a cell that repeats. Anything not a
+      // whole number of bars drifts against the loop.
+      expect(t.motif.length % 16, `${t.id} motif is not whole bars`).toBe(0);
+      expect(t.motif.length).toBeGreaterThan(0);
       expect(t.kick.some(Boolean), `${t.id} has no kick`).toBe(true);
       // The clap on 2 and 4 is the backbone. A track without one is missing the
       // thing the body counts, which is how the first version sounded thin.
@@ -163,6 +167,17 @@ describe('the songs (GDD §18.2)', () => {
         expect(c.root).toBeGreaterThanOrEqual(0);
         expect(c.root).toBeLessThan(12);
       }
+    }
+  });
+
+  it('each track is built from a different set of instruments', () => {
+    // The point of the rewrite: two tracks sharing a synth with different knob
+    // settings still sound like the same band. Distinctness has to come from
+    // the voices, so no two tracks may pick the same one everywhere.
+    const keys = ['kickVoice', 'percVoice', 'bassVoice', 'stabVoice', 'leadVoice'] as const;
+    for (const key of keys) {
+      const used = new Set(TRACKS.map((t) => t[key]));
+      expect(used.size, `every track uses the same ${key}`).toBe(TRACKS.length);
     }
   });
 

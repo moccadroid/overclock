@@ -1530,6 +1530,70 @@ and it is one the player chose.
 
 ---
 
+## D-76 · SETTLED · Distinctness comes from voices, not from knobs
+
+Reported: "now all the songs have the same voices". Correct, and the reason is
+that the first pass expressed character as *parameters on one synth* — same
+kick, same clap, same bass topology, different filter Q. Two tracks sharing a
+synth with different settings still sound like the same band.
+
+Each layer is now a set of named instruments:
+
+- **Kick** — `punch` (house: mid decay, present click), `tight` (909: short,
+  hard, leaves room for sixteenths), `deep` (dub: long, soft, almost no click).
+- **Backbeat** — `clap` (three bursts a few ms apart, like many hands not quite
+  together), `snare` (noise over a tuned body), `rim` (a woody tick, almost
+  nothing).
+- **Bass** — `pluck` (round, stays out of the way), `acid` (a real 303: one saw,
+  a steep resonant lowpass, and a *filter envelope per note*. The squelch is the
+  envelope, not the resonance — that is the part everyone gets wrong. Accents
+  open it further; glide slurs one note into the next), `sub` (almost a sine, no
+  filter movement at all).
+- **Stab** — `organ` (stacked sines at octave and fifth, drawbar registration,
+  no filter movement), `saw`, `dub`.
+- **Lead** — `pluck`, `acid` (the 303 an octave up, reedy and sliding), `bell`
+  (two-operator FM at a non-integer ratio).
+
+Measured across five seconds of each, average energy per band:
+
+| track | onsets | sub | low-mid | mid | high |
+|---|---|---|---|---|---|
+| Ignition | 27 | 209 | 102 | 42 | 9.8 |
+| Circuit | 24 | 189 | 117 | 84 | 43 |
+| Feedback | 17 | 223 | 64 | 16 | 2.5 |
+
+Previously all three sat between 9 and 17 in the highs. They now span 2.5 to 43.
+
+A test asserts no two tracks share any voice slot — the failure mode this
+guards is silent, since a duplicated voice sounds fine, just not different.
+
+## D-77 · SETTLED · Dub techno does not break the kick
+
+Reported: "the broken kick doesn't work as well". It does not, and the reason is
+that a missing third beat reads as an error rather than as space — the body
+counts four and one of them is absent, with no compensating accent to explain it.
+
+The genre does not do that. It keeps four on the floor and creates space with a
+*soft, long, low* kick and silence everywhere else. So the pattern went back to
+whole and the character moved into the voice, where it belonged.
+
+Feedback also gained the thing that actually defines the genre: **a dub delay**.
+A dotted-eighth feedback loop with a lowpass inside it, so each repeat returns
+darker than the last and the tail dissolves rather than stopping. Its stab and
+lead are sent to it at 0.85, meaning most of what you hear from those layers is
+echoes. Naming the Axiom "Feedback" made this too apt to pass up.
+
+## D-78 · SETTLED · Circuit gets a tune
+
+"Circuit has a melody, that's good — lean into this even more."
+
+Its motif went from one bar to two, so it is a line rather than a cell that
+repeats, and the motif sequencer now walks its own length instead of the bar's.
+The lead is the 303 voice with glide, which is what makes a line sound *played*
+rather than stepped, and the bass takes accents on five of its sixteen steps.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

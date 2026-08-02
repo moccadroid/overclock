@@ -31,7 +31,7 @@ import { Clock } from './clock';
 import {
   bass,
   chord,
-  clap,
+  perc,
   hat,
   hurt,
   kick,
@@ -87,6 +87,15 @@ export class Audio {
   private lowShelf!: BiquadFilterNode;
   /** Automated across each 16-bar phrase - the genre's build and release. */
   private musicFilter!: BiquadFilterNode;
+  /**
+   * The dub delay. A feedback loop with a lowpass inside it, so each repeat
+   * arrives darker than the last and the tail dissolves rather than stopping.
+   * This is the entire personality of dub techno, and the reason the Feedback
+   * Axiom's track sounds like a different genre rather than a preset.
+   */
+  private delay!: DelayNode;
+  private delayFeedback!: GainNode;
+  private echoSend!: GainNode;
 
   private state: AudioState = {
     intensity: 0,
@@ -107,6 +116,9 @@ export class Audio {
   private silenced = false;
   /** The chord currently sounding. Accents snap to it. */
   private tones: number[] = [0, 3, 7];
+  /** Previous note, for 303 glide. 0 means "no slide into this one". */
+  private lastBassHz = 0;
+  private lastLeadHz = 0;
   /** Smoothed, so the arrangement never flickers between layers frame to frame. */
   private smoothed = 0;
 
@@ -157,6 +169,24 @@ export class Audio {
     this.musicBus = ctx.createGain();
     this.musicBus.gain.value = 0.9;
     this.musicBus.connect(this.musicFilter);
+
+    // Dotted eighth is the classic dub delay: it lands between the beats rather
+    // than on them, so the echoes read as counter-rhythm instead of as a
+    // stutter. Set properly once the tempo is known.
+    this.delay = ctx.createDelay(2);
+    this.delay.delayTime.value = (60 / 112) * 0.75;
+    this.delayFeedback = ctx.createGain();
+    this.delayFeedback.gain.value = 0.52;
+    const delayDamp = ctx.createBiquadFilter();
+    delayDamp.type = 'lowpass';
+    delayDamp.frequency.value = 1700;
+
+    this.delay.connect(delayDamp).connect(this.delayFeedback).connect(this.delay);
+    this.delay.connect(this.musicFilter);
+
+    this.echoSend = ctx.createGain();
+    this.echoSend.gain.value = 0;
+    this.echoSend.connect(this.delay);
 
     this.engineBus = ctx.createGain();
     this.engineBus.gain.value = 0.5;
@@ -279,6 +309,8 @@ export class Audio {
     // and the earlier build moved it every frame. Tempo now sits at 112 and only
     // Meltdown — a once-per-run, permanent, announced event — shifts it.
     this.clock.bpm = 112 + state.meltdown * 12;
+    this.delay.delayTime.setTargetAtTime((60 / this.clock.bpm) * 0.75, this.ctx.currentTime, 0.2);
+    this.echoSend.gain.setTargetAtTime(this.track.echo, this.ctx.currentTime, 0.3);
     this.setDrive(Math.max(state.heat * 0.6, state.meltdown * 0.45));
     this.musicBus.gain.value = state.stalled ? 0.12 : 0.9;
 
@@ -335,13 +367,14 @@ export class Audio {
     const swung = index % 2 === 1 ? at + beat * 0.25 * t.swing : at;
 
     if (t.kick[index]) {
-      kick(punch, at, 0.95);
+      kick(punch, at, 0.95, t.kickVoice);
       this.duck(at);
     }
-    // Clap on 2 and 4 - with the kick, the thing the body counts. It drops out
-    // for the last bar of a phrase, which is what makes the next downbeat land.
+    // The backbeat on 2 and 4 - with the kick, the thing the body counts. It
+    // drops for the last bar of a phrase, which is what makes the next downbeat
+    // land.
     if (t.clap[index] && this.bar % PHRASE_BARS !== PHRASE_BARS - 1) {
-      clap(punch, at, 0.75);
+      perc(punch, at, 0.75, t.percVoice);
     }
 
     const d = i * t.drive;
@@ -355,11 +388,19 @@ export class Audio {
       const pattern = t.bass[i > 0.7 ? 2 : i > 0.3 ? 1 : 0]!;
       const tone = pattern[index]!;
       if (tone >= 0) {
-        bass(music, swung, semiHz(tones[tone % tones.length]! - 12), 0.85, {
-          wave: t.bassWave,
+        const hz = semiHz(tones[tone % tones.length]! - 12);
+        bass(music, swung, hz, 0.85, {
+          voice: t.bassVoice,
           q: t.bassQ,
           brightness: t.bassBrightness * colour,
+          accent: t.accents?.includes(index) ?? false,
+          // Slide from the previous note when they are adjacent sixteenths.
+          // Glide is what makes a 303 line sound played rather than stepped.
+          glideFrom: this.lastBassHz > 0 && pattern[(index + 15) % 16]! >= 0 ? this.lastBassHz : 0,
         });
+        this.lastBassHz = hz;
+      } else {
+        this.lastBassHz = 0;
       }
     }
 
@@ -368,16 +409,24 @@ export class Audio {
     // The stab. Enters a quarter of the way into a phrase and is most of what
     // reads as melody in this genre.
     if (t.stab[index] && (phrase > 0.24 || i > 0.5)) {
-      stab(music, swung, tones, 0.7 + i * 0.5, t.stabWave);
+      stab(music, swung, tones, 0.7 + i * 0.5, t.stabVoice);
+      if (t.echo > 0.01) stab(this.voice(this.echoSend), swung, tones, 0.7 + i * 0.5, t.stabVoice);
     }
 
     // The motif: one or two bars, repeated unchanged. The hook is repetition,
     // not development - so it arrives on a phrase boundary and then never varies.
+    // The motif walks its own length, so a 32-step line reads as two bars of
+    // tune rather than the same bar twice.
     if (phrase > 0.48 || i > 0.65) {
-      const step = t.motif[index]!;
+      const step = t.motif[count % t.motif.length]!;
       if (step >= 0) {
         const octave = step >= 3 ? 12 : 0;
-        motif(music, swung, semiHz(tones[step % 3]! + 24 + octave), 0.9);
+        const hz = semiHz(tones[step % 3]! + 24 + octave);
+        motif(music, swung, hz, 0.9, t.leadVoice, this.lastLeadHz);
+        if (t.echo > 0.01) motif(this.voice(this.echoSend), swung, hz, 0.9, t.leadVoice);
+        this.lastLeadHz = hz;
+      } else {
+        this.lastLeadHz = 0;
       }
     }
 
@@ -421,7 +470,7 @@ export class Audio {
     // Occasions first, and never dropped. A level-up chord that loses its slot
     // to the 300th kill note is the system defeating its own purpose.
     for (const occasion of this.occasions.splice(0, 2)) {
-      const tones = this.chordTones();
+      const tones = this.tones;
       if (occasion.kind === 'overheat') {
         // Overheat resolves *down* a fourth: the one chord in the game that
         // sounds like something went wrong rather than right.
