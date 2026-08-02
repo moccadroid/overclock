@@ -93,8 +93,13 @@ export const TUNABLE = {
    * it, so the opening gets its own lever.
    */
   xpFirstLevel: 5,
-  xpBase: 8,
-  xpGrowth: 1.38,
+  /**
+   * Retuned for the sustained-pressure director. Holding density instead of
+   * dumping fixed waves raised kills per run from ~3.9k to ~26k, so a curve
+   * built for the old volume delivered a draft every ten seconds.
+   */
+  xpBase: 16,
+  xpGrowth: 1.42,
   xpPerShard: 1,
   draftCards: 3,
   rerollsPerRun: 2,
@@ -108,17 +113,32 @@ export const TUNABLE = {
   // ---- §12 director ----
   /** Threat reaches ~24 by the 20:00 Meltdown line — the scale wave bands use. */
   threatPerSecond: 0.02,
-  waveIntervalBase: 7.0,
-  waveIntervalPerThreat: 0.2,
-  waveIntervalMin: 2.0,
+  /** How long one composition holds before the director rotates to another. */
+  compositionDuration: 26,
+  /** The burst that announces a new composition, as a fraction of target density. */
+  compositionArrivalFraction: 0.28,
   /**
-   * Soft population throttle. The director stops adding to the arena above this,
-   * which keeps a starting engine from being buried before it can be built and
-   * keeps entity counts inside the §16.1 legibility budget. Difficulty still
-   * comes from composition and Threat (§11 bans HP inflation, not density caps).
+   * The density the director actively *maintains*, not a cap it stops at.
+   *
+   * A wave used to be a fixed quantity: spawn N, and if the player cleared them
+   * the arena sat empty until the next one. That produced exactly the wrong
+   * rhythm — delete everything, then wander around collecting in silence. A wave
+   * is now a *composition*, and the director keeps feeding that composition in
+   * until it is replaced. The screen should never empty.
    */
-  maxAliveBase: 70,
-  maxAlivePerThreat: 16,
+  targetAliveBase: 30,
+  targetAlivePerThreat: 20,
+  /** Ceiling, for the §16.1 legibility budget and for frame time. */
+  maxAliveHard: 900,
+  /**
+   * How fast the director can close a density deficit, enemies per second. This
+   * has to exceed a strong engine's kill rate or the arena empties anyway — the
+   * ceiling on pressure is the density target, not the rate of resupply.
+   */
+  refillRateBase: 16,
+  refillRatePerThreat: 4,
+  /** How much of the deficit it tries to close each second, 0..1. */
+  refillAggression: 0.55,
   /**
    * Enemies this far from the player are silently removed, with no drops. Not in
    * the GDD, but required once the arena is bigger than the view: without it,
@@ -144,22 +164,8 @@ export const TUNABLE = {
   spawnRingMax: 1480,
   /** Candidate directions considered when placing a wave. */
   spawnCandidates: 12,
-  /**
-   * A wave template's members arrive spread over this long, from 2-3 compass
-   * slots rather than one. A template dumped at a single point produced a clump
-   * that one Nova deleted, followed by silence — pressure has to be continuous
-   * to be pressure.
-   */
+  /** Spread of arrival times within a composition's announcing burst. */
   waveArrivalSpread: 1.6,
-  waveCompassSlots: 3,
-  /**
-   * Ambient trickle: a constant low stream between wave templates, so the arena
-   * is never empty. Interval shortens with Threat.
-   */
-  ambientIntervalBase: 1.5,
-  ambientIntervalMin: 0.34,
-  ambientIntervalPerThreat: 0.045,
-  ambientPerThreat: 0.11,
   /** Seconds an enemy takes to draw itself in (§17.1). Presentation only. */
   spawnFadeTime: 0.28,
 

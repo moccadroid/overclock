@@ -169,7 +169,6 @@ const waveSchema: Schema = {
   minThreat: { type: 'number', required: true, min: 0 },
   maxThreat: { type: 'number', required: true, min: 0 },
   weight: { type: 'number', required: true, min: 0 },
-  stream: { type: 'boolean' },
   reactive: { type: 'string', oneOf: ['projectiles'] },
   entries: {
     type: 'array',

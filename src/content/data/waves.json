@@ -4,7 +4,6 @@
     "minThreat": 0,
     "maxThreat": 99,
     "weight": 14,
-    "stream": true,
     "entries": [{ "enemy": "mote", "count": 2, "spread": 90 }],
     "description": "Ambient trickle. The horde is never fully cleared."
   },
@@ -13,7 +12,6 @@
     "minThreat": 1.5,
     "maxThreat": 99,
     "weight": 9,
-    "stream": true,
     "entries": [{ "enemy": "drifter", "count": 1, "spread": 70 }],
     "description": "Ambient trickle, heavier."
   },
@@ -22,7 +20,6 @@
     "minThreat": 6,
     "maxThreat": 99,
     "weight": 5,
-    "stream": true,
     "entries": [{ "enemy": "charger", "count": 1, "spread": 70 }],
     "description": "Ambient trickle that punishes standing still."
   },
@@ -31,7 +28,6 @@
     "minThreat": 4,
     "maxThreat": 99,
     "weight": 4,
-    "stream": true,
     "entries": [{ "enemy": "leech", "count": 1, "spread": 70 }],
     "description": "Ambient economic pressure."
   },

@@ -327,8 +327,11 @@ export class World {
   purged = new Set<string>();
 
   threat = 0;
-  waveTimer = 2;
-  ambientTimer = 1;
+  /** §12 — the composition currently being fed into the arena. */
+  composition: WaveTemplateDef | null = null;
+  compositionTimer = 0;
+  /** Fractional spawns carried between ticks so the stream is smooth. */
+  private refillDebt = 0;
   beaconTimer = 20;
   recompileTimer = 0;
   wardenTimer: number = TUNABLE.wardenInterval;
@@ -1861,23 +1864,14 @@ export class World {
 
     this.releasePendingSpawns();
 
-    // Soft population throttle — see TUNABLE.maxAliveBase. Difficulty keeps
-    // rising through composition and Threat; only raw pile-up is capped.
-    const maxAlive = TUNABLE.maxAliveBase + this.threat * TUNABLE.maxAlivePerThreat;
-
-    // Ambient trickle: constant low pressure so the arena is never empty between
-    // templates. This is the difference between "a clump, then silence" and a
-    // horde that keeps coming.
-    this.ambientTimer -= dt;
-    if (this.ambientTimer <= 0) {
-      this.ambientTimer = Math.max(
-        TUNABLE.ambientIntervalMin,
-        TUNABLE.ambientIntervalBase - this.threat * TUNABLE.ambientIntervalPerThreat,
-      );
-      if (this.enemies.length < maxAlive) this.spawnAmbient();
+    // Rotate the composition, and announce the new one with an arrival burst.
+    this.compositionTimer -= dt;
+    if (this.compositionTimer <= 0 || !this.composition) {
+      this.compositionTimer = TUNABLE.compositionDuration;
+      this.rotateComposition();
     }
 
-    // §10.2 — Wardens punctuate waves once Threat is high enough.
+    // §10.2 — Wardens punctuate the flow once Threat is high enough.
     if (this.threat >= TUNABLE.wardenFromThreat) {
       this.wardenTimer -= dt;
       if (this.wardenTimer <= 0) {
@@ -1887,15 +1881,77 @@ export class World {
       }
     }
 
-    this.waveTimer -= dt;
-    if (this.waveTimer > 0) return;
-    this.waveTimer = Math.max(
-      TUNABLE.waveIntervalMin,
-      TUNABLE.waveIntervalBase - this.threat * TUNABLE.waveIntervalPerThreat,
-    );
-    if (this.enemies.length >= maxAlive) return;
+    this.sustainPressure(dt);
+  }
 
-    this.spawnWave(false);
+  /** Live density the director is actively trying to hold. */
+  get targetAlive(): number {
+    return Math.min(
+      TUNABLE.maxAliveHard,
+      TUNABLE.targetAliveBase + this.threat * TUNABLE.targetAlivePerThreat,
+    );
+  }
+
+  /**
+   * Feed the current composition in continuously to close the density deficit.
+   *
+   * Density is *maintained*, not capped. This is not rubber-banding: the target
+   * is a pure function of Threat, which only ever rises. Killing faster earns
+   * more fuel, more XP and more EPS — it does not earn quiet.
+   */
+  private sustainPressure(dt: number): void {
+    const composition = this.composition;
+    if (!composition) return;
+
+    const present = this.enemies.length + this.pendingSpawns.length;
+    const deficit = this.targetAlive - present;
+    if (deficit <= 0) {
+      this.refillDebt = 0;
+      return;
+    }
+
+    const maxRate = TUNABLE.refillRateBase + this.threat * TUNABLE.refillRatePerThreat;
+    const rate = Math.min(maxRate, deficit * TUNABLE.refillAggression);
+    this.refillDebt += rate * dt;
+
+    let guard = 0;
+    while (this.refillDebt >= 1 && guard++ < 64) {
+      this.refillDebt -= 1;
+      this.spawnFromComposition(composition, false, 0);
+    }
+  }
+
+  private rotateComposition(): void {
+    const eligible = WAVES.filter((w) => this.threat >= w.minThreat && this.threat <= w.maxThreat);
+    if (eligible.length === 0) return;
+    this.composition = this.rng.pickWeighted(
+      eligible,
+      eligible.map((w) => this.waveWeight(w)),
+    );
+
+    // The arrival: a real burst so a new composition announces itself, sized
+    // against the density target rather than the template's own counts.
+    const burst = Math.round(this.targetAlive * TUNABLE.compositionArrivalFraction);
+    for (let i = 0; i < burst; i++) {
+      this.spawnFromComposition(this.composition, false, this.rng.next() * TUNABLE.waveArrivalSpread);
+    }
+    const origin = this.pickSpawnOrigin();
+    this.emit({ type: 'wave', depth: 0, x: origin.x, y: origin.y });
+  }
+
+  /** Draw one enemy from a composition, weighted by its entry counts. */
+  private spawnFromComposition(
+    template: WaveTemplateDef,
+    enriched: boolean,
+    delay: number,
+  ): void {
+    if (template.entries.length === 0) return;
+    const entry = this.rng.pickWeighted(
+      template.entries,
+      template.entries.map((e) => e.count),
+    );
+    const origin = this.pickSpawnOrigin();
+    this.queueSpawn(entry.enemy, origin.x, origin.y, entry.spread, delay, enriched);
   }
 
   /**
@@ -1948,51 +2004,22 @@ export class World {
   }
 
   /** One or two light enemies from a random direction, scaled by Threat. */
-  private spawnAmbient(): void {
-    const stream = WAVES.filter(
-      (w) => w.stream === true && this.threat >= w.minThreat && this.threat <= w.maxThreat,
-    );
-    if (stream.length === 0) return;
-    const template = this.rng.pickWeighted(
-      stream,
-      stream.map((w) => w.weight),
-    );
-    const extra = 1 + Math.floor(this.threat * TUNABLE.ambientPerThreat);
-    for (const entry of template.entries) {
-      for (let i = 0; i < entry.count * extra; i++) {
-        const origin = this.pickSpawnOrigin();
-        this.queueSpawn(entry.enemy, origin.x, origin.y, entry.spread, 0, false);
-      }
-    }
-  }
-
   /**
-   * §12.2 — a wave template arrives from one compass direction, off-screen.
-   * The ring radius is viewport-independent on purpose: the simulation must not
-   * know how big the player's window is, or two players on different monitors
-   * would get different runs from the same seed.
+   * §12.3 — a channelled Beacon pulls the next wave in early and enriched. With
+   * the director maintaining density continuously, "early" means a burst of the
+   * current composition on top of the flow, not a replacement for it.
    */
   private spawnWave(enriched: boolean): void {
-    const eligible = WAVES.filter(
-      (w) => !w.stream && this.threat >= w.minThreat && this.threat <= w.maxThreat,
-    );
-    if (eligible.length === 0) return;
-    const template = this.rng.pickWeighted(eligible, eligible.map((w) => this.waveWeight(w)));
+    if (!this.composition) this.rotateComposition();
+    const composition = this.composition;
+    if (!composition) return;
 
-    // Several compass slots, not one — a template that all lands in one place is
-    // one Nova away from nothing happening.
-    const slots: { x: number; y: number }[] = [];
-    for (let i = 0; i < TUNABLE.waveCompassSlots; i++) slots.push(this.pickSpawnOrigin());
-
-    for (const entry of template.entries) {
-      for (let i = 0; i < entry.count; i++) {
-        const origin = slots[this.rng.int(slots.length)]!;
-        const delay = this.rng.next() * TUNABLE.waveArrivalSpread;
-        this.queueSpawn(entry.enemy, origin.x, origin.y, entry.spread, delay, enriched);
-      }
+    const burst = Math.round(this.targetAlive * TUNABLE.compositionArrivalFraction * 1.5);
+    for (let i = 0; i < burst; i++) {
+      this.spawnFromComposition(composition, enriched, this.rng.next() * TUNABLE.waveArrivalSpread);
     }
-    const first = slots[0]!;
-    this.emit({ type: 'wave', depth: 0, x: first.x, y: first.y });
+    const origin = this.pickSpawnOrigin();
+    this.emit({ type: 'wave', depth: 0, x: origin.x, y: origin.y });
   }
 
   /** Place one spawn around an origin and queue it to arrive after `delay`. */

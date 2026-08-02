@@ -681,6 +681,65 @@ the player's own Programs against them.
 
 ---
 
+## D-32 · SETTLED · A wave is a composition, not a quantity
+
+Reported from play: "waves seem to be a set number of units, and if I clear them,
+nobody comes until the next... my programs just deleted everything on screen and
+then I sat around for seconds collecting with no enemies."
+
+That was a design error on my part, not a tuning miss. I had built waves as
+*quantities* — spawn N of a template, then wait — so any engine that out-killed
+the spawn budget bought itself silence. §7 calls the horde a supply chain; a
+supply chain does not stop.
+
+The director now holds a **composition** and feeds it continuously. It picks a
+template, announces it with an arrival burst, and then spawns from that
+composition at whatever rate is needed to sustain a target density, until the
+composition rotates ~26s later. The entry counts in a template are now *ratios*,
+not amounts.
+
+Density is maintained, not capped, and this is deliberately **not** rubber-
+banding: the target is a pure function of Threat, which only ever rises. Killing
+faster earns more fuel, more XP and more EPS — it does not earn quiet. Resupply
+rate has to exceed a strong engine's kill rate or the arena empties anyway, so
+the ceiling on pressure is the density target rather than the rate of refill.
+
+**What this changed.** Against the previous director, same seeds: kills per run
+went from 3,889 to 25,817 and peak EPS from 187 to 2,054. More importantly the
+*economy* finally engaged — Cycle demand went from 141% of budget to 1,384%, and
+time spent in Heat instability from 3% to 35%. Capacity, Scrap and fuel now
+matter, because they are finally scarce. The reported "zero incentive to scrap
+anything or care about cycles" was a symptom of the arena being empty.
+
+The XP curve was retuned for the new kill volume (a curve built for 3.9k kills
+delivered a draft every ten seconds at 26k).
+
+**The harness bot is no longer a valid balance proxy.** At 200+ converging
+enemies, survival depends on kiting skill the reference pilot does not have — it
+now dies around 6–7 minutes while a human reached level 17 comfortably. Tuning
+density down until the bot survives would undo precisely what was asked for, so
+density is set by judgement here and wants human play to confirm. The harness
+remains authoritative for cadence, economy and throughput, which are pilot-
+independent.
+
+---
+
+## D-33 · SETTLED · Loot must not look like a creature
+
+Reported: "the loot looks a LOT like the enemies right now, especially the
+starter enemies look very much alike."
+
+Fuel motes were a stroked circle with a halo — which is a small Drifter. The
+distinction is now categorical rather than a matter of size: **enemies are
+outlined polygons that hold still; pickups are filled marks that bob and spark.**
+Fuel is a filled core with a rotating four-point spark, XP a filled white
+diamond, and neither carries an outline ring.
+
+Mote and Drifter share a behaviour and therefore share a silhouette by §10.1, so
+they could only be told apart by size. The Drifter now carries a concentric core.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

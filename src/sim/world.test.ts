@@ -149,6 +149,50 @@ describe('navigation (GDD §22 — ruins are cover, not walls that trap)', () =>
 });
 
 describe('the horde is continuous, not lumpy', () => {
+  it('holds density against an engine that clears the screen', () => {
+    // The failure this guards against: an engine strong enough to delete
+    // everything buys itself seconds of empty arena. A wave is a composition the
+    // director keeps feeding, not a quantity it dumps once.
+    const w = new World({ seed: 'pressure', axiomId: 'ignition' });
+    const rows: [string, string, string | null][] = [
+      ['clock', 'nova', 'amplify'],
+      ['on_kill', 'nova', 'split'],
+      ['on_hit', 'arc', 'amplify'],
+    ];
+    rows.forEach(([trigger, action, modifier], i) => {
+      const p = w.engine.programs[i]!;
+      p.triggerId = trigger;
+      p.actionId = action;
+      p.modifierIds[0] = modifier;
+    });
+    w.engine.recompile();
+    w.syncBudget();
+
+    runPiloted(w, 90);
+
+    let starved = 0;
+    let worstGap = 0;
+    let gap = 0;
+    const ticks = 60 * 150;
+    for (let i = 0; i < ticks; i++) {
+      w.player.alive = true;
+      w.player.integrity = w.player.maxIntegrity;
+      w.advance(botInput(w));
+      // "Starved" means well under the density the director is aiming to hold.
+      if (w.enemies.length < w.targetAlive * 0.25) {
+        starved++;
+        gap++;
+        worstGap = Math.max(worstGap, gap);
+      } else {
+        gap = 0;
+      }
+    }
+
+    expect(w.stats.kills).toBeGreaterThan(500);
+    expect(starved / ticks).toBeLessThan(0.1);
+    expect(worstGap / 60).toBeLessThan(3);
+  });
+
   it('never leaves the arena empty for long', () => {
     const w = new World({ seed: 'stream', axiomId: 'ignition' });
     // A deliberately over-powered engine: clears everything it can reach, which
@@ -282,7 +326,9 @@ describe('Meltdown and Containment (GDD §11.4, §13.2)', () => {
     const kinds = new Set<string>();
     for (let i = 0; i < 60 * 240; i++) {
       // Keep the pilot alive: this test is about what the director produces,
-      // not about whether a bot can survive Containment.
+      // not about whether a bot can survive Containment. `alive` matters as much
+      // as integrity — advance() no-ops once the player is down.
+      w.player.alive = true;
       w.player.integrity = w.player.maxIntegrity;
       w.advance(botInput(w));
       for (const c of w.containment) kinds.add(c.kind);

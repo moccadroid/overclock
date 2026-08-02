@@ -531,27 +531,43 @@ export class Renderer {
     }
     if (anyXp) g.fill({ color: PALETTE.xp, alpha: BAND.inFlight });
 
-    // Fuel motes: a bright core with a hue halo, batched per hue.
+    // Fuel motes: a filled core with a four-point spark, batched per hue.
+    //
+    // Loot must never be mistakable for a creature. Enemies are *outlined*
+    // polygons that hold still; pickups are *filled* marks that bob and spark.
+    // A stroked circle around a fuel mote read as a small Drifter, which is
+    // exactly the confusion to avoid.
     for (const hue of HUE_ORDER) {
       const color = HUE_COLOR[hue];
+
       let any = false;
       for (const item of world.pickups) {
         if (item.kind === 'xp' || item.hue !== hue) continue;
         if (!this.camera.isVisible(item.x, item.y, 20)) continue;
         const y = item.y + Math.sin(item.age * 3.4 + item.id) * 1.8;
-        g.circle(item.x, y, 5.5);
+        const spin = item.age * 1.6 + item.id;
+        for (let i = 0; i < 4; i++) {
+          const a = spin + (i / 4) * Math.PI * 2;
+          g.moveTo(item.x + Math.cos(a) * 3, y + Math.sin(a) * 3).lineTo(
+            item.x + Math.cos(a) * 7,
+            y + Math.sin(a) * 7,
+          );
+        }
         any = true;
       }
-      if (any) g.stroke({ width: 1.5, color, alpha: BAND.inFlight * 0.75 });
+      if (any) g.stroke({ width: 1.2, color, alpha: BAND.inFlight * 0.7 });
 
       any = false;
       for (const item of world.pickups) {
         if (item.kind === 'xp' || item.hue !== hue) continue;
         if (!this.camera.isVisible(item.x, item.y, 20)) continue;
         const y = item.y + Math.sin(item.age * 3.4 + item.id) * 1.8;
-        g.circle(item.x, y, 2.6);
+        g.circle(item.x, y, 3.2);
         any = true;
       }
+      // Band 4, not band 1: §16.2 reserves full luminance for the player alone,
+      // and loot popping is not worth breaking the one rule that lets you find
+      // yourself in chaos.
       if (any) g.fill({ color, alpha: BAND.entity });
     }
   }
@@ -605,6 +621,13 @@ export class Renderer {
         g.beginPath();
         polygonPath(g, verts);
         g.fill({ color, alpha: 0.08 * health });
+      }
+
+      // Mote and Drifter share a behaviour and therefore share a silhouette
+      // (§10.1), which left them distinguishable only by size. The Drifter gets
+      // a concentric core so the two read apart at a glance.
+      if (def.shape === 'circle') {
+        g.circle(e.x, e.y, r * 0.45).stroke({ width: 1.5, color, alpha: BAND.inFlight * born });
       }
 
       if (e.enriched) {

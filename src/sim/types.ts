@@ -174,7 +174,6 @@ export interface WaveTemplateDef {
    * Ambient trickle rather than a wave: drawn continuously between templates to
    * keep constant pressure. Stream templates should be small (1-2 enemies).
    */
-  stream?: boolean;
   /**
    * §12.2 — the director's reactive inputs. `projectiles` raises this template's
    * weight with the player's live projectile count, which is what turns pure
