@@ -21,6 +21,7 @@ interface Options {
   axiom: string | null;
   seedPrefix: string;
   recompile: RecompilePolicy;
+  burn: BurnPolicy;
   verbose: boolean;
 }
 
@@ -31,6 +32,7 @@ function parseArgs(argv: readonly string[]): Options {
     axiom: null,
     seedPrefix: 'harness',
     recompile: 'smart',
+    burn: 'strong',
     verbose: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -41,6 +43,7 @@ function parseArgs(argv: readonly string[]): Options {
     else if (arg === '--axiom' && next) opts.axiom = next;
     else if (arg === '--seed' && next) opts.seedPrefix = next;
     else if (arg === '--recompile' && next) opts.recompile = next as RecompilePolicy;
+    else if (arg === '--burn' && next) opts.burn = next as BurnPolicy;
     else if (arg === '--verbose') opts.verbose = true;
   }
   return opts;
@@ -79,7 +82,15 @@ interface RunResult {
   engine: string[];
 }
 
-function simulateRun(seed: string, axiomId: string, minutes: number): RunResult {
+/** Which rows the reference pilot sacrifices when it Recompiles. */
+export type BurnPolicy = 'strong' | 'weak' | 'all';
+
+function simulateRun(
+  seed: string,
+  axiomId: string,
+  minutes: number,
+  burn: BurnPolicy = 'strong',
+): RunResult {
   const world = new World({ seed, axiomId });
   const totalTicks = Math.round((minutes * 60) / SIM_DT);
   const levelTimes: number[] = [];
@@ -96,8 +107,11 @@ function simulateRun(seed: string, axiomId: string, minutes: number): RunResult 
       const live = world.engine.programs
         .map((_, i) => ({ i, share: world.outputShareOf([i]) }))
         .filter((r) => r.share > 0)
-        .sort((a, b) => b.share - a.share);
-      if (live.length > 0) world.recompile([live[0]!.i]);
+        .sort((a, b) => (burn === 'weak' ? a.share - b.share : b.share - a.share));
+      if (live.length > 0) {
+        const chosen = burn === 'all' ? live.map((r) => r.i) : [live[0]!.i];
+        world.recompile(chosen);
+      }
       world.pendingCeremony = null;
     }
 
@@ -189,7 +203,7 @@ function main(): void {
 
   console.log(
     `\n  headless sweep — ${opts.runs} run(s) x ${opts.minutes} min x ${axioms.length} axiom(s)` +
-      `  ·  recompile: ${opts.recompile}\n`,
+      `  ·  recompile: ${opts.recompile}/${opts.burn}\n`,
   );
 
   const all: RunResult[] = [];
@@ -197,7 +211,7 @@ function main(): void {
   for (const axiomId of axioms) {
     const results: RunResult[] = [];
     for (let i = 0; i < opts.runs; i++) {
-      results.push(simulateRun(`${opts.seedPrefix}-${i}`, axiomId, opts.minutes));
+      results.push(simulateRun(`${opts.seedPrefix}-${i}`, axiomId, opts.minutes, opts.burn));
     }
     all.push(...results);
 

@@ -365,11 +365,14 @@
   border-color: var(--signal);
   color: var(--signal);
 }
+/* Slot kinds are told apart by border colour rather than by separators. */
 .chip.trigger {
   border-color: #4a6a8c;
+  border-left-width: 3px;
 }
 .chip.action {
   border-color: #7a6a3c;
+  border-right-width: 3px;
 }
 .arrow {
   color: #3d5570;

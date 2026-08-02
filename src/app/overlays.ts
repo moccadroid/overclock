@@ -247,7 +247,9 @@ export class EditorOverlay extends Overlay {
       chips.className = 'chips';
       chips.appendChild(chip(program.triggerId, 'trigger', i, 'trigger', this));
       for (let s = 0; s < LOADBEARING.modifierSlotsPerProgram; s++) {
-        chips.appendChild(arrow());
+        // No flow arrows between slots: they were chevrons sitting next to the
+        // move buttons' chevrons, two symbols with different meanings in the
+        // same row. Adjacency already reads as sequence.
         const id = program.modifierIds[s] ?? null;
         const group = document.createElement('span');
         group.className = 'slot-group';
@@ -267,7 +269,6 @@ export class EditorOverlay extends Overlay {
         );
         chips.appendChild(group);
       }
-      chips.appendChild(arrow());
       chips.appendChild(chip(program.actionId, 'action', i, 'action', this));
 
       const stats = document.createElement('div');
@@ -468,13 +469,6 @@ export class EditorOverlay extends Overlay {
 
 function hasAnyNode(program: { triggerId: string | null; actionId: string | null; modifierIds: (string | null)[] }): boolean {
   return Boolean(program.triggerId || program.actionId || program.modifierIds.some(Boolean));
-}
-
-function arrow(): HTMLElement {
-  const el = document.createElement('span');
-  el.className = 'arrow';
-  el.textContent = '→';
-  return el;
 }
 
 /**
