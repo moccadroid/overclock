@@ -12,7 +12,7 @@
 import { World } from '../sim/world';
 import { SIM_DT } from '../sim/tunables';
 import { applyDraft, rollDraft } from '../sim/draft';
-import { botDraftChoice, botInput } from './bot';
+import { botDraftChoice, botInput, setRecompilePolicy, type RecompilePolicy } from './bot';
 import { AXIOMS } from '../content/index';
 
 interface Options {
@@ -20,6 +20,7 @@ interface Options {
   minutes: number;
   axiom: string | null;
   seedPrefix: string;
+  recompile: RecompilePolicy;
   verbose: boolean;
 }
 
@@ -29,6 +30,7 @@ function parseArgs(argv: readonly string[]): Options {
     minutes: 6,
     axiom: null,
     seedPrefix: 'harness',
+    recompile: 'smart',
     verbose: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -38,6 +40,7 @@ function parseArgs(argv: readonly string[]): Options {
     else if (arg === '--minutes' && next) opts.minutes = Number(next);
     else if (arg === '--axiom' && next) opts.axiom = next;
     else if (arg === '--seed' && next) opts.seedPrefix = next;
+    else if (arg === '--recompile' && next) opts.recompile = next as RecompilePolicy;
     else if (arg === '--verbose') opts.verbose = true;
   }
   return opts;
@@ -61,6 +64,13 @@ interface RunResult {
   cyclesPerSec: number;
   peakHeat: number;
   firstLevelTime: number;
+  kernels: number;
+  kernelMultiplier: number;
+  reachedMeltdown: boolean;
+  meltdownSeconds: number;
+  peakMultiplier: number;
+  finalScore: number;
+  ending: string;
   peakEnemies: number;
   misfireRate: number;
   safetyTrips: number;
@@ -128,6 +138,13 @@ function simulateRun(seed: string, axiomId: string, minutes: number): RunResult 
     cyclesPerSec: world.time > 0 ? world.stats.cyclesSpent / world.time : 0,
     peakHeat: world.stats.peakHeat,
     firstLevelTime: world.stats.firstLevelTime,
+    kernels: world.kernels,
+    kernelMultiplier: world.engine.kernel,
+    reachedMeltdown: world.phase === 'meltdown',
+    meltdownSeconds: world.meltdownTime,
+    peakMultiplier: world.peakMeltdownMultiplier,
+    finalScore: world.finalScore().total,
+    ending: world.ending,
     peakEnemies: world.stats.peakConcurrentEnemies,
     misfireRate: world.stats.fires > 0 ? world.stats.misfires / world.stats.fires : 0,
     safetyTrips: world.stats.safetyTrips,
@@ -155,9 +172,11 @@ function pad(s: string | number, width: number): string {
 function main(): void {
   const opts = parseArgs(process.argv.slice(2));
   const axioms = opts.axiom ? [opts.axiom] : AXIOMS.map((a) => a.id);
+  setRecompilePolicy(opts.recompile);
 
   console.log(
-    `\n  headless sweep — ${opts.runs} run(s) x ${opts.minutes} min x ${axioms.length} axiom(s)\n`,
+    `\n  headless sweep — ${opts.runs} run(s) x ${opts.minutes} min x ${axioms.length} axiom(s)` +
+      `  ·  recompile: ${opts.recompile}\n`,
   );
 
   const all: RunResult[] = [];
@@ -187,7 +206,25 @@ function main(): void {
     );
     console.log(`    level reached ${pad(mean(results.map((r) => r.level)).toFixed(1), 8)}`);
     console.log(`    peak EPS      ${pad(mean(results.map((r) => r.peakEps)).toFixed(1), 8)}`);
-    console.log(`    score         ${pad(mean(results.map((r) => r.score)).toFixed(0), 8)}`);
+    console.log(`    score         ${pad(mean(results.map((r) => r.finalScore)).toFixed(0), 8)}`);
+    console.log(
+      `    recompiles    ${pad(mean(results.map((r) => r.kernels)).toFixed(1), 8)}` +
+        `   kernel ×${mean(results.map((r) => r.kernelMultiplier)).toFixed(2)}   [§9.2 target 2-3]`,
+    );
+    console.log(
+      `    meltdown      ${pad(results.filter((r) => r.reachedMeltdown).length, 8)}/${results.length} runs` +
+        `   +${mean(results.map((r) => r.meltdownSeconds)).toFixed(0)}s` +
+        `   peak ×${mean(results.map((r) => r.peakMultiplier)).toFixed(2)}`,
+    );
+    const endings = results.reduce<Record<string, number>>((acc, r) => {
+      acc[r.ending] = (acc[r.ending] ?? 0) + 1;
+      return acc;
+    }, {});
+    console.log(
+      `    endings       ${Object.entries(endings)
+        .map(([k, v]) => `${k} ${v}`)
+        .join('  ')}`,
+    );
     console.log(`    kills         ${pad(mean(results.map((r) => r.kills)).toFixed(0), 8)}`);
     console.log(`    max depth     ${pad(mean(results.map((r) => r.maxDepth)).toFixed(1), 8)}`);
     console.log(`    overheats     ${pad(mean(results.map((r) => r.overheats)).toFixed(1), 8)}`);

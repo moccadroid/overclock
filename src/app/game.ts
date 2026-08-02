@@ -8,14 +8,14 @@
 import './ui.css';
 import { Renderer } from './renderer';
 import { Hud } from './hud';
-import { DraftOverlay, EditorOverlay, MessageOverlay } from './overlays';
+import { CeremonyOverlay, DraftOverlay, EditorOverlay, MessageOverlay } from './overlays';
 import { Input } from './input';
 import { NO_INPUT, World, type RunConfig } from '../sim/world';
 import { SIM_DT } from '../sim/tunables';
 import { BRANDING } from '../branding';
 import { VISUAL } from './visual';
 
-type Mode = 'running' | 'draft' | 'editor' | 'paused' | 'dead';
+type Mode = 'running' | 'draft' | 'editor' | 'paused' | 'dead' | 'ceremony';
 
 export class Game {
   private world: World;
@@ -25,6 +25,7 @@ export class Game {
   private draft!: DraftOverlay;
   private editor!: EditorOverlay;
   private message!: MessageOverlay;
+  private ceremony!: CeremonyOverlay;
 
   private mode: Mode = 'running';
   private accumulator = 0;
@@ -51,6 +52,7 @@ export class Game {
     this.draft = new DraftOverlay(ui);
     this.editor = new EditorOverlay(ui);
     this.message = new MessageOverlay(ui, 'results');
+    this.ceremony = new CeremonyOverlay(ui);
 
     this.input.onCommand((cmd) => this.onCommand(cmd));
 
@@ -122,6 +124,11 @@ export class Game {
     }
     if (this.hitstop > 0) this.hitstop = Math.max(0, this.hitstop - elapsed);
 
+    // §19.7 — the Recompile ceremony freezes the run. It is never skippable.
+    if (this.mode === 'ceremony') {
+      if (!this.ceremony.update(elapsed)) this.mode = 'running';
+    }
+
     if (this.mode === 'running' && this.hitstop <= 0) {
       this.accumulator += elapsed;
       let steps = 0;
@@ -135,6 +142,14 @@ export class Game {
 
         if (!this.world.player.alive) {
           this.onDeath();
+          break;
+        }
+        const pending = this.world.pendingCeremony;
+        if (pending) {
+          this.world.pendingCeremony = null;
+          this.mode = 'ceremony';
+          this.ceremony.begin(pending.rows, pending.percent, pending.kernel);
+          this.renderer.addShake(4);
           break;
         }
         if (this.world.pendingDrafts > 0) {
@@ -187,8 +202,8 @@ export class Game {
     this.mode = 'dead';
     this.editor.close();
     this.draft.setOpen(false);
-    // §14 — no shaming language. Full Results screen is M3.
-    this.message.show('GARBAGE COLLECTED', this.runSummary());
+    this.ceremony.setOpen(false);
+    this.message.showResults(this.world);
   }
 
   /**

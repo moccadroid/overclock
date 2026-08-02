@@ -76,13 +76,18 @@ export function rollDraft(world: World): DraftOffer {
   const cards: DraftCard[] = [];
   const taken = new Set<string>();
 
-  while (cards.length < TUNABLE.draftCards) {
+  // §9.1 — the next few drafts after a Recompile offer four cards, and §13.3
+  // shifts the Meltdown pool toward capacity so a big Engine can keep running.
+  const cardCount = world.surgeDrafts > 0 ? TUNABLE.rebuildSurgeCards : TUNABLE.draftCards;
+
+  while (cards.length < cardCount) {
     const remaining = pool.filter((n) => !taken.has(n.id));
 
     // §8.2 — capacity upgrades and (here) a Program slot are the floor that keeps
     // a draft from ever being dead.
     const slotAvailable = world.engine.programs.length < LOADBEARING.programSlotsMax;
-    const fillerWeight = remaining.length === 0 ? 1 : 0.18;
+    const fillerWeight =
+      remaining.length === 0 ? 1 : world.phase === 'meltdown' ? 0.34 : 0.18;
     const rollFiller = remaining.length === 0 || world.rng.chance(fillerWeight);
 
     if (rollFiller) {
@@ -146,6 +151,7 @@ export function applyDraft(world: World, card: DraftCard): number | null {
 
   world.syncBudget();
   if (world.pendingDrafts > 0) world.pendingDrafts--;
+  if (world.surgeDrafts > 0) world.surgeDrafts--;
   return landed;
 }
 

@@ -1,0 +1,169 @@
+/**
+ * The Results screen. GDD §14.
+ *
+ * The run trace is the hero element, not a footnote: a single horizontal chart
+ * of EPS over the run, annotated with level-ups, Recompiles (visible as
+ * cliffs-then-spikes — the prestige rhythm made visible), Meltdown and death.
+ * That chart is the run's story, and everything else is annotation around it.
+ *
+ * Drawn as inline SVG so it stays in the same stroke-and-type vocabulary as the
+ * rest of the schematic (§16: no sprites, no textures, ever).
+ */
+import { NODE_BY_ID } from '../content/index';
+import { TUNABLE } from '../sim/tunables';
+import type { TraceMarkerKind, World } from '../sim/world';
+import { BRANDING } from '../branding';
+
+const MARKER_COLOR: Record<TraceMarkerKind, string> = {
+  level: '#3f5570',
+  beacon: '#9fd0ff',
+  recompile: '#b44cff',
+  meltdown: '#ffb000',
+  extract: '#ffb000',
+  death: '#ff2a3c',
+};
+
+const CHART_W = 900;
+const CHART_H = 210;
+
+function svgEscape(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function clockLabel(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+/** The EPS run-trace, as an annotated schematic chart. */
+function renderTrace(world: World): string {
+  const trace = world.trace;
+  const duration = Math.max(1, world.time);
+  const peak = Math.max(1, ...trace.map((s) => s.eps));
+
+  const x = (t: number): number => (t / duration) * CHART_W;
+  const y = (eps: number): number => CHART_H - (eps / peak) * (CHART_H - 12);
+
+  const line =
+    trace.length > 1
+      ? trace.map((s, i) => `${i === 0 ? 'M' : 'L'}${x(s.t).toFixed(1)},${y(s.eps).toFixed(1)}`).join(' ')
+      : '';
+  const area = line ? `${line} L${CHART_W},${CHART_H} L0,${CHART_H} Z` : '';
+
+  // Gridlines every minute, in the same band-5 language as the arena grid.
+  const minutes: string[] = [];
+  for (let t = 60; t < duration; t += 60) {
+    const px = x(t).toFixed(1);
+    minutes.push(
+      `<line x1="${px}" y1="0" x2="${px}" y2="${CHART_H}" stroke="#2a3a52" stroke-width="1" opacity="0.5"/>` +
+        `<text x="${px}" y="${CHART_H + 14}" fill="#3f5570" font-size="10" text-anchor="middle">${clockLabel(t)}</text>`,
+    );
+  }
+
+  const markers = world.markers
+    .filter((m) => m.kind !== 'level' || world.markers.length < 40)
+    .map((m) => {
+      const px = x(m.t).toFixed(1);
+      const color = MARKER_COLOR[m.kind];
+      const big = m.kind !== 'level' && m.kind !== 'beacon';
+      return (
+        `<line x1="${px}" y1="${big ? 0 : CHART_H - 18}" x2="${px}" y2="${CHART_H}" ` +
+        `stroke="${color}" stroke-width="${big ? 1.5 : 1}" opacity="${big ? 0.9 : 0.45}"/>` +
+        (big
+          ? `<text x="${px}" y="-6" fill="${color}" font-size="10" text-anchor="middle">${svgEscape(m.label)}</text>`
+          : '')
+      );
+    })
+    .join('');
+
+  return `
+    <svg class="trace" viewBox="-8 -22 ${CHART_W + 16} ${CHART_H + 44}" width="100%">
+      <rect x="0" y="0" width="${CHART_W}" height="${CHART_H}" fill="none" stroke="#2a3a52" stroke-width="1"/>
+      ${minutes.join('')}
+      ${area ? `<path d="${area}" fill="#00e5ff" opacity="0.10"/>` : ''}
+      ${line ? `<path d="${line}" fill="none" stroke="#00e5ff" stroke-width="1.5"/>` : ''}
+      ${markers}
+      <text x="4" y="12" fill="#3f5570" font-size="10">EPS · peak ${peak.toFixed(0)}</text>
+    </svg>`;
+}
+
+function renderEngine(world: World): string {
+  const rows = world.engine.programs
+    .map((p, i) => {
+      if (!world.engine.compiled[i]?.live) return null;
+      const parts = [nodeName(p.triggerId)];
+      for (const m of p.modifierIds) if (m) parts.push(nodeName(m));
+      parts.push(nodeName(p.actionId));
+      return `  ${parts.join(' › ')}`;
+    })
+    .filter(Boolean);
+  return rows.length > 0 ? rows.join('\n') : '  (no live programs)';
+}
+
+function nodeName(id: string | null): string {
+  if (!id) return '·';
+  return NODE_BY_ID.get(id)?.name ?? id;
+}
+
+/** §14 — no shaming language anywhere. */
+function headline(world: World): string {
+  if (world.ending === 'contained') {
+    return `CONTAINED — after ${world.meltdownTime.toFixed(0)}s of divergence`;
+  }
+  if (world.ending === 'extracted') return 'EXTRACTED — banked at ×1.0';
+  return 'GARBAGE COLLECTED';
+}
+
+export function renderResults(world: World): string {
+  const score = world.finalScore();
+  const wasted = world.kernels === 0 ? world.wastedKernelPercent : 0;
+
+  const lines: string[] = [
+    `time              ${clockLabel(world.time)}`,
+    `output (∫EPS)     ${score.output.toLocaleString()}`,
+    `peak EPS          ${world.stats.peakEps.toFixed(1)}`,
+    `meltdown peak     ×${score.multiplier.toFixed(2)}`,
+    `kernels           ${world.kernels}  (+${score.kernelBonus})`,
+    `mirror kills      0  (+0)`,
+    `─────────────────────────────`,
+    `SCORE             ${score.total.toLocaleString()}`,
+    ``,
+    `kills             ${world.stats.kills.toLocaleString()}`,
+    `events            ${world.stats.events.toLocaleString()}`,
+    `deepest cascade   ${world.stats.maxDepth}`,
+    `overheats         ${world.stats.overheats}`,
+    `beacons           ${world.stats.beaconsChannelled}`,
+    `level             ${world.level}`,
+  ];
+
+  // §9.2 — hoarding a solved engine is the noob trap, and Results says so.
+  const wastedLine =
+    wasted > 1
+      ? `<div class="wasted">Kernel potential wasted: ${wasted.toFixed(0)}% — a Recompile at your peak would have compounded that into every later run of the engine.</div>`
+      : '';
+
+  // §12.4 — extraction shows what the Meltdown multiplier would have offered,
+  // feeding next run's greed.
+  const extractLine =
+    world.ending === 'extracted'
+      ? `<div class="wasted">Banked safe at ×1.0. Meltdown was still ahead of you — every 30s survived past ${clockLabel(
+          world.config.meltdownAt ?? TUNABLE.meltdownAt,
+        )} would have added ×${TUNABLE.meltdownMultiplierStep}.</div>`
+      : '';
+
+  return `
+    <div class="headline">${headline(world)}</div>
+    ${renderTrace(world)}
+    <div class="cols">
+      <pre class="score">${lines.join('\n')}</pre>
+      <div class="snapshot">
+        <div class="k">final engine</div>
+        <pre>${svgEscape(renderEngine(world))}</pre>
+        <div class="k">seed</div>
+        <pre>  ${svgEscape(world.config.seed)} · ${svgEscape(world.config.axiomId)}</pre>
+      </div>
+    </div>
+    ${wastedLine}${extractLine}
+    <div class="foot">${BRANDING.title} · run it back with the same seed by reloading</div>`;
+}

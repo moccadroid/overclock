@@ -141,8 +141,67 @@ export const TUNABLE = {
   beaconRadius: 34,
   maxBeacons: 2,
 
+  // ---- §9 Recompile ----
+  /** Terminals begin appearing at minute 8. */
+  recompileFromTime: 8 * 60,
+  recompileInterval: 70,
+  recompileChannelTime: 3,
+  recompileCapacityGain: 20,
+  /**
+   * §9.1 — K scales with the deleted Engine's *recent average* output, measured
+   * as an EWMA with this half-life. It has to be an average over a window rather
+   * than an all-time peak: with a peak, the number you get is the same whenever
+   * you press the button, and §9.2's "Recompiling at your peak clearly beats
+   * hoarding" becomes false.
+   */
+  kernelAverageHalfLife: 10,
+  /**
+   * These have to be generous. §9.2: "The Kernel formula must make Recompiling
+   * at your peak clearly better than hoarding — hoarding a solved build to
+   * Meltdown should be the noob trap." Measured at the first pass, the reverse
+   * was true: a pilot that never recompiled outlived one that did by 50%.
+   */
+  kernelBasePercent: 15,
+  kernelPercentPerEps: 1.5,
+  kernelMaxPercent: 220,
+  /** Rebuild surge: double XP, and the next few drafts widen. */
+  rebuildSurgeTime: 180,
+  rebuildSurgeXpMult: 6,
+  rebuildSurgeDrafts: 3,
+  rebuildSurgeCards: 4,
+
+  // ---- §12.4 Extraction ----
+  extractFromTime: 15 * 60,
+  extractChannelTime: 5,
+
+  // ---- §13.2 Meltdown ----
+  meltdownAt: 20 * 60,
+  meltdownMultiplierStep: 0.25,
+  meltdownStepSeconds: 30,
+
+  // ---- §11.4 Containment ----
+  containmentFirstDelay: 8,
+  containmentIntervalBase: 16,
+  containmentIntervalMin: 3.5,
+  containmentIntervalPerMinute: 1.6,
+  sweeperSpeed: 210,
+  sweeperGapWidth: 260,
+  sweeperDamage: 26,
+  cellDuration: 7,
+  cellStartRadius: 620,
+  cellEndRadius: 90,
+  cellGaps: 3,
+  cellDamagePercent: 0.18,
+  nullFrontDuration: 10,
+  nullFrontDepth: 620,
+  nullFrontDamage: 14,
+
   // ---- §13 scoring ----
   epsSmoothingWindow: 5,
+  /** Sampling period for the Results run-trace chart (§14). */
+  epsTraceInterval: 0.5,
+  scorePerKernel: 250,
+  scorePerMirrorKill: 500,
 } as const;
 
 export const LOADBEARING = {

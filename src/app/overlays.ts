@@ -20,6 +20,7 @@ import { MODIFIER_BY_ID, NODE_BY_ID } from '../content/index';
 import type { World } from '../sim/world';
 import { LOADBEARING } from '../sim/tunables';
 import { slotAccepts, type NodeSlot } from '../sim/engine';
+import { renderResults } from './results';
 
 export class Overlay {
   readonly el: HTMLElement;
@@ -584,7 +585,78 @@ export class MessageOverlay extends Overlay {
     this.setOpen(true);
   }
 
+  /** §14 — the Results screen, with the run-trace chart as its hero element. */
+  showResults(world: World): void {
+    this.el.replaceChildren();
+    const panel = document.createElement('div');
+    panel.className = 'panel results-panel';
+    panel.innerHTML = renderResults(world);
+    this.el.appendChild(panel);
+    this.setOpen(true);
+  }
+
   hide(): void {
     this.setOpen(false);
   }
 }
+
+/**
+ * §19.7 — the Recompile ceremony. "A full-screen 2s ceremony (skippable never —
+ * this is a ritual): the schematic burns down row by row, Kernel forged, rebuild
+ * surge begins." The one moment of grandeur in an otherwise dry UI.
+ */
+export class CeremonyOverlay extends Overlay {
+  private timer = 0;
+  private rows: string[] = [];
+  private kernelPercent = 0;
+  private kernelTotal = 1;
+
+  constructor(root: HTMLElement) {
+    super(root, 'ceremony');
+  }
+
+  /** Call with the Engine as it stood *before* the Recompile deleted it. */
+  begin(rows: string[], kernelPercent: number, kernelTotal: number): void {
+    this.rows = rows;
+    this.kernelPercent = kernelPercent;
+    this.kernelTotal = kernelTotal;
+    this.timer = 0;
+    this.setOpen(true);
+    this.paint();
+  }
+
+  /** Returns true while the ceremony is still running. */
+  update(dt: number): boolean {
+    if (!this.open) return false;
+    this.timer += dt;
+    if (this.timer >= CEREMONY_SECONDS) {
+      this.setOpen(false);
+      return false;
+    }
+    this.paint();
+    return true;
+  }
+
+  private paint(): void {
+    const burn = Math.min(1, this.timer / (CEREMONY_SECONDS * 0.55));
+    const burned = Math.floor(burn * this.rows.length);
+    const forged = this.timer > CEREMONY_SECONDS * 0.6;
+
+    const rows = this.rows
+      .map((row, i) => `<div class="burn ${i < burned ? 'gone' : ''}">${row}</div>`)
+      .join('');
+
+    this.el.innerHTML =
+      `<div class="ceremony-inner">` +
+      `<div class="title">RECOMPILE</div>` +
+      `<div class="rows">${rows}</div>` +
+      (forged
+        ? `<div class="kernel">KERNEL FORGED  +${this.kernelPercent.toFixed(0)}%` +
+          `<span class="total">total ×${this.kernelTotal.toFixed(2)}</span></div>` +
+          `<div class="surge">REBUILD SURGE — double XP, wider drafts</div>`
+        : `<div class="kernel dim">measuring output…</div>`) +
+      `</div>`;
+  }
+}
+
+export const CEREMONY_SECONDS = 2;

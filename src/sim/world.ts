@@ -100,15 +100,51 @@ export interface Zone extends SpatialItem {
 }
 
 /**
- * GDD §12.3 Wave Beacon. Channel it to pull the next wave in early and enriched,
- * permanently ticking Threat up. Ignoring beacons is safe and slow; chaining them
- * is the greed line. This is what makes traversing the arena a decision.
+ * Everything you walk to and hold Interact on. All three share one shape because
+ * they share one interaction (§21: hold-to-complete with visible progress and
+ * generous interrupt-resume).
+ *
+ * - `beacon`   §12.3 — call the next wave early and enriched; Threat ticks up.
+ * - `recompile` §9    — delete the Engine, forge a Kernel, rebuild steeper.
+ * - `extract`  §12.4 — bank the run at ×1.0 and walk away.
  */
-export interface Beacon extends SpatialItem {
+export type TerminalKind = 'beacon' | 'recompile' | 'extract';
+
+export interface Terminal extends SpatialItem {
   id: number;
-  /** 0..1 channel progress. Resets if the player leaves or stops holding. */
+  kind: TerminalKind;
+  /** 0..1 channel progress. Decays if the player leaves or stops holding. */
   progress: number;
   age: number;
+  channelTime: number;
+  /** §9.1 — Recompile must be channelled while stationary. */
+  requiresStillness: boolean;
+}
+
+export type ContainmentKind = 'sweeper' | 'cell' | 'nullfront';
+
+/**
+ * §11.4 — the runtime's immune response, Meltdown only. These scale in frequency
+ * and overlap, never in HP: by minute 26 the player threads simultaneous
+ * Sweepers, cells and fronts while their engine deletes everything else. Death
+ * comes from geometry, not attrition.
+ */
+export interface Containment extends SpatialItem {
+  id: number;
+  kind: ContainmentKind;
+  age: number;
+  life: number;
+  maxLife: number;
+  /** Sweeper: unit direction of travel, and the gap centre along the wall. */
+  dirX: number;
+  dirY: number;
+  gapAt: number;
+  /** Cell: current radius, and where its gaps sit. */
+  radius: number;
+  gapAngles: number[];
+  /** Null front: how far the edge has advanced into the arena. */
+  advance: number;
+  telegraph: number;
 }
 
 /**
@@ -184,6 +220,27 @@ export interface RunConfig {
   seed: string;
   axiomId: string;
   arenaId?: string;
+  /** Testing hook: bring Meltdown forward. Never set in a scored run. */
+  meltdownAt?: number;
+}
+
+export type RunPhase = 'build' | 'meltdown';
+
+/** How a run ended (§2.1). There is no "you win". */
+export type RunEnding = 'alive' | 'died-early' | 'extracted' | 'contained';
+
+/** §14 — one sample of the run-trace chart, the Results screen's hero element. */
+export interface TraceSample {
+  t: number;
+  eps: number;
+}
+
+export type TraceMarkerKind = 'level' | 'recompile' | 'meltdown' | 'extract' | 'death' | 'beacon';
+
+export interface TraceMarker {
+  t: number;
+  kind: TraceMarkerKind;
+  label: string;
 }
 
 export interface RunStats {
@@ -224,7 +281,8 @@ export class World {
   projectiles: Projectile[] = [];
   pickups: Pickup[] = [];
   zones: Zone[] = [];
-  beacons: Beacon[] = [];
+  terminals: Terminal[] = [];
+  containment: Containment[] = [];
   fx: Fx[] = [];
   /** Drained by the renderer each frame; capped so a headless run cannot grow it. */
   visualDeaths: VisualDeath[] = [];
@@ -244,8 +302,29 @@ export class World {
   waveTimer = 2;
   ambientTimer = 1;
   beaconTimer = 20;
+  recompileTimer = 0;
+  containmentTimer: number = TUNABLE.containmentFirstDelay;
   score = 0;
   eps = 0;
+
+  // ---- run structure (§9, §13.2) ----
+  phase: RunPhase = 'build';
+  ending: RunEnding = 'alive';
+  /** §13.2 — climbs +0.25 every 30s of Meltdown survived, uncapped. */
+  meltdownMultiplier = 1;
+  peakMeltdownMultiplier = 1;
+  kernels = 0;
+  /** §9.1 — seconds of doubled XP remaining. */
+  surgeTime = 0;
+  surgeDrafts = 0;
+  /** §9.1 — smoothed recent output of the live Engine; the Kernel's basis. */
+  outputAverage = 0;
+  /** The best that average ever reached, for the wasted-Kernel readout (§9.2). */
+  peakOutputAverage = 0;
+  /** §14 — the run's story. */
+  trace: TraceSample[] = [];
+  markers: TraceMarker[] = [];
+  private traceTimer = 0;
 
   stats: RunStats = {
     events: 0,
@@ -287,17 +366,12 @@ export class World {
     this.grid = new SpatialGrid<Enemy>(this.arena.width, this.arena.height);
     this.flow = new FlowField(this.arena);
 
-    const ax = getAxiom(config.axiomId);
     this.engine = new Engine();
-    const p0 = this.engine.programs[0]!;
-    p0.triggerId = ax.starter.trigger;
-    p0.actionId = ax.starter.action;
-    ax.starter.modifiers.forEach((m, i) => {
-      if (i < p0.modifierIds.length) p0.modifierIds[i] = m;
-    });
-    this.engine.recompile();
+    this.installAxiomStarter();
 
-    this.budget = new CycleBudget(TUNABLE.cycleCapacityBase + ax.capacityDelta);
+    this.budget = new CycleBudget(
+      TUNABLE.cycleCapacityBase + getAxiom(config.axiomId).capacityDelta,
+    );
     this.budget.setStaticLoad(this.engine.staticLoad);
 
     this.player = {
@@ -316,6 +390,18 @@ export class World {
     };
 
     this.xpToNext = TUNABLE.xpFirstLevel;
+  }
+
+  /** §8.4 — the Axiom's starter Program, at run start and after a Recompile. */
+  private installAxiomStarter(): void {
+    const ax = getAxiom(this.config.axiomId);
+    const p0 = this.engine.programs[0]!;
+    p0.triggerId = ax.starter.trigger;
+    p0.actionId = ax.starter.action;
+    ax.starter.modifiers.forEach((m, i) => {
+      if (i < p0.modifierIds.length) p0.modifierIds[i] = m;
+    });
+    this.engine.recompile();
   }
 
   // ---------------------------------------------------------------- main step
@@ -339,8 +425,10 @@ export class World {
     this.updateZones(dt);
     this.updatePickups(dt);
     this.updateFx(dt);
-    this.updateBeacons(input, dt);
+    this.updateTerminals(input, dt);
+    this.updateMeltdown(dt);
     this.updateDirector(dt);
+    if (this.surgeTime > 0) this.surgeTime = Math.max(0, this.surgeTime - dt);
 
     if (!this.budget.stalled) {
       this.advanceClocks(dt);
@@ -678,45 +766,355 @@ export class World {
     }
   }
 
-  // ------------------------------------------------------------------ beacons
+  // ---------------------------------------------------------------- terminals
 
   /**
-   * §12.3 — hold Interact inside a Beacon to pull the next wave in early and
-   * enriched, permanently bumping Threat. Channelling is interruptible and
-   * resumes from zero, with visible progress (§21).
+   * Spawn and channel every terminal type. Channelling is interruptible and
+   * resumes from zero, with visible progress (§21); Recompile additionally
+   * requires stillness (§9.1).
    */
-  private updateBeacons(input: InputState, dt: number): void {
-    this.beaconTimer -= dt;
-    if (this.beaconTimer <= 0 && this.beacons.length < TUNABLE.maxBeacons) {
-      this.beaconTimer = TUNABLE.beaconInterval;
-      const spot = this.findOpenSpot(TUNABLE.spawnRingMin * 0.5, TUNABLE.spawnRingMax);
-      this.beacons.push({
-        id: this.nextId++,
-        x: spot.x,
-        y: spot.y,
-        progress: 0,
-        age: 0,
-        alive: true,
-      });
-    }
+  private updateTerminals(input: InputState, dt: number): void {
+    this.spawnTerminals(dt);
 
-    for (const b of this.beacons) {
-      if (!b.alive) continue;
-      b.age += dt;
+    const moving = Math.hypot(this.player.vx, this.player.vy) > 12;
+    for (const t of this.terminals) {
+      if (!t.alive) continue;
+      t.age += dt;
+
       const near =
-        Math.hypot(this.player.x - b.x, this.player.y - b.y) < TUNABLE.beaconRadius + TUNABLE.playerRadius;
-      if (near && input.interact) {
-        b.progress += dt / TUNABLE.beaconChannelTime;
-        if (b.progress >= 1) {
-          b.alive = false;
-          this.stats.beaconsChannelled++;
-          this.threat += TUNABLE.beaconThreatBump;
-          this.spawnWave(true);
+        Math.hypot(this.player.x - t.x, this.player.y - t.y) <
+        TUNABLE.beaconRadius + TUNABLE.playerRadius;
+      const channelling = near && input.interact && !(t.requiresStillness && moving);
+
+      if (channelling) {
+        t.progress += dt / t.channelTime;
+        if (t.progress >= 1) {
+          t.alive = false;
+          this.completeTerminal(t);
         }
-      } else if (b.progress > 0) {
-        b.progress = Math.max(0, b.progress - dt / TUNABLE.beaconChannelTime);
+      } else if (t.progress > 0) {
+        // Generous interrupt-resume: it drains rather than snapping to zero.
+        t.progress = Math.max(0, t.progress - (dt / t.channelTime) * 0.6);
       }
     }
+  }
+
+  private spawnTerminals(dt: number): void {
+    const count = (kind: TerminalKind): number =>
+      this.terminals.reduce((n, t) => n + (t.alive && t.kind === kind ? 1 : 0), 0);
+
+    this.beaconTimer -= dt;
+    if (this.beaconTimer <= 0 && count('beacon') < TUNABLE.maxBeacons) {
+      this.beaconTimer = TUNABLE.beaconInterval;
+      const spot = this.findOpenSpot(TUNABLE.spawnRingMin * 0.5, TUNABLE.spawnRingMax);
+      this.pushTerminal('beacon', spot.x, spot.y, TUNABLE.beaconChannelTime, false);
+    }
+
+    // §9.1 — Recompile terminals appear from minute 8.
+    if (this.time >= TUNABLE.recompileFromTime) {
+      this.recompileTimer -= dt;
+      if (this.recompileTimer <= 0 && count('recompile') < 1) {
+        this.recompileTimer = TUNABLE.recompileInterval;
+        const spot = this.findOpenSpot(TUNABLE.spawnRingMin * 0.6, TUNABLE.spawnRingMax);
+        this.pushTerminal('recompile', spot.x, spot.y, TUNABLE.recompileChannelTime, true);
+      }
+    }
+
+    // §12.4 — one Extract terminal, at a fixed landmark, from minute 15.
+    if (this.time >= TUNABLE.extractFromTime && count('extract') === 0) {
+      this.pushTerminal(
+        'extract',
+        this.arena.extractX,
+        this.arena.extractY,
+        TUNABLE.extractChannelTime,
+        false,
+      );
+    }
+  }
+
+  private pushTerminal(
+    kind: TerminalKind,
+    x: number,
+    y: number,
+    channelTime: number,
+    requiresStillness: boolean,
+  ): void {
+    this.terminals.push({
+      id: this.nextId++,
+      kind,
+      x,
+      y,
+      progress: 0,
+      age: 0,
+      channelTime,
+      requiresStillness,
+      alive: true,
+    });
+  }
+
+  private completeTerminal(t: Terminal): void {
+    if (t.kind === 'beacon') {
+      this.stats.beaconsChannelled++;
+      this.threat += TUNABLE.beaconThreatBump;
+      this.spawnWave(true);
+      this.mark('beacon', 'beacon');
+      return;
+    }
+    if (t.kind === 'recompile') {
+      this.recompile();
+      return;
+    }
+    // §12.4 — banked at ×1.0. No Meltdown multiplier ever applies.
+    this.ending = 'extracted';
+    this.player.alive = false;
+    this.mark('extract', 'extracted');
+  }
+
+  /**
+   * §9 — Recompile. Delete the entire Engine, keep the Scrap bonuses, and forge
+   * a Kernel whose size scales with what the deleted Engine was producing.
+   *
+   * §9.2 requires that Recompiling at your peak beats hoarding, so K is measured
+   * against the best sustained output the Engine actually reached, not its state
+   * at the moment you press the button.
+   */
+  recompile(): number {
+    const measured = this.outputAverage;
+    const percent = Math.min(
+      TUNABLE.kernelMaxPercent,
+      TUNABLE.kernelBasePercent + TUNABLE.kernelPercentPerEps * measured,
+    );
+
+    // Capture the schematic before it burns, for the §19.7 ceremony.
+    const rows = this.engine.programs
+      .map((p, i) => {
+        if (!this.engine.compiled[i]?.live) return null;
+        const mods = p.modifierIds.filter(Boolean);
+        return [p.triggerId, ...mods, p.actionId].join(' › ');
+      })
+      .filter((r): r is string => r !== null);
+
+    for (const p of this.engine.programs) {
+      p.triggerId = null;
+      p.actionId = null;
+      p.modifierIds.fill(null);
+      p.recentEvents = 0;
+      p.tickEvents = 0;
+    }
+    // Reboot to the Axiom rather than to nothing — see DECISIONS D-28. Every
+    // drafted node is gone; the starter Program comes back.
+    this.installAxiomStarter();
+    this.engine.kernel *= 1 + percent / 100;
+    this.engine.recompile();
+
+    this.kernels++;
+    this.budget.capacity += TUNABLE.recompileCapacityGain;
+    this.syncBudget();
+
+    // Rebuild surge (§9.1): double XP for 120s, and the next few drafts widen.
+    this.surgeTime = TUNABLE.rebuildSurgeTime;
+    this.surgeDrafts = TUNABLE.rebuildSurgeDrafts;
+    // The new Engine has produced nothing yet.
+    this.outputAverage = 0;
+    this.lastKernelPercent = percent;
+    this.lastRecompileTime = this.time;
+    this.mark('recompile', `kernel +${percent.toFixed(0)}%`);
+    // Drained by the presentation layer. Derived data, like visualDeaths.
+    this.pendingCeremony = { rows, percent, kernel: this.engine.kernel };
+    return percent;
+  }
+
+  lastKernelPercent = 0;
+  lastRecompileTime = -Infinity;
+  pendingCeremony: { rows: string[]; percent: number; kernel: number } | null = null;
+
+  /**
+   * §9.2 — hoarding a solved Engine to Meltdown is the noob trap, and Results
+   * says so out loud. This is the fraction of Kernel value left on the table.
+   */
+  get wastedKernelPercent(): number {
+    if (this.peakOutputAverage <= 0) return 0;
+    return Math.min(
+      TUNABLE.kernelMaxPercent,
+      TUNABLE.kernelBasePercent + TUNABLE.kernelPercentPerEps * this.peakOutputAverage,
+    );
+  }
+
+  // --------------------------------------------------------------- meltdown
+
+  /** §13.2 — at 20:00 the build phase ends. This is not a fail state, it is act three. */
+  private updateMeltdown(dt: number): void {
+    const meltdownAt = this.config.meltdownAt ?? TUNABLE.meltdownAt;
+    if (this.phase === 'build') {
+      if (this.time < meltdownAt) return;
+      this.phase = 'meltdown';
+      this.mark('meltdown', 'MELTDOWN');
+      return;
+    }
+
+    const elapsed = this.time - meltdownAt;
+    this.meltdownMultiplier =
+      1 +
+      TUNABLE.meltdownMultiplierStep * Math.floor(elapsed / TUNABLE.meltdownStepSeconds);
+    this.peakMeltdownMultiplier = Math.max(this.peakMeltdownMultiplier, this.meltdownMultiplier);
+
+    this.updateContainment(dt, elapsed);
+  }
+
+  /** Seconds since Meltdown began, or 0 during the build phase. */
+  get meltdownTime(): number {
+    const meltdownAt = this.config.meltdownAt ?? TUNABLE.meltdownAt;
+    return this.phase === 'meltdown' ? this.time - meltdownAt : 0;
+  }
+
+  // -------------------------------------------------------------- containment
+
+  private updateContainment(dt: number, meltdownElapsed: number): void {
+    this.containmentTimer -= dt;
+    if (this.containmentTimer <= 0) {
+      // §11.4 — scales in frequency and overlap, never in HP.
+      const minutes = meltdownElapsed / 60;
+      this.containmentTimer = Math.max(
+        TUNABLE.containmentIntervalMin,
+        TUNABLE.containmentIntervalBase - minutes * TUNABLE.containmentIntervalPerMinute,
+      );
+      this.spawnContainment();
+    }
+
+    for (const c of this.containment) {
+      if (!c.alive) continue;
+      c.age += dt;
+      c.life -= dt;
+      if (c.life <= 0) {
+        c.alive = false;
+        continue;
+      }
+      // Everything is telegraphed before it can hurt you (§17.1, §21).
+      const armed = c.age >= c.telegraph;
+
+      if (c.kind === 'sweeper') {
+        c.x += c.dirX * TUNABLE.sweeperSpeed * dt;
+        c.y += c.dirY * TUNABLE.sweeperSpeed * dt;
+        if (armed) this.testSweeper(c);
+      } else if (c.kind === 'cell') {
+        const t = Math.min(1, Math.max(0, (c.age - c.telegraph) / TUNABLE.cellDuration));
+        c.radius = TUNABLE.cellStartRadius + (TUNABLE.cellEndRadius - TUNABLE.cellStartRadius) * t;
+        if (armed) this.testCell(c);
+      } else {
+        const t = Math.min(1, Math.max(0, (c.age - c.telegraph) / TUNABLE.nullFrontDuration));
+        c.advance = TUNABLE.nullFrontDepth * Math.sin(t * Math.PI);
+        if (armed) this.testNullFront(c);
+      }
+    }
+  }
+
+  private spawnContainment(): void {
+    const kinds: ContainmentKind[] = ['sweeper', 'cell', 'nullfront'];
+    const kind = this.rng.pick(kinds);
+    const base = {
+      id: this.nextId++,
+      kind,
+      age: 0,
+      dirX: 0,
+      dirY: 0,
+      gapAt: 0,
+      radius: 0,
+      gapAngles: [] as number[],
+      advance: 0,
+      telegraph: 1.1,
+      alive: true,
+    };
+
+    if (kind === 'sweeper') {
+      // A wall crossing the whole arena with one gap. Positional test that
+      // ignores DPS entirely — you cannot shoot your way out of geometry.
+      const horizontal = this.rng.chance(0.5);
+      const fromStart = this.rng.chance(0.5);
+      const travel = horizontal ? this.arena.width : this.arena.height;
+      this.containment.push({
+        ...base,
+        x: horizontal ? (fromStart ? -60 : this.arena.width + 60) : this.arena.width / 2,
+        y: horizontal ? this.arena.height / 2 : fromStart ? -60 : this.arena.height + 60,
+        dirX: horizontal ? (fromStart ? 1 : -1) : 0,
+        dirY: horizontal ? 0 : fromStart ? 1 : -1,
+        gapAt: this.rng.range(
+          TUNABLE.sweeperGapWidth,
+          (horizontal ? this.arena.height : this.arena.width) - TUNABLE.sweeperGapWidth,
+        ),
+        life: travel / TUNABLE.sweeperSpeed + 2.5,
+        maxLife: travel / TUNABLE.sweeperSpeed + 2.5,
+      });
+      return;
+    }
+
+    if (kind === 'cell') {
+      const gaps: number[] = [];
+      for (let i = 0; i < TUNABLE.cellGaps; i++) {
+        gaps.push(this.rng.next() * Math.PI * 2);
+      }
+      this.containment.push({
+        ...base,
+        x: this.player.x,
+        y: this.player.y,
+        radius: TUNABLE.cellStartRadius,
+        gapAngles: gaps,
+        telegraph: 1.4,
+        life: TUNABLE.cellDuration + 2.4,
+        maxLife: TUNABLE.cellDuration + 2.4,
+      });
+      return;
+    }
+
+    const horizontal = this.rng.chance(0.5);
+    const fromStart = this.rng.chance(0.5);
+    this.containment.push({
+      ...base,
+      x: horizontal ? (fromStart ? 0 : this.arena.width) : this.arena.width / 2,
+      y: horizontal ? this.arena.height / 2 : fromStart ? 0 : this.arena.height,
+      dirX: horizontal ? (fromStart ? 1 : -1) : 0,
+      dirY: horizontal ? 0 : fromStart ? 1 : -1,
+      life: TUNABLE.nullFrontDuration + 2.6,
+      maxLife: TUNABLE.nullFrontDuration + 2.6,
+    });
+  }
+
+  private testSweeper(c: Containment): void {
+    const p = this.player;
+    const along = c.dirX !== 0 ? p.y : p.x;
+    const across = c.dirX !== 0 ? p.x - c.x : p.y - c.y;
+    const inGap = Math.abs(along - c.gapAt) < TUNABLE.sweeperGapWidth / 2;
+    if (!inGap && Math.abs(across) < 22 + TUNABLE.playerRadius) {
+      this.hurtPlayer(TUNABLE.sweeperDamage);
+    }
+  }
+
+  private testCell(c: Containment): void {
+    const p = this.player;
+    const dx = p.x - c.x;
+    const dy = p.y - c.y;
+    const d = Math.hypot(dx, dy);
+    if (Math.abs(d - c.radius) > 20 + TUNABLE.playerRadius) return;
+    // Standing in one of the cage's gaps is how you get out.
+    const angle = Math.atan2(dy, dx);
+    for (const gap of c.gapAngles) {
+      if (Math.abs(angleDelta(angle, gap)) < 0.34) return;
+    }
+    this.hurtPlayer(this.player.maxIntegrity * TUNABLE.cellDamagePercent);
+  }
+
+  /** §11.4 — shrinks the playable arena, forcing motion. */
+  private testNullFront(c: Containment): void {
+    const p = this.player;
+    let inside = false;
+    if (c.dirX > 0) inside = p.x < c.advance;
+    else if (c.dirX < 0) inside = p.x > this.arena.width - c.advance;
+    else if (c.dirY > 0) inside = p.y < c.advance;
+    else inside = p.y > this.arena.height - c.advance;
+    if (inside) this.hurtPlayer(TUNABLE.nullFrontDamage);
+  }
+
+  private mark(kind: TraceMarkerKind, label: string): void {
+    if (this.markers.length < 400) this.markers.push({ t: this.time, kind, label });
   }
 
   /**
@@ -882,6 +1280,10 @@ export class World {
     if (p.integrity <= 0) {
       p.integrity = 0;
       p.alive = false;
+      // §14 — "CONTAINED" in Meltdown, "Garbage collected" before it. Never
+      // shaming language either way.
+      this.ending = this.phase === 'meltdown' ? 'contained' : 'died-early';
+      this.mark('death', this.ending === 'contained' ? 'CONTAINED' : 'garbage collected');
     }
   }
 
@@ -1364,10 +1766,13 @@ export class World {
   // ---------------------------------------------------------------- progression
 
   private gainXp(amount: number): void {
-    this.xp += amount * TUNABLE.xpPerShard;
+    // §9.1 — the rebuild surge doubles XP for 120s after a Recompile.
+    const surge = this.surgeTime > 0 ? TUNABLE.rebuildSurgeXpMult : 1;
+    this.xp += amount * TUNABLE.xpPerShard * surge;
     while (this.xp >= this.xpToNext) {
       this.xp -= this.xpToNext;
       this.level++;
+      this.mark('level', `level ${this.level}`);
       // level 2 costs xpBase, and the curve compounds from there. Level 1's cost
       // was set separately in the constructor.
       this.xpToNext = Math.ceil(TUNABLE.xpBase * Math.pow(TUNABLE.xpGrowth, this.level - 2));
@@ -1379,6 +1784,37 @@ export class World {
   /** Called by the draft layer once a card is applied, so static load stays in sync. */
   syncBudget(): void {
     this.budget.setStaticLoad(this.engine.staticLoad);
+  }
+
+  /**
+   * §13.3 — the final score.
+   *
+   *   Score = ∫EPS × Meltdown multiplier (peak)
+   *         + Mirror kills × 500
+   *         + Kernel count × 250
+   *         + Discovery bonuses
+   *
+   * ∫EPS already has the multiplier folded in as it accrued, so peak multiplier
+   * is reported rather than applied twice. Discoveries and the Mirror do not
+   * exist yet and contribute zero.
+   */
+  finalScore(): {
+    total: number;
+    output: number;
+    kernelBonus: number;
+    mirrorBonus: number;
+    multiplier: number;
+  } {
+    const output = Math.floor(this.score);
+    const kernelBonus = this.kernels * TUNABLE.scorePerKernel;
+    const mirrorBonus = 0;
+    return {
+      total: output + kernelBonus + mirrorBonus,
+      output,
+      kernelBonus,
+      mirrorBonus,
+      multiplier: this.peakMeltdownMultiplier,
+    };
   }
 
   // ------------------------------------------------------------------ plumbing
@@ -1396,11 +1832,25 @@ export class World {
     }
     this.eps = this.epsWindowSum / (this.epsWindow.length * SIM_DT);
     if (this.eps > this.stats.peakEps) this.stats.peakEps = this.eps;
+    // §9.1 — recent average output of the live Engine. Decays when the Engine
+    // goes quiet, which is what makes Recompile timing a decision.
+    const outputDecay = Math.pow(0.5, dt / TUNABLE.kernelAverageHalfLife);
+    this.outputAverage = this.outputAverage * outputDecay + this.eps * (1 - outputDecay);
+    this.peakOutputAverage = Math.max(this.peakOutputAverage, this.outputAverage);
     if (this.enemies.length > this.stats.peakConcurrentEnemies) {
       this.stats.peakConcurrentEnemies = this.enemies.length;
     }
-    // §13.1 — score is the integral of EPS over the run.
-    this.score += this.eps * dt;
+    // §13.1 — score is the integral of EPS over the run, and §13.2 scales it by
+    // the Meltdown multiplier as it accrues.
+    this.score += this.eps * dt * this.meltdownMultiplier;
+
+    // §14 — sample the run-trace chart.
+    this.traceTimer += dt;
+    if (this.traceTimer >= TUNABLE.epsTraceInterval) {
+      // Subtract rather than reset, so sampling cannot drift over a 25-minute run.
+      this.traceTimer -= TUNABLE.epsTraceInterval;
+      if (this.trace.length < 4000) this.trace.push({ t: this.time, eps: this.eps });
+    }
 
     // Per-row EPS attribution for the editor readout (§19.6): an exponential
     // moving average with a 2s half-life, so "share of total EPS" reacts fast
@@ -1417,7 +1867,8 @@ export class World {
     compactInPlace(this.projectiles);
     compactInPlace(this.pickups);
     compactInPlace(this.zones);
-    compactInPlace(this.beacons);
+    compactInPlace(this.terminals);
+    compactInPlace(this.containment);
     compactInPlace(this.fx);
   }
 }
@@ -1433,6 +1884,14 @@ function compactInPlace<T extends { alive: boolean }>(arr: T[]): void {
 
 function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v;
+}
+
+/** Shortest signed distance between two angles, in radians. */
+function angleDelta(a: number, b: number): number {
+  let d = (a - b) % (Math.PI * 2);
+  if (d > Math.PI) d -= Math.PI * 2;
+  if (d < -Math.PI) d += Math.PI * 2;
+  return d;
 }
 
 export type { Program };

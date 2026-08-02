@@ -16,7 +16,7 @@
 import { Application, Container, Graphics, Text } from 'pixi.js';
 import { TUNABLE } from '../sim/tunables';
 import type { Hue } from '../sim/types';
-import type { World } from '../sim/world';
+import type { TerminalKind, World } from '../sim/world';
 import { enemy as getEnemy } from '../content/index';
 import { Camera } from './camera';
 import { BAND, PALETTE, VISUAL } from './visual';
@@ -49,6 +49,7 @@ export class Renderer {
   private readonly gGrid = new Graphics();
   private readonly gRuins = new Graphics();
   private readonly gBeacons = new Graphics();
+  private readonly gContainment = new Graphics();
   private readonly gZones = new Graphics();
   private readonly gPickups = new Graphics();
   private readonly gDebris = new Graphics();
@@ -86,6 +87,7 @@ export class Renderer {
     this.structureLayer.addChild(this.gGrid, this.gRuins);
     this.worldLayer.addChild(
       this.gBeacons,
+      this.gContainment,
       this.gZones,
       this.gPickups,
       this.gDebris,
@@ -155,7 +157,8 @@ export class Renderer {
     const tier = world.budget.tier;
 
     this.drawGrid(world);
-    this.drawBeacons(world);
+    this.drawTerminals(world);
+    this.drawContainment(world);
     this.drawZones(world);
     this.drawPickups(world);
     this.drawDebris();
@@ -165,10 +168,21 @@ export class Renderer {
     this.drawPlayer(world, heat);
     this.drawIndicators(world);
 
-    // §16.7 — the degradation ladder, driven by Heat now and by Meltdown later.
-    this.bloom.setAberration(tier >= 2 ? 0.5 + 0.5 * heat : 0);
-    this.bloom.setTear(world.budget.stalled ? (this.jitter(1) > 0 ? 1 : -1) * 0.6 : 0);
-    this.bloom.setBloom(VISUAL.bloomIntensity * (1 + heat * 0.35));
+    // §16.7 — one ordered ladder serves both Heat (temporary, local) and
+    // Meltdown (permanent, escalating). Meltdown intensity climbs without limit
+    // and the renderer becomes the doom clock (§13.2).
+    const melt = world.phase === 'meltdown' ? Math.min(1.6, world.meltdownTime / 360) : 0;
+
+    this.bloom.setAberration(Math.min(1, (tier >= 2 ? 0.5 + 0.5 * heat : 0) + melt * 0.55));
+    this.bloom.setTear(world.budget.stalled ? (this.jitter(1) > 0 ? 1 : -1) * 0.6 : melt * 0.12);
+    this.bloom.setBloom(VISUAL.bloomIntensity * (1 + heat * 0.35 + melt * 0.5));
+    // Step 5: the background lightens toward white as the final minutes approach.
+    // The world overexposes.
+    this.app.renderer.background.color = mix(
+      PALETTE.background,
+      0x243044,
+      Math.min(0.85, melt * 0.55),
+    );
     this.bloom.compose();
   }
 
@@ -323,34 +337,51 @@ export class Renderer {
 
   // ---------------------------------------------------------------- entities
 
-  private drawBeacons(world: World): void {
+  /** §16.4 — terminals are blueprint-annotated structures: ticks, label, sweep. */
+  private drawTerminals(world: World): void {
     const g = this.gBeacons;
     g.clear();
-    this.syncBeaconLabels(world);
+    this.syncTerminalLabels(world);
 
-    for (const b of world.beacons) {
+    for (const t of world.terminals) {
       const r = TUNABLE.beaconRadius;
-      g.rect(b.x - r, b.y - r, r * 2, r * 2).stroke({
-        width: 2,
-        color: PALETTE.beacon,
-        alpha: BAND.entity,
-      });
-      const sweep = (b.age * 1.6) % (Math.PI * 2);
-      arcSegment(g, b.x, b.y, r + 12, sweep, sweep + 0.9);
-      g.stroke({ width: 2, color: PALETTE.beacon, alpha: BAND.inFlight });
-      for (const [sx, sy] of CORNERS) {
-        g.moveTo(b.x + sx * r, b.y + sy * r).lineTo(b.x + sx * (r + 7), b.y + sy * (r + 7));
+      const color = TERMINAL_COLOR[t.kind];
+
+      g.rect(t.x - r, t.y - r, r * 2, r * 2).stroke({ width: 2, color, alpha: BAND.entity });
+      // Recompile gets a second, inset frame; Extract a heavier outer bracket —
+      // they must be tellable apart from across the arena.
+      if (t.kind === 'recompile') {
+        g.rect(t.x - r + 6, t.y - r + 6, (r - 6) * 2, (r - 6) * 2);
+        g.stroke({ width: 1, color, alpha: BAND.inFlight });
+      } else if (t.kind === 'extract') {
+        for (const [sx, sy] of CORNERS) {
+          g.moveTo(t.x + sx * (r + 10), t.y + sy * (r + 2)).lineTo(
+            t.x + sx * (r + 10),
+            t.y + sy * (r + 10),
+          );
+          g.lineTo(t.x + sx * (r + 2), t.y + sy * (r + 10));
+        }
+        g.stroke({ width: 2, color, alpha: BAND.entity });
       }
-      g.stroke({ width: 1, color: PALETTE.beacon, alpha: BAND.structure * 2 });
-      if (b.progress > 0) {
-        arcSegment(g, b.x, b.y, r + 12, -Math.PI / 2, -Math.PI / 2 + b.progress * Math.PI * 2);
-        g.stroke({ width: 4, color: PALETTE.beacon, alpha: BAND.telegraph });
+
+      const sweep = (t.age * 1.6) % (Math.PI * 2);
+      arcSegment(g, t.x, t.y, r + 12, sweep, sweep + 0.9);
+      g.stroke({ width: 2, color, alpha: BAND.inFlight });
+
+      for (const [sx, sy] of CORNERS) {
+        g.moveTo(t.x + sx * r, t.y + sy * r).lineTo(t.x + sx * (r + 7), t.y + sy * (r + 7));
+      }
+      g.stroke({ width: 1, color, alpha: BAND.structure * 2 });
+
+      if (t.progress > 0) {
+        arcSegment(g, t.x, t.y, r + 12, -Math.PI / 2, -Math.PI / 2 + t.progress * Math.PI * 2);
+        g.stroke({ width: 4, color, alpha: BAND.telegraph });
       }
     }
   }
 
-  private syncBeaconLabels(world: World): void {
-    while (this.beaconLabels.length < world.beacons.length) {
+  private syncTerminalLabels(world: World): void {
+    while (this.beaconLabels.length < world.terminals.length) {
       const label = new Text({
         text: '',
         style: { fontFamily: 'monospace', fontSize: 13, fill: PALETTE.beacon, letterSpacing: 2 },
@@ -361,18 +392,91 @@ export class Renderer {
     }
     for (let i = 0; i < this.beaconLabels.length; i++) {
       const label = this.beaconLabels[i]!;
-      const beacon = world.beacons[i];
-      if (!beacon) {
+      const t = world.terminals[i];
+      if (!t) {
         label.visible = false;
         continue;
       }
       const near =
-        Math.hypot(world.player.x - beacon.x, world.player.y - beacon.y) <
+        Math.hypot(world.player.x - t.x, world.player.y - t.y) <
         TUNABLE.beaconRadius + TUNABLE.playerRadius;
+      const moving = t.requiresStillness && Math.hypot(world.player.vx, world.player.vy) > 12;
       label.visible = true;
-      label.text = near ? 'HOLD  E' : `BEACON_${String(beacon.id).padStart(2, '0')}`;
+      label.text = near
+        ? moving
+          ? 'HOLD STILL'
+          : 'HOLD  E'
+        : `${t.kind.toUpperCase()}_${String(t.id).padStart(2, '0')}`;
       label.alpha = near ? BAND.telegraph : BAND.inFlight;
-      label.position.set(beacon.x, beacon.y + TUNABLE.beaconRadius + 20);
+      label.style.fill = moving && near ? PALETTE.signal : TERMINAL_COLOR[t.kind];
+      label.position.set(t.x, t.y + TUNABLE.beaconRadius + 20);
+    }
+  }
+
+  /**
+   * §11.4 — Containment. Every one of these is a geometry problem the player
+   * solves with position, not damage, so all three are drawn as hard, legible
+   * boundaries with their safe passage visibly marked.
+   */
+  private drawContainment(world: World): void {
+    const g = this.gContainment;
+    g.clear();
+    const arena = world.arena;
+
+    for (const c of world.containment) {
+      const arming = c.age < c.telegraph;
+      // §17.1 — the telegraph is a drawn line before it is a threat.
+      const alpha = arming ? BAND.telegraph * (0.3 + 0.7 * (c.age / c.telegraph)) : BAND.telegraph;
+      const width = arming ? 1.5 : 4;
+      const color = arming ? PALETTE.beacon : PALETTE.signal;
+
+      if (c.kind === 'sweeper') {
+        const horizontal = c.dirX !== 0;
+        const half = TUNABLE.sweeperGapWidth / 2;
+        if (horizontal) {
+          g.moveTo(c.x, 0).lineTo(c.x, c.gapAt - half);
+          g.moveTo(c.x, c.gapAt + half).lineTo(c.x, arena.height);
+        } else {
+          g.moveTo(0, c.y).lineTo(c.gapAt - half, c.y);
+          g.moveTo(c.gapAt + half, c.y).lineTo(arena.width, c.y);
+        }
+        g.stroke({ width, color, alpha });
+        // Mark the gap: the answer is always visible.
+        if (horizontal) {
+          g.moveTo(c.x - 14, c.gapAt - half).lineTo(c.x + 14, c.gapAt - half);
+          g.moveTo(c.x - 14, c.gapAt + half).lineTo(c.x + 14, c.gapAt + half);
+        } else {
+          g.moveTo(c.gapAt - half, c.y - 14).lineTo(c.gapAt - half, c.y + 14);
+          g.moveTo(c.gapAt + half, c.y - 14).lineTo(c.gapAt + half, c.y + 14);
+        }
+        g.stroke({ width: 1.5, color: PALETTE.beacon, alpha: BAND.inFlight });
+      } else if (c.kind === 'cell') {
+        const segments = 48;
+        for (let i = 0; i < segments; i++) {
+          const a0 = (i / segments) * Math.PI * 2;
+          const a1 = ((i + 1) / segments) * Math.PI * 2;
+          const mid = (a0 + a1) / 2;
+          if (c.gapAngles.some((gap) => Math.abs(angleDiff(mid, gap)) < 0.34)) continue;
+          arcSegment(g, c.x, c.y, c.radius, a0, a1);
+        }
+        g.stroke({ width, color, alpha });
+      } else {
+        const depth = c.advance;
+        if (depth > 1) {
+          if (c.dirX > 0) g.rect(0, 0, depth, arena.height);
+          else if (c.dirX < 0) g.rect(arena.width - depth, 0, depth, arena.height);
+          else if (c.dirY > 0) g.rect(0, 0, arena.width, depth);
+          else g.rect(0, arena.height - depth, arena.width, depth);
+          g.fill({ color: PALETTE.signal, alpha: 0.1 * (arming ? 0.3 : 1) });
+
+          // Leading edge, drawn hard so the boundary is unmistakable.
+          if (c.dirX > 0) g.moveTo(depth, 0).lineTo(depth, arena.height);
+          else if (c.dirX < 0) g.moveTo(arena.width - depth, 0).lineTo(arena.width - depth, arena.height);
+          else if (c.dirY > 0) g.moveTo(0, depth).lineTo(arena.width, depth);
+          else g.moveTo(0, arena.height - depth).lineTo(arena.width, arena.height - depth);
+          g.stroke({ width, color, alpha });
+        }
+      }
     }
   }
 
@@ -675,7 +779,7 @@ export class Renderer {
     const cx = this.viewWidth / 2;
     const cy = VIEW_HEIGHT / 2;
 
-    for (const b of world.beacons) {
+    for (const b of world.terminals) {
       if (this.camera.isVisible(b.x, b.y, 0)) continue;
       const dx = b.x - this.camera.x;
       const dy = b.y - this.camera.y;
@@ -687,8 +791,9 @@ export class Renderer {
       const ix = cx + Math.cos(angle) * scale;
       const iy = cy + Math.sin(angle) * scale;
 
+      const color = TERMINAL_COLOR[b.kind];
       polygonPath(g, shapeOutline('triangle', ix, iy, 9, angle));
-      g.stroke({ width: 2, color: PALETTE.beacon, alpha: BAND.entity });
+      g.stroke({ width: 2, color, alpha: BAND.entity });
 
       const dist = Math.hypot(dx, dy);
       const ticks = Math.min(4, Math.max(1, Math.round(2400 / Math.max(400, dist))));
@@ -697,7 +802,7 @@ export class Renderer {
           ix - Math.cos(angle) * (16 + i * 6),
           iy - Math.sin(angle) * (16 + i * 6),
           1.4,
-        ).fill({ color: PALETTE.beacon, alpha: BAND.inFlight });
+        ).fill({ color, alpha: BAND.inFlight });
       }
     }
   }
@@ -709,6 +814,21 @@ export class Renderer {
 }
 
 const HUE_ORDER: readonly Hue[] = ['thermal', 'voltaic', 'void'];
+
+/** Terminals are told apart by colour as well as by frame (§16.4). */
+const TERMINAL_COLOR: Record<TerminalKind, number> = {
+  beacon: PALETTE.beacon,
+  recompile: PALETTE.void,
+  extract: PALETTE.thermal,
+};
+
+/** Shortest signed distance between two angles. */
+function angleDiff(a: number, b: number): number {
+  let d = (a - b) % (Math.PI * 2);
+  if (d > Math.PI) d -= Math.PI * 2;
+  if (d < -Math.PI) d += Math.PI * 2;
+  return d;
+}
 
 const CORNERS = [
   [-1, -1],

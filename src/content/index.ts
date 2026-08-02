@@ -70,6 +70,8 @@ const arenaSchema: Schema = {
   height: { type: 'number', required: true, min: 600 },
   spawnX: { type: 'number', required: true, min: 0 },
   spawnY: { type: 'number', required: true, min: 0 },
+  extractX: { type: 'number', required: true, min: 0 },
+  extractY: { type: 'number', required: true, min: 0 },
   ruins: {
     type: 'array',
     required: true,

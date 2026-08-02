@@ -14,12 +14,21 @@ const seed = params.get('seed') ?? `run-${Math.floor(Math.random() * 1e9).toStri
 const requested = params.get('axiom');
 const axiomId = AXIOMS.some((a) => a.id === requested) ? requested! : 'ignition';
 
+/**
+ * Playtest hook: `?meltdown=90` brings the Meltdown line forward so the third
+ * act can be seen without playing twenty minutes first. Never set in a real run
+ * — the Results screen reports it so a run tuned this way is never mistaken for
+ * a scored one.
+ */
+const meltdownParam = Number(params.get('meltdown'));
+const meltdownAt = Number.isFinite(meltdownParam) && meltdownParam > 0 ? meltdownParam : undefined;
+
 document.title = `${BRANDING.title} — ${axiomId} — ${seed}`;
 
 const mount = document.getElementById('app');
 if (!mount) throw new Error('missing #app mount');
 
-const game = new Game({ seed, axiomId });
+const game = new Game(meltdownAt === undefined ? { seed, axiomId } : { seed, axiomId, meltdownAt });
 void game.start(mount);
 
 // Reproducing a run means reproducing its seed; keep it visible and shareable.

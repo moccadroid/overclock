@@ -72,14 +72,25 @@ export class Hud {
     const tier = world.budget.tier;
     const tierName = ['NOMINAL', 'INSTABILITY I', 'INSTABILITY II', 'OVERHEAT'][tier]!;
     const heatClass = tier >= 1 ? 'hot' : '';
+    // §19.4 — at 20:00 the clock is replaced by the Meltdown multiplier.
+    const topLine =
+      world.phase === 'meltdown'
+        ? `<span class="meltdown">MELTDOWN ×${world.meltdownMultiplier.toFixed(2)}` +
+          `   +${clock(world.meltdownTime)}</span>`
+        : `${clock(world.time)}   THREAT ${world.threat.toFixed(1)}`;
     this.tc.innerHTML =
-      `${clock(world.time)}   THREAT ${world.threat.toFixed(1)}\n` +
+      `${topLine}\n` +
       `<span class="${heatClass}">HEAT ${bar(heat, 100, 12)} ${tierName}` +
-      `${world.budget.stalled ? '  ·  STALLED' : ''}</span>`;
+      `${world.budget.stalled ? '  ·  STALLED' : ''}</span>` +
+      (world.surgeTime > 0
+        ? `\n<span class="surge">REBUILD SURGE ${world.surgeTime.toFixed(0)}s · 2× XP</span>`
+        : '');
 
     this.tr.innerHTML =
       `<span class="eps">EPS ${world.eps.toFixed(1)}</span>\n` +
-      `SCORE ${Math.floor(world.score)}\n` +
+      `SCORE ${Math.floor(world.score)}` +
+      (world.kernels > 0 ? `   KERNEL ×${world.engine.kernel.toFixed(2)}` : '') +
+      `\n` +
       `CYCLES ${Math.round(world.budget.available)}/${Math.round(world.budget.headroom)}` +
       `  (static ${world.engine.staticLoad.toFixed(1)}/${world.budget.capacity})`;
 
@@ -127,11 +138,11 @@ export class Hud {
       );
     });
 
-    const beacon = world.beacons.find((b) => b.progress > 0);
-    const channel = beacon
-      ? `<div class="channel">CHANNELLING ${'█'.repeat(Math.round(beacon.progress * 10))}${'·'.repeat(
-          10 - Math.round(beacon.progress * 10),
-        )}</div>`
+    const active = world.terminals.find((t) => t.progress > 0);
+    const filled = active ? Math.round(active.progress * 10) : 0;
+    const channel = active
+      ? `<div class="channel">${active.kind.toUpperCase()} ` +
+        `${'█'.repeat(filled)}${'·'.repeat(10 - filled)}</div>`
       : '';
 
     this.engine.innerHTML =

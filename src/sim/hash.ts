@@ -58,11 +58,19 @@ export function hashWorld(world: World): string {
     h = fnv(h, q(z.y));
     h = fnv(h, q(z.life));
   }
-  for (const b of world.beacons) {
-    h = fnv(h, b.id);
-    h = fnv(h, q(b.x));
-    h = fnv(h, q(b.progress));
+  for (const t of world.terminals) {
+    h = fnv(h, t.id);
+    h = fnv(h, q(t.x));
+    h = fnv(h, q(t.progress));
   }
+  for (const c of world.containment) {
+    h = fnv(h, c.id);
+    h = fnv(h, q(c.x));
+    h = fnv(h, q(c.y));
+    h = fnv(h, q(c.radius));
+  }
+  h = fnv(h, q(world.meltdownMultiplier));
+  h = fnv(h, world.kernels);
   for (const state of world.rng.save()) h = fnv(h, state);
 
   return (h >>> 0).toString(16).padStart(8, '0');

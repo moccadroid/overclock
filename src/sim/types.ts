@@ -96,6 +96,9 @@ export interface ArenaDef {
   height: number;
   spawnX: number;
   spawnY: number;
+  /** §12.4 — the Extract terminal sits at a fixed arena landmark. */
+  extractX: number;
+  extractY: number;
   ruins: readonly RuinRect[];
   description: string;
 }

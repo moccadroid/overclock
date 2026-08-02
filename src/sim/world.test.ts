@@ -5,6 +5,7 @@ import { LOADBEARING, SIM_DT, TUNABLE } from './tunables';
 import { CycleBudget } from './cycles';
 import { Rng } from './rng';
 import { botInput } from '../harness/bot';
+import { applyDraft, rollDraft } from './draft';
 
 /** Run with the harness pilot, which actually collects fuel and XP. */
 function runPiloted(world: World, seconds: number): void {
@@ -180,6 +181,188 @@ describe('the horde is continuous, not lumpy', () => {
     // Under 2% dead air, and never a gap longer than a couple of seconds.
     expect(emptyTicks / ticks).toBeLessThan(0.02);
     expect(longestEmptyRun / 60).toBeLessThan(2.5);
+  });
+});
+
+describe('Recompile (GDD §9)', () => {
+  function buildEngine(w: World): void {
+    const p = w.engine.programs[0]!;
+    p.triggerId = 'clock';
+    p.actionId = 'bolt';
+    p.modifierIds[0] = 'amplify';
+    w.engine.recompile();
+    w.syncBudget();
+  }
+
+  it('deletes drafted nodes, reboots to the Axiom, and forges a Kernel', () => {
+    const w = new World({ seed: 'kernel', axiomId: 'ignition' });
+    buildEngine(w);
+    w.engine.scrapStacks = 3;
+    runPiloted(w, 40);
+
+    const capacityBefore = w.budget.capacity;
+    const percent = w.recompile();
+
+    expect(percent).toBeGreaterThan(0);
+    // Every drafted node is gone...
+    expect(w.engine.programs.slice(1).every((p) => !p.triggerId && !p.actionId)).toBe(true);
+    expect(w.engine.programs[0]!.modifierIds.every((m) => m === null)).toBe(true);
+    // ...but the Axiom's starter is restored (DECISIONS D-28). An Engine with no
+    // live Program deals no damage, so it earns no XP, so it can never rebuild
+    // itself — leaving it empty is a dead end, not a hard mode.
+    expect(w.engine.programs[0]!.triggerId).toBe('clock');
+    expect(w.engine.programs[0]!.actionId).toBe('bolt');
+    expect(w.engine.compiled.some((c) => c.live)).toBe(true);
+    // §9.1 — "Scrap bonuses are kept."
+    expect(w.engine.scrapStacks).toBe(3);
+    expect(w.engine.kernel).toBeCloseTo(1 + percent / 100, 8);
+    expect(w.budget.capacity).toBe(capacityBefore + TUNABLE.recompileCapacityGain);
+    expect(w.kernels).toBe(1);
+    // Rebuild surge.
+    expect(w.surgeTime).toBeCloseTo(TUNABLE.rebuildSurgeTime, 6);
+    expect(w.surgeDrafts).toBe(TUNABLE.rebuildSurgeDrafts);
+  });
+
+  it('§9.2 — Recompiling at your peak beats hoarding', () => {
+    // Two identical runs. One Recompiles while its engine is producing; the
+    // other waits until the engine has been idle and its output has decayed.
+    const hot = new World({ seed: 'peak', axiomId: 'ignition' });
+    buildEngine(hot);
+    runPiloted(hot, 60);
+    const hotKernel = hot.recompile();
+
+    const cold = new World({ seed: 'peak', axiomId: 'ignition' });
+    buildEngine(cold);
+    runPiloted(cold, 60);
+    // Let it go quiet: strip the engine so EPS collapses before recompiling.
+    for (const p of cold.engine.programs) {
+      p.triggerId = null;
+      p.actionId = null;
+    }
+    cold.engine.recompile();
+    runPiloted(cold, 25);
+    const coldKernel = cold.recompile();
+
+    expect(hotKernel).toBeGreaterThan(coldKernel);
+  });
+
+  it('the rebuild surge doubles XP and widens the next drafts', () => {
+    const w = new World({ seed: 'surge', axiomId: 'ignition' });
+    buildEngine(w);
+    w.recompile();
+    const offer = rollDraft(w);
+    expect(offer.cards).toHaveLength(TUNABLE.rebuildSurgeCards);
+
+    applyDraft(w, offer.cards[0]!);
+    expect(w.surgeDrafts).toBe(TUNABLE.rebuildSurgeDrafts - 1);
+  });
+});
+
+describe('Meltdown and Containment (GDD §11.4, §13.2)', () => {
+  it('enters Meltdown on time and climbs the multiplier', () => {
+    const w = new World({ seed: 'melt', axiomId: 'ignition', meltdownAt: 20 });
+    expect(w.phase).toBe('build');
+    runPiloted(w, 21);
+    expect(w.phase).toBe('meltdown');
+    expect(w.meltdownMultiplier).toBeCloseTo(1, 6);
+
+    runPiloted(w, 61);
+    // +0.25 per 30s survived, uncapped.
+    expect(w.meltdownMultiplier).toBeCloseTo(1.5, 6);
+    expect(w.markers.some((m) => m.kind === 'meltdown')).toBe(true);
+  });
+
+  it('spawns Containment only in Meltdown, and escalates it', () => {
+    const w = new World({ seed: 'contain', axiomId: 'ignition', meltdownAt: 20 });
+    runPiloted(w, 19);
+    expect(w.containment).toHaveLength(0);
+
+    runPiloted(w, 90);
+    expect(w.containment.length).toBeGreaterThan(0);
+    const kinds = new Set<string>();
+    for (let i = 0; i < 60 * 240; i++) {
+      // Keep the pilot alive: this test is about what the director produces,
+      // not about whether a bot can survive Containment.
+      w.player.integrity = w.player.maxIntegrity;
+      w.advance(botInput(w));
+      for (const c of w.containment) kinds.add(c.kind);
+      if (kinds.size === 3) break;
+    }
+    // All three antagonists exist and appear.
+    expect(kinds.size).toBe(3);
+  });
+
+  it('every Containment unit is telegraphed before it can hurt you (§17.1)', () => {
+    const w = new World({ seed: 'telegraph', axiomId: 'ignition', meltdownAt: 5 });
+    runPiloted(w, 6);
+    let checked = 0;
+    for (let i = 0; i < 60 * 120; i++) {
+      w.advance(NO_INPUT);
+      for (const c of w.containment) {
+        if (c.age < c.telegraph) {
+          expect(c.telegraph).toBeGreaterThan(0.5);
+          checked++;
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
+
+  it('death in Meltdown is CONTAINED, not a failure', () => {
+    const w = new World({ seed: 'contained', axiomId: 'ignition', meltdownAt: 5 });
+    for (let i = 0; i < 60 * 400 && w.player.alive; i++) w.advance(NO_INPUT);
+    expect(w.player.alive).toBe(false);
+    expect(w.ending).toBe('contained');
+  });
+});
+
+describe('scoring and the run trace (GDD §13.3, §14)', () => {
+  it('folds the Meltdown multiplier into score and reports the parts', () => {
+    const w = new World({ seed: 'score', axiomId: 'ignition', meltdownAt: 30 });
+    const p = w.engine.programs[0]!;
+    p.triggerId = 'clock';
+    p.actionId = 'bolt';
+    w.engine.recompile();
+    runPiloted(w, 120);
+
+    const score = w.finalScore();
+    expect(score.output).toBeGreaterThan(0);
+    expect(score.multiplier).toBeGreaterThan(1);
+    expect(score.total).toBe(score.output + score.kernelBonus + score.mirrorBonus);
+  });
+
+  it('records a trace and annotates it with the run\'s events', () => {
+    const w = new World({ seed: 'trace', axiomId: 'ignition', meltdownAt: 40 });
+    runPiloted(w, 90);
+    expect(w.trace.length).toBeGreaterThan(100);
+    expect(w.markers.some((m) => m.kind === 'level')).toBe(true);
+    expect(w.markers.some((m) => m.kind === 'meltdown')).toBe(true);
+    // Sampled on a fixed cadence that must not drift across a 25-minute run.
+    const span = w.trace[w.trace.length - 1]!.t - w.trace[0]!.t;
+    const meanCadence = span / (w.trace.length - 1);
+    expect(meanCadence).toBeCloseTo(TUNABLE.epsTraceInterval, 3);
+  });
+
+  it('extraction banks at x1.0 and never gets the Meltdown multiplier', () => {
+    const w = new World({ seed: 'extract', axiomId: 'ignition' });
+    runPiloted(w, 30);
+    w.terminals.length = 0;
+    w.terminals.push({
+      id: 1,
+      kind: 'extract',
+      x: w.player.x,
+      y: w.player.y,
+      progress: 0,
+      age: 0,
+      channelTime: TUNABLE.extractChannelTime,
+      requiresStillness: false,
+      alive: true,
+    });
+    for (let i = 0; i < 60 * 8 && w.player.alive; i++) {
+      w.advance({ moveX: 0, moveY: 0, dash: false, interact: true });
+    }
+    expect(w.ending).toBe('extracted');
+    expect(w.finalScore().multiplier).toBe(1);
   });
 });
 

@@ -467,6 +467,73 @@ then.
 
 ---
 
+## D-28 · OPEN · Recompile does not currently earn its place
+
+§9 is the mid-run prestige: delete your Engine, forge a Kernel, rebuild steeper.
+§9.2 requires that "Recompiling at your peak clearly beats hoarding" and that
+hoarding is "the noob trap". Measured across 12 seeds per arm, at 28 minutes:
+
+| pilot | survived | score | reached Meltdown |
+|---|---|---|---|
+| never Recompiles | 1033s | 32,040 | 8/12 |
+| Recompiles eagerly | 592s | 8,726 | 0/12 |
+
+Hoarding wins by roughly 3.7×. The design's central claim about this mechanic is
+false as built.
+
+**Why, mechanically.** The player has no innate attack — every point of damage
+comes from a Program (§3, §24: no manual aiming, no basic attack). As originally
+specified, Recompile deletes every Program, so output goes to zero, so no XP is
+earned, so no drafts arrive, so the Engine can never be rebuilt. The 2× XP
+rebuild surge multiplies zero. Instrumented over five seeds, four of five
+Recompiles never restored a single firing Program within the following three
+minutes.
+
+**What I tried, in order.** Each of these was measured, not reasoned about:
+
+1. A much larger Kernel (up to ×2.9 global output). No effect on the outcome.
+2. Rebooting to the Axiom's starter Program instead of to nothing, so the loop
+   can feed itself. Fixed the dead end; did not fix the economics.
+3. A far faster rebuild (6× XP for 180s instead of 2× for 120s). No effect.
+
+The binding constraint is not the size of the reward and not the speed of the
+rebuild. It is that **the cost of Recompile is progression time, and in this game
+progression time is also survival**. You do not merely lose output while
+rebuilding; you lose the ability to hold the arena, and the horde does not pause.
+A multiplier cannot compensate, because it multiplies an Engine that is no longer
+big enough to keep you alive.
+
+Three separate measurement arms in this investigation were distorted by the
+reference pilot rather than the game (a draft heuristic blind to an empty Engine,
+and a policy that recompiled every 70 seconds). Worth remembering: when the
+harness says a mechanic is bad, check the pilot before believing it.
+
+**Current state.** Recompile is implemented and functional: terminals appear from
+minute 8, the ceremony runs, the Kernel is forged, the Axiom starter is restored.
+It is simply not worth taking. Options, none of which I want to choose alone:
+
+1. **Cut it.** Meltdown alone carries the third act. Loses §9.2's answer to
+   "a solved build stops generating decisions" — which is a real problem the
+   player has already hit by level 11.
+2. **Make it partial.** Sacrifice *chosen* Programs rather than all of them;
+   bigger sacrifice, bigger Kernel. Becomes a dial rather than a cliff, and the
+   cost stops being total. Furthest from §9 as written, closest to working.
+3. **Pay the Kernel forward in nodes, not multipliers.** Recompile returns the
+   deleted nodes as a guaranteed draft sequence, so rebuilding is near-instant
+   and the Kernel is pure profit. Keeps the ritual, removes the vulnerability
+   window.
+
+My preference is (2): it makes the sacrifice a decision with a size, which is
+more interesting than a binary, and it is the only option where the cost scales
+with what the player can afford.
+
+Note the deliberate deviation already made: Recompile restores the Axiom starter
+rather than leaving the Engine empty. Even if the mechanic is cut or reshaped,
+that change stands — an Engine that cannot generate the XP needed to rebuild
+itself is a dead end regardless of the surrounding economy.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

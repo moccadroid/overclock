@@ -449,6 +449,115 @@
   font-size: 11px;
 }
 
+.meltdown {
+  color: var(--thermal);
+  letter-spacing: 0.14em;
+}
+.surge {
+  color: var(--void);
+}
+
+/* §19.7 — the Recompile ceremony. The one moment of grandeur in a dry UI. */
+#ceremony {
+  background: rgba(6, 10, 18, 0.94);
+}
+.ceremony-inner {
+  text-align: center;
+  line-height: 2;
+}
+.ceremony-inner .title {
+  font-size: 22px;
+  letter-spacing: 0.6em;
+  color: var(--void);
+  margin-bottom: 20px;
+}
+.ceremony-inner .rows {
+  min-height: 100px;
+  color: var(--ink-bright);
+  font-size: 14px;
+}
+.ceremony-inner .burn {
+  transition: opacity 160ms linear, transform 160ms ease-in;
+}
+.ceremony-inner .burn.gone {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+.ceremony-inner .kernel {
+  margin-top: 18px;
+  font-size: 18px;
+  letter-spacing: 0.25em;
+  color: var(--void);
+}
+.ceremony-inner .kernel.dim {
+  color: #46586e;
+  font-size: 12px;
+  letter-spacing: 0.2em;
+}
+.ceremony-inner .kernel .total {
+  margin-left: 16px;
+  font-size: 12px;
+  color: var(--ink);
+  letter-spacing: 0.1em;
+}
+.ceremony-inner .surge {
+  margin-top: 8px;
+  font-size: 11px;
+  letter-spacing: 0.28em;
+  color: var(--ink);
+}
+
+/* §14 — Results. The run-trace chart is the hero, everything else annotates it. */
+.results-panel {
+  width: min(1000px, 95vw) !important;
+  max-height: 92vh;
+  overflow-y: auto;
+  white-space: normal !important;
+  line-height: 1.6 !important;
+}
+.results-panel .trace {
+  display: block;
+  margin: 16px 0 22px;
+}
+.results-panel .cols {
+  display: flex;
+  gap: 34px;
+  align-items: flex-start;
+}
+.results-panel pre {
+  margin: 0;
+  font: inherit;
+  color: var(--ink);
+  line-height: 1.75;
+}
+.results-panel .score {
+  color: var(--ink-bright);
+}
+.results-panel .snapshot {
+  flex: 1;
+  min-width: 0;
+}
+.results-panel .k {
+  color: #46586e;
+  letter-spacing: 0.22em;
+  margin: 0 0 4px;
+}
+.results-panel .snapshot pre {
+  margin-bottom: 16px;
+  overflow-x: auto;
+}
+.results-panel .wasted {
+  margin-top: 18px;
+  padding: 10px 12px;
+  border: 1px solid #7a5a2a;
+  color: #c9a25e;
+}
+.results-panel .foot {
+  margin-top: 18px;
+  color: #3f5570;
+  font-size: 11px;
+}
+
 #results .panel {
   width: min(620px, 92vw);
   border: 1px solid var(--structure);

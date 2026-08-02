@@ -10,6 +10,20 @@ import type { InputState, World } from '../sim/world';
 import type { DraftCard } from '../sim/draft';
 import { NODE_BY_ID } from '../content/index';
 
+/**
+ * Recompile policy, so the harness can A/B the §9.2 claim directly rather than
+ * inferring it from one blended pilot.
+ *   never  — hoard the engine to the end
+ *   eager  — take every terminal the moment it appears
+ *   smart  — take it when there is output worth converting and health to spare
+ */
+export type RecompilePolicy = 'never' | 'eager' | 'smart';
+let recompilePolicy: RecompilePolicy = 'smart';
+
+export function setRecompilePolicy(policy: RecompilePolicy): void {
+  recompilePolicy = policy;
+}
+
 export function botInput(world: World): InputState {
   const p = world.player;
   let ax = 0;
@@ -54,15 +68,34 @@ export function botInput(world: World): InputState {
   // Route to a beacon when one is reasonably close — the greed line is part of
   // what the harness should be exercising (§12.3).
   let channelling = false;
-  const beacon = world.beacons[0];
-  // Only take the greed line while healthy — a bot that channels every beacon
-  // measures a reckless pilot, not the game.
-  const greedy = p.integrity > p.maxIntegrity * 0.6;
-  if (beacon && greedy) {
-    const dx = beacon.x - p.x;
-    const dy = beacon.y - p.y;
+  // §9.2 says Recompiling at your peak beats hoarding, so the reference pilot
+  // takes it — but only when there is actually an Engine worth converting and
+  // enough Integrity to survive being empty. A bot that recompiles the instant a
+  // terminal appears measures recklessness, not the mechanic.
+  const healthy = p.integrity > p.maxIntegrity * 0.6;
+  // §9.2 describes 2-3 Recompiles across a run, taken at the Engine's peak — not
+  // one every time a terminal happens to appear. A policy without a cooldown
+  // measures a pilot resetting itself to the Axiom every 70 seconds, which is
+  // nobody's play pattern.
+  const sinceLast = world.time - world.lastRecompileTime;
+  const worthConverting =
+    recompilePolicy === 'never'
+      ? false
+      : recompilePolicy === 'eager'
+        ? sinceLast > 240
+        : sinceLast > 240 && world.outputAverage > 20 && p.integrity > p.maxIntegrity * 0.7;
+  const target =
+    (worthConverting
+      ? world.terminals.find((t) => t.kind === 'recompile' && t.alive)
+      : undefined) ??
+    (healthy ? world.terminals.find((t) => t.kind === 'beacon' && t.alive) : undefined);
+
+  if (target) {
+    const dx = target.x - p.x;
+    const dy = target.y - p.y;
     const d = Math.hypot(dx, dy);
-    if (d < 900 && threatDist > 150) {
+    const range = target.kind === 'recompile' ? 2200 : 900;
+    if (d < range && threatDist > 150) {
       ax += (dx / (d || 1)) * 1.4;
       ay += (dy / (d || 1)) * 1.4;
     }
@@ -88,11 +121,17 @@ export function botInput(world: World): InputState {
  * produces nothing); capacity matters only when static load is crowding the cap.
  */
 export function botDraftChoice(world: World, cards: readonly DraftCard[]): number {
-  const needsTrigger = world.engine.programs.some((p) => p.triggerId === null && p.actionId);
-  const needsAction = world.engine.programs.some((p) => p.actionId === null && p.triggerId);
+  // A Program needs BOTH a Trigger and an Action to fire, so "needs" has to
+  // include the empty-engine case. Written as "has an action but no trigger" it
+  // is false for a freshly Recompiled Engine, and the pilot then drafts
+  // modifiers onto nothing forever — which is exactly what it did.
+  const live = world.engine.compiled.some((c) => c.live);
+  const needsTrigger = world.engine.programs.some((p) => p.triggerId === null);
+  const needsAction = world.engine.programs.some((p) => p.actionId === null);
+  const rebuilding = !live;
   // Capacity is the only lever this pilot has against Heat — it never scraps.
   const headroomTight =
-    world.engine.staticLoad > world.budget.capacity * 0.45 || world.budget.heat > 35;
+    live && (world.engine.staticLoad > world.budget.capacity * 0.45 || world.budget.heat > 35);
 
   let bestIndex = 0;
   let bestScore = -Infinity;
@@ -105,9 +144,10 @@ export function botDraftChoice(world: World, cards: readonly DraftCard[]): numbe
     } else {
       const node = NODE_BY_ID.get(card.nodeId);
       if (!node) score = 0;
-      else if (node.kind === 'trigger') score = needsTrigger ? 8 : 4;
-      else if (node.kind === 'action') score = needsAction ? 8 : 4;
-      else score = headroomTight ? 3 : 6;
+      // While rebuilding, completing a firing Program beats everything.
+      else if (node.kind === 'trigger') score = rebuilding ? 20 : needsTrigger ? 8 : 4;
+      else if (node.kind === 'action') score = rebuilding ? 20 : needsAction ? 8 : 4;
+      else score = rebuilding ? 1 : headroomTight ? 3 : 6;
     }
     if (score > bestScore) {
       bestScore = score;
