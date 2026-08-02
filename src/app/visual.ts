@@ -103,3 +103,104 @@ export const VISUAL = {
 } as const;
 
 export type Band = keyof typeof BAND;
+
+
+/**
+ * §20.1 — visual presets.
+ *
+ * Sliders were the wrong control. Three of them means eight combinations that
+ * look wrong for every one that looks good, and a "0%" that turned the game off
+ * rather than turning an effect off — because they were multipliers over a
+ * baseline that already *is* the look.
+ *
+ * So: presets, and **SCHEMATIC is the floor, not the middle.** It is exactly what
+ * the game looked like before any of this existed — §16's restrained document,
+ * which is the design. Everything above it is a player choosing excess, and the
+ * excess is allowed to be genuinely excessive.
+ */
+export interface ViewPreset {
+  id: string;
+  name: string;
+  note: string;
+  /** Multiplier over VISUAL.bloomIntensity. 1 = the tuned baseline. */
+  bloom: number;
+  /** Emissive brightness before the blur — how hot things burn. */
+  glow: number;
+  /** §17.2 screenshake, which some people cannot tolerate at all. */
+  shake: number;
+  /** Post-pass, all zero at the floor. See gfx/post.ts. */
+  barrel: number;
+  aberration: number;
+  scan: number;
+  grain: number;
+  vignette: number;
+  bleed: number;
+}
+
+export const VIEW_PRESETS: ViewPreset[] = [
+  {
+    id: 'schematic',
+    name: 'Schematic',
+    note: 'the drawing, undecorated. What §16 actually asks for.',
+    bloom: 1,
+    glow: 1,
+    shake: 1,
+    barrel: 0,
+    aberration: 0,
+    scan: 0,
+    grain: 0,
+    vignette: 0,
+    bleed: 0,
+  },
+  {
+    id: 'phosphor',
+    name: 'Phosphor',
+    note: 'a CRT in a dark room. Scanlines, a curved tube, light that lingers.',
+    bloom: 2,
+    glow: 1.35,
+    shake: 1,
+    barrel: 0.07,
+    aberration: 0.3,
+    scan: 0.26,
+    grain: 0.07,
+    vignette: 0.3,
+    bleed: 0.3,
+  },
+  {
+    id: 'overdrive',
+    name: 'Overdrive',
+    note: 'too much light and no apology for it. Everything bleeds outward.',
+    bloom: 3.2,
+    glow: 1.8,
+    shake: 1.15,
+    barrel: 0.05,
+    aberration: 0.45,
+    scan: 0.1,
+    grain: 0.09,
+    vignette: 0.34,
+    bleed: 0.95,
+  },
+  {
+    id: 'divergence',
+    name: 'Divergence',
+    note: 'the Meltdown look, all the time. Barely legible, and that is the point.',
+    bloom: 4.2,
+    glow: 2.2,
+    shake: 1.35,
+    barrel: 0.14,
+    aberration: 0.85,
+    scan: 0.3,
+    grain: 0.16,
+    vignette: 0.42,
+    bleed: 1.4,
+  },
+];
+
+export const VIEW_PRESET_BY_ID = new Map(VIEW_PRESETS.map((p) => [p.id, p]));
+
+/** The live view settings. Mutated by `applyPreset`; read by the renderer. */
+export const VIEW: ViewPreset = { ...VIEW_PRESETS[0]! };
+
+export function applyPreset(id: string): void {
+  Object.assign(VIEW, VIEW_PRESET_BY_ID.get(id) ?? VIEW_PRESETS[0]!);
+}

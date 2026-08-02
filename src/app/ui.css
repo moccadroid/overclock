@@ -1363,6 +1363,130 @@
   color: var(--voltaic);
 }
 
+/* One button. Every clickable surface routes through this — the raw browser
+   button is a grey slab that punches a hole in §16's document. */
+.btn {
+  padding: 7px 14px;
+  border: 1px solid var(--structure);
+  background: rgba(255, 255, 255, 0.015);
+  color: var(--ink);
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  cursor: pointer;
+  transition:
+    border-color 90ms linear,
+    color 90ms linear,
+    background 90ms linear;
+}
+.btn:hover:enabled {
+  border-color: var(--voltaic);
+  color: var(--voltaic);
+  background: rgba(0, 229, 255, 0.06);
+}
+.btn:active:enabled {
+  background: rgba(0, 229, 255, 0.14);
+}
+.btn:disabled {
+  opacity: 0.32;
+  cursor: default;
+}
+.btn.on {
+  border-color: var(--voltaic);
+  color: var(--voltaic);
+}
+.btn.danger {
+  color: #c48a80;
+}
+.btn.danger:hover:enabled {
+  border-color: var(--signal);
+  color: var(--signal);
+  background: rgba(255, 42, 60, 0.07);
+}
+.btn.set-mute.on {
+  color: var(--signal);
+  border-color: #5a2a2a;
+}
+
+/* Visual presets. */
+.preset {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-bottom-color: rgba(42, 58, 82, 0.55);
+  cursor: pointer;
+}
+.preset:hover {
+  border-color: var(--structure);
+}
+.preset.on {
+  border-color: var(--voltaic);
+  background: rgba(0, 229, 255, 0.05);
+}
+.ps-mark {
+  flex: none;
+  color: #2f4258;
+}
+.preset.on .ps-mark {
+  color: var(--voltaic);
+}
+.ps-name {
+  flex: 0 0 130px;
+  color: var(--ink-bright);
+  letter-spacing: 0.1em;
+}
+.ps-note {
+  flex: 1;
+  min-width: 0;
+  color: #56708c;
+}
+
+/* Settings. */
+.set-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  line-height: 2.2;
+}
+.set-label {
+  flex: 0 0 130px;
+  color: #46586e;
+  letter-spacing: 0.14em;
+}
+.set-slider {
+  flex: 0 0 240px;
+  accent-color: var(--voltaic);
+  background: transparent;
+  cursor: pointer;
+}
+.set-val {
+  flex: 0 0 52px;
+  color: var(--ink-bright);
+}
+.set-note {
+  color: #46586e;
+}
+.set-mute {
+  flex: 0 0 240px;
+  padding: 5px 12px;
+  border: 1px solid var(--structure);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  letter-spacing: 0.14em;
+  cursor: pointer;
+}
+.set-mute:hover {
+  border-color: var(--voltaic);
+  color: var(--voltaic);
+}
+.set-mute.on {
+  color: var(--signal);
+  border-color: #5a2a2a;
+}
+
 /* Codex. */
 .codex-row {
   display: flex;

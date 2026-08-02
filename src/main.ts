@@ -11,6 +11,7 @@ import { TitleScreen } from './app/menu';
 import { BRANDING } from './branding';
 import { Library } from './meta/profile';
 import { Audio } from './audio/audio';
+import { applyPreset } from './app/visual';
 import './app/ui.css';
 
 const params = new URLSearchParams(location.search);
@@ -22,6 +23,11 @@ const library = new Library();
 // hands it to the run, which keeps the AudioContext alive across the handover —
 // browsers only grant one per gesture, and losing it means a silent run.
 const audio = new Audio();
+// §20.1 — a player's visual preferences apply before the first frame, not after
+// they have already seen the wrong one.
+applyPreset(library.snapshot.settings.preset);
+audio.setMuted(library.snapshot.settings.muted);
+audio.setVolume(library.snapshot.settings.volume);
 
 /**
  * Playtest hook: `?meltdown=90` brings the Meltdown line forward so the third

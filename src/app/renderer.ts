@@ -19,7 +19,8 @@ import type { Hue } from '../sim/types';
 import type { TerminalKind, World } from '../sim/world';
 import { enemy as getEnemy } from '../content/index';
 import { Camera } from './camera';
-import { BAND, PALETTE, VISUAL } from './visual';
+import { BAND, PALETTE, VIEW, VISUAL } from './visual';
+import { PostPass } from './gfx/post';
 import { BloomPipeline } from './gfx/bloom';
 import { ParticleField } from './gfx/particles';
 import { shapeCoreRadius, shapeOutline } from './gfx/shapes';
@@ -52,6 +53,7 @@ export class Renderer {
   camera!: Camera;
 
   private bloom!: BloomPipeline;
+  private readonly post = new PostPass();
   private readonly particles = new ParticleField();
 
   /** Non-blooming schematic: the arena's structure. */
@@ -116,6 +118,10 @@ export class Renderer {
       this.gProjectiles,
       this.gPlayer,
     );
+    // Emissive brightness before the blur pass. Raising this is what makes the
+    // glow have something hot to work with, which is a different knob from how
+    // wide the glow spreads — §16.1 separates them and so does the settings pane.
+    this.worldLayer.alpha = VIEW.glow;
     this.bloom.emissive.addChild(this.worldLayer);
     this.screenLayer.addChild(this.gIndicators);
 
@@ -174,6 +180,7 @@ export class Renderer {
     this.lootPhase += frameDt * 3.6;
     this.updateShake(frameDt);
     this.applyTransform();
+    this.worldLayer.alpha = VIEW.glow;
 
     const heat = Math.min(1, world.budget.heat / 100);
     const tier = world.budget.tier;
@@ -198,7 +205,7 @@ export class Renderer {
 
     this.bloom.setAberration(Math.min(1, (tier >= 2 ? 0.5 + 0.5 * heat : 0) + melt * 0.55));
     this.bloom.setTear(world.budget.stalled ? (this.jitter(1) > 0 ? 1 : -1) * 0.6 : melt * 0.12);
-    this.bloom.setBloom(VISUAL.bloomIntensity * (1 + heat * 0.35 + melt * 0.5));
+    this.bloom.setBloom(VISUAL.bloomIntensity * VIEW.bloom * (1 + heat * 0.35 + melt * 0.5));
     // Step 5: the background lightens toward white as the final minutes approach.
     // The world overexposes.
     this.app.renderer.background.color = mix(
@@ -206,6 +213,13 @@ export class Renderer {
       0x243044,
       Math.min(0.85, melt * 0.55),
     );
+    // §16.7 — the degradation ladder pushes whatever preset the player chose
+    // further than they asked, which is how Heat and Meltdown stay legible as
+    // *damage to the picture* rather than as a separate effect.
+    this.post.update(VIEW, Math.max(heat * 0.6, melt), frameDt);
+    const off = PostPass.isOff(VIEW) && heat < 0.02 && melt < 0.02;
+    this.app.stage.filters = off ? [] : [this.post.filter];
+
     this.bloom.compose();
   }
 
@@ -300,7 +314,7 @@ export class Renderer {
 
   private updateShake(dt: number): void {
     this.shake = Math.max(0, this.shake - VISUAL.shakeDecay * dt);
-    const magnitude = this.shake * VISUAL.degradationIntensity;
+    const magnitude = this.shake * VISUAL.degradationIntensity * VIEW.shake;
     this.shakeX = this.jitter(magnitude);
     this.shakeY = this.jitter(magnitude);
   }

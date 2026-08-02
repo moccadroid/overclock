@@ -65,6 +65,24 @@ const HUE_COLOUR: Record<Hue, number> = { thermal: 1, voltaic: 1.45, void: 0.7 }
 /** §18 — techno moves in 16-bar phrases. Everything automated rides this. */
 const PHRASE_BARS = 16;
 
+/**
+ * Soft clip. 0 is transparent, 1 is coming apart.
+ *
+ * Saturation raises perceived loudness far less than gain does while raising
+ * *perceived aggression* far more, which is exactly the trade a game that gets
+ * busier should make.
+ */
+function shape(node: WaveShaperNode, amount: number): void {
+  const k = amount * 40;
+  const n = 256;
+  const curve = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const x = (i / (n - 1)) * 2 - 1;
+    curve[i] = k === 0 ? x : ((1 + k) * x) / (1 + k * Math.abs(x));
+  }
+  node.curve = curve;
+}
+
 export interface AudioState {
   /** 0..1 — how busy the engine is, from EPS. Drives the arrangement. */
   intensity: number;
@@ -99,6 +117,15 @@ export class Audio {
   private delay!: DelayNode;
   private delayFeedback!: GainNode;
   private echoSend!: GainNode;
+  /**
+   * Intensity used to raise gains, which is the wrong instrument entirely — a
+   * track that gets *louder* as the game gets busier is uncomfortable and, at
+   * the top, just clipping. Aggression is the thing that should climb, so it
+   * climbs here: saturation on the music bus, plus a headroom trim that offsets
+   * the extra voices a busy arrangement adds. Same loudness, more teeth.
+   */
+  private musicDrive!: WaveShaperNode;
+  private musicTrim!: GainNode;
 
   private state: AudioState = {
     intensity: 0,
@@ -176,9 +203,16 @@ export class Audio {
     this.musicFilter.Q.value = 1.1;
     this.musicFilter.connect(this.lowShelf);
 
+    this.musicDrive = ctx.createWaveShaper();
+    this.musicDrive.connect(this.musicFilter);
+
+    this.musicTrim = ctx.createGain();
+    this.musicTrim.gain.value = 1;
+    this.musicTrim.connect(this.musicDrive);
+
     this.musicBus = ctx.createGain();
     this.musicBus.gain.value = 0.9;
-    this.musicBus.connect(this.musicFilter);
+    this.musicBus.connect(this.musicTrim);
 
     // Dotted eighth is the classic dub delay: it lands between the beats rather
     // than on them, so the echoes read as counter-rhythm instead of as a
@@ -334,6 +368,11 @@ export class Audio {
     this.clock.bpm = 112 + state.meltdown * 12;
     this.delay.delayTime.setTargetAtTime((60 / this.clock.bpm) * 0.75, this.ctx.currentTime, 0.2);
     this.echoSend.gain.setTargetAtTime(this.track.echo, this.ctx.currentTime, 0.3);
+
+    // Busier means dirtier, not louder. Drive climbs with intensity while the
+    // trim comes down to pay for the layers that intensity added.
+    shape(this.musicDrive, this.smoothed * 0.55 + state.meltdown * 0.35);
+    this.musicTrim.gain.setTargetAtTime(1 - this.smoothed * 0.3, this.ctx.currentTime, 0.4);
     this.setDrive(Math.max(state.heat * 0.6, state.meltdown * 0.45));
     this.musicBus.gain.value = state.stalled ? 0.12 : 0.9;
 
@@ -454,8 +493,8 @@ export class Audio {
     // The stab. Enters a quarter of the way into a phrase and is most of what
     // reads as melody in this genre.
     if (t.stab[index] && (phrase > 0.24 || i > 0.5)) {
-      stab(music, swung, tones, 0.7 + i * 0.5, t.stabVoice);
-      if (t.echo > 0.01) stab(this.voice(this.echoSend), swung, tones, 0.7 + i * 0.5, t.stabVoice);
+      stab(music, swung, tones, 0.9, t.stabVoice);
+      if (t.echo > 0.01) stab(this.voice(this.echoSend), swung, tones, 0.9, t.stabVoice);
     }
 
     // The motif: one or two bars, repeated unchanged. The hook is repetition,
@@ -479,10 +518,10 @@ export class Audio {
     // seconds with no relationship to the beat, which is what made it sound
     // ethereal and disconnected; harmony in this genre is carried rhythmically.
     if (i > 0.3 && index % 8 === 4) {
-      gatedChord(music, swung, tones, Math.min(1, (i - 0.3) * 1.6), beat * 0.45, t.padWave);
+      gatedChord(music, swung, tones, 0.85, beat * 0.45, t.padWave);
     }
 
-    this.playParts(music, swung, index, tones, i);
+    this.playParts(music, swung, index, tones);
     this.flush(at, i);
   }
 
@@ -494,22 +533,17 @@ export class Audio {
    * across the chord by index so two rows never land on the same note, which is
    * the difference between harmony and four copies of one line.
    */
-  private playParts(
-    music: VoiceCtx,
-    swung: number,
-    index: number,
-    tones: number[],
-    intensity: number,
-  ): void {
+  private playParts(music: VoiceCtx, swung: number, index: number, tones: number[]): void {
     for (let p = 0; p < this.parts.length; p++) {
       const part = this.parts[p];
       if (!part || !part.pattern[index]) {
         if (part) this.lastPartHz[p] = 0;
         continue;
       }
-      // Parts fade up with the run rather than arriving at full volume: a fresh
-      // Engine should sound like one row, not like a finished track.
-      const level = part.gain * (0.45 + intensity * 0.55);
+      // Fixed level. A part is either in the arrangement or it is not — fading
+      // it up with intensity is the same "louder when busy" mistake in miniature,
+      // and four parts all swelling at once is the version that hurts.
+      const level = part.gain;
       const hz = semiHz(tones[part.tone % tones.length]! + 24 + part.register);
       playPart(
         music,
@@ -578,8 +612,9 @@ export class Audio {
     const batch = this.pending;
     this.pending = [];
 
-    // As the arrangement takes over, individual events step back. At full
-    // intensity the engine layer is a quarter of its quiet-game volume.
+    // As the arrangement takes over, individual events step back. This one is a
+    // *reduction*, which is the direction that stays comfortable: the engine
+    // layer thins out rather than everything else getting louder to bury it.
     const duckToArrangement = 1 - Math.min(0.75, intensity * 0.95);
     if (duckToArrangement < 0.3) return;
 
@@ -638,13 +673,6 @@ export class Audio {
 
   /** Soft clip. 0 is transparent; 1 is an engine coming apart. */
   private setDrive(amount: number): void {
-    const k = amount * 40;
-    const n = 256;
-    const curve = new Float32Array(n);
-    for (let i = 0; i < n; i++) {
-      const x = (i / (n - 1)) * 2 - 1;
-      curve[i] = k === 0 ? x : ((1 + k) * x) / (1 + k * Math.abs(x));
-    }
-    this.shaper.curve = curve;
+    shape(this.shaper, amount);
   }
 }

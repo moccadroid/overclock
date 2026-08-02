@@ -517,11 +517,11 @@ export class EditorOverlay extends Overlay {
     foot.className = 'foot console-foot';
     const resume = button('RESUME', true, () => this.onAction?.('close'));
     const quit = button(
-      this.quitConfirm ? 'QUIT — CLICK AGAIN TO CONFIRM' : 'QUIT TO RUN SETUP',
+      this.quitConfirm ? 'QUIT — CLICK AGAIN TO CONFIRM' : 'QUIT TO MENU',
       true,
       () => this.onAction?.('quit'),
     );
-    quit.className = 'danger';
+    quit.className = 'btn danger';
     const note = document.createElement('span');
     note.className = 'dim';
     note.textContent = 'quitting ends this run without scoring it';
@@ -579,7 +579,7 @@ export class EditorOverlay extends Overlay {
       this.pendingScrap = null;
       this.afterChange();
     });
-    confirm.className = 'danger';
+    confirm.className = 'btn danger';
     const cancel = button('CANCEL', true, () => {
       this.pendingScrap = null;
       this.render();
@@ -823,6 +823,14 @@ function slotButton(label: string, enabled: boolean, onClick: () => void): HTMLB
   return el;
 }
 
+/**
+ * The button. One component, one look, one set of sounds.
+ *
+ * Every clickable surface in the game routes through `.btn` — the raw browser
+ * button is a grey slab that punches a hole in §16's document, and buttons built
+ * ad hoc in five places drift into five appearances. Hover and click sounds come
+ * from the delegated listeners in game.ts and menu.ts, which match on this class.
+ */
 function button(
   label: string,
   enabled: boolean,
@@ -832,7 +840,7 @@ function button(
   const el = document.createElement('button');
   el.textContent = label;
   el.disabled = !enabled;
-  if (danger) el.className = 'danger';
+  el.className = danger ? 'btn danger' : 'btn';
   el.addEventListener('click', onClick);
   return el;
 }

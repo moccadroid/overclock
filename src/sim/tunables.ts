@@ -24,7 +24,7 @@ export const TUNABLE = {
    * §4.1 says ~1.5x avatar diameter (=46). That was sized for a boxed arena; in
    * an open world the player outruns their own drops and the opening starves.
    */
-  collectRadius: 95,
+  collectRadius: 190,
   playerRadius: 15,
 
   // ---- §6 cycles & heat ----

@@ -154,7 +154,7 @@ export class Game {
     if (cmd === 'editor' || cmd === 'close') {
       if (this.mode === 'draft' && cmd === 'editor') return;
       const open = cmd === 'close' ? (this.editor.close(), false) : this.editor.toggle(this.world, 'pipeline');
-      this.audio.chrome(open ? 'click' : 'back');
+      this.audio.chrome('click');
       this.mode = open ? 'editor' : 'running';
       this.confirmQuit = false;
       this.input.clear();
@@ -181,7 +181,7 @@ export class Game {
         return;
       }
       this.confirmQuit = true;
-      this.audio.chrome('back');
+      this.audio.chrome('click');
       this.editor.setQuitConfirm(true);
       return;
     }
@@ -194,7 +194,7 @@ export class Game {
       if (this.mode === 'primer') {
         this.message.hide();
         this.mode = 'running';
-        this.audio.chrome('back');
+        this.audio.chrome('click');
       } else if (this.mode === 'draft') {
         // The offer is kept, so resuming returns to the same three cards.
         this.draft.defer();
@@ -204,7 +204,7 @@ export class Game {
         // ESC out of the pipeline shows the run rather than dumping you back
         // into the fight; a second ESC closes.
         const open = this.editor.toggle(this.world, 'run');
-        this.audio.chrome(open ? 'click' : 'back');
+        this.audio.chrome('click');
         this.mode = open ? 'editor' : 'running';
         this.confirmQuit = false;
         if (!open && this.pausedFromDraft) {
@@ -240,6 +240,7 @@ export class Game {
 
   private openDraft(): void {
     this.mode = 'draft';
+    this.audio.chrome('draft');
     this.draft.present(this.world, () => {
       this.mode = 'running';
       this.audio.chrome('confirm');

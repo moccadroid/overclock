@@ -1744,6 +1744,76 @@ non-musical sound in the game; this is its full stop.
 
 ---
 
+## D-85 · BUG · Bloom above 1x was a placebo
+
+`glow.alpha = intensity` on a single additive sprite. Alpha clamps at 1, so
+every bloom setting above 1x silently did nothing — the "more bloom" control had
+no effect at all, which is why turning it up did not turn anything up.
+
+Bloom now stacks three additive copies at widening blur radii: the tight one
+gives edges their halo, the wide ones are what turn a screen full of light into
+§16.1's "chaos resolving into light". 1x is the tuned baseline, 4x is a
+deliberate excess and looks like one.
+
+The radial bleed had the same shape of error inverted: it *mixed* the blurred
+copy over the sharp one, so raising it made the picture softer when the ask was
+for it to be brighter — every enemy became an unreadable smear. It adds now
+instead of replacing, so strokes stay sharp and light hangs off them.
+
+## D-86 · SETTLED · Presets, not sliders, and the floor is the current look
+
+Three sliders is eight combinations that look wrong for every one that looks
+good. Worse, they were multipliers over a baseline that already *is* the look,
+so 0% turned the game off rather than turning an effect off.
+
+Four presets. **SCHEMATIC is the floor** — bit-for-bit what the game looked like
+before any of this existed, because §16's restraint is the design and everything
+else is a player choosing excess on top of it. A preset with every effect at
+zero has to be indistinguishable from not having the pass at all, and it is: the
+filter is removed from the stage entirely when nothing is asking for it.
+
+Above it: Phosphor (a CRT in a dark room), Overdrive (too much light, no
+apology) and Divergence (the Meltdown look, permanently).
+
+## D-87 · SETTLED · A real post-processing pass
+
+One fragment shader over the composited frame, doing what a sprite-and-blend
+pipeline cannot: barrel distortion, per-channel radial displacement, scanlines,
+animated grain, vignette, additive radial bleed.
+
+The old aberration was two tinted sprites offset by a constant, which is why it
+read as a colour wash rather than as glass — real aberration grows toward the
+edge of the lens, which needs a per-pixel radius. Same for the tear.
+
+§16.7's degradation ladder now scales whatever preset the player picked rather
+than being a separate effect, so Heat and Meltdown read as *damage to the
+picture* they already chose. A preset at zero stays at zero under the ladder:
+it scales what is there rather than introducing it.
+
+## D-88 · SETTLED · One button
+
+Every clickable surface routes through `.btn`. The raw browser button is a grey
+slab that punches a hole in §16's document, and buttons built ad hoc in five
+places had already drifted into five appearances.
+
+UI sounds were also too quiet to register — raised roughly 3x, and the hover and
+click are now the *same object* at two weights rather than two melodies. A UI
+that plays little tunes competes with the track for attention it has not earned.
+The two exceptions are the two moments that are actually decisions: a Draft
+arriving and a Draft taken.
+
+## D-89 · SETTLED · Busier means dirtier, not louder
+
+Reported: "the music should not get louder, that's very uncomfortable."
+
+Intensity was raising gains in four places. It now raises *saturation* on the
+music bus and lowers a trim to pay for the extra voices a busy arrangement adds.
+Saturation raises perceived loudness far less than gain does and perceived
+aggression far more, which is exactly the trade a game that gets busier should
+make.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

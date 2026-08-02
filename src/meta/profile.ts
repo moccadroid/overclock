@@ -81,7 +81,17 @@ export interface LibraryData {
    * either trip it or force the guard to be loosened. Neither is worth it:
    * settings are not progression, so they live somewhere else.
    */
-  settings: { muted: boolean; volume: number; track: string };
+  settings: {
+    muted: boolean;
+    volume: number;
+    track: string;
+    /**
+     * §20.1 — the chosen visual preset. An id, like everything else here: the
+     * numbers live in `visual.ts` where they can be tuned as a set, and §15.1's
+     * no-numbers guard stays honest by accident rather than by exception.
+     */
+    preset: string;
+  };
 }
 
 function emptyData(): LibraryData {
@@ -93,7 +103,7 @@ function emptyData(): LibraryData {
     bestScore: 0,
     bestDepth: 0,
     bestTime: 0,
-    settings: { muted: false, volume: 0.7, track: '' },
+    settings: { muted: false, volume: 0.7, track: '', preset: 'schematic' },
   };
 }
 
@@ -129,6 +139,10 @@ export class Library {
           // '' means "let the seed choose", which is the default and the one
           // that keeps a shared seed sounding the same for everyone.
           track: typeof parsed.settings?.track === 'string' ? parsed.settings.track : '',
+          preset:
+            typeof parsed.settings?.preset === 'string'
+              ? parsed.settings.preset
+              : base.settings.preset,
         },
       };
     } catch {
@@ -217,6 +231,11 @@ export class Library {
 
   setTrack(track: string): void {
     this.data.settings = { ...this.data.settings, track };
+    this.save();
+  }
+
+  setPreset(preset: string): void {
+    this.data.settings = { ...this.data.settings, preset };
     this.save();
   }
 

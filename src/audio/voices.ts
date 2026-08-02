@@ -851,81 +851,65 @@ export function gatedChord(
 
 // ------------------------------------------------------------------- chrome
 
-export type UiSound =
-  | 'hover'
-  | 'click'
-  | 'back'
-  | 'confirm'
-  | 'start'
-  | 'death';
+export type UiSound = 'hover' | 'click' | 'draft' | 'confirm' | 'start' | 'death';
 
 /**
  * Interface sounds. GDD §18.4 — "silence is banned: even the menu hums."
  *
- * Two rules, and they pull against each other:
+ * A hover and a click should be the *same object* at two weights: a tiny wooden
+ * tick, differing only in how hard it was hit. Giving them separate melodic
+ * identities was a mistake — a UI that plays little tunes at you competes with
+ * the track for attention it has not earned, and every one of these fires
+ * hundreds of times a session.
  *
- *   **In key, so they never clash with the track.** Every pitch here comes from
- *   the same pentatonic the rest of the game plays in, so a click during a
- *   cascade is a note rather than an intrusion.
+ * The two exceptions are the two moments that matter: a Draft arriving, and a
+ * Draft taken. Those are decisions, and a decision is worth a note.
  *
- *   **Off the grid, so they feel immediate.** Everything else in the game waits
- *   up to 34ms for a sixteenth boundary. A button that waited would feel broken
- *   — UI has to answer the instant you touch it, and the cost of that is the
- *   only thing worth spending unquantized time on besides being hurt.
- *
- * They are also *quiet*. A hover fires hundreds of times a minute; anything you
- * would notice individually becomes unbearable in aggregate.
+ * All of it is unquantized. Everything else in the game waits up to 34ms for a
+ * sixteenth; a button that waited would feel broken. Immediacy is worth more
+ * than grid alignment for anything the player's hand caused directly — the same
+ * exemption §18.3 gives the hurt clip, for the same reason.
  */
 export function ui(v: VoiceCtx, at: number, sound: UiSound): void {
   const { ctx } = v;
 
   switch (sound) {
-    case 'hover': {
-      // Barely there. If you can describe it, it is too loud.
-      const g = env(ctx, at, 0.001, 0.028, 0.035);
-      const o = osc(ctx, 'sine', noteHz(17), at, at + 0.05);
-      o.connect(g).connect(v.out);
-      return;
-    }
-    case 'click': {
-      const g = env(ctx, at, 0.001, 0.07, 0.12);
-      const bp = ctx.createBiquadFilter();
-      bp.type = 'bandpass';
-      bp.frequency.value = noteHz(15);
-      bp.Q.value = 3;
-      const o = osc(ctx, 'square', noteHz(15), at, at + 0.1);
-      o.connect(bp).connect(g).connect(v.out);
-      return;
-    }
-    case 'back': {
-      // The same shape as a click, a fifth down. Going back should sound like
-      // the click you already know, resolving downward.
-      const g = env(ctx, at, 0.001, 0.09, 0.1);
-      const o = ctx.createOscillator();
-      o.type = 'triangle';
-      o.frequency.setValueAtTime(noteHz(13), at);
-      o.frequency.exponentialRampToValueAtTime(noteHz(10), at + 0.06);
-      o.start(at);
-      o.stop(at + 0.13);
-      o.connect(g).connect(v.out);
-      return;
-    }
-    case 'confirm': {
-      // Two notes up. A draft pick is the most common decision in the game, so
-      // it gets the smallest possible fanfare that still reads as "yes".
-      for (const [i, degree] of [12, 15].entries()) {
-        const t = at + i * 0.055;
-        const g = env(ctx, t, 0.002, 0.11, 0.09);
-        const o = osc(ctx, 'triangle', noteHz(degree), t, t + 0.14);
+    // One tick, two weights. If you can describe the hover individually, it is
+    // too loud; if the click does not feel like the same object, they are wrong.
+    case 'hover':
+      return tick(v, at, 0.09, 2400, 0.018);
+    case 'click':
+      return tick(v, at, 0.3, 1900, 0.03);
+
+    case 'draft': {
+      // A Draft arriving. Two notes up, quiet: an offer, not an announcement.
+      for (const [i, degree] of [10, 14].entries()) {
+        const t = at + i * 0.07;
+        const g = env(ctx, t, 0.003, 0.16, 0.16);
+        const o = osc(ctx, 'triangle', noteHz(degree), t, t + 0.2);
         o.connect(g).connect(v.out);
       }
       return;
     }
+
+    case 'confirm': {
+      // A Draft taken. The same interval, landing rather than rising, plus the
+      // tick you get from every other button so it still feels like a press.
+      tick(v, at, 0.3, 1900, 0.03);
+      for (const [i, degree] of [14, 12].entries()) {
+        const t = at + i * 0.06;
+        const g = env(ctx, t, 0.003, 0.2, 0.18);
+        const o = osc(ctx, 'triangle', noteHz(degree), t, t + 0.24);
+        o.connect(g).connect(v.out);
+      }
+      return;
+    }
+
     case 'start': {
-      // A run beginning: the tonic, low and wide, with the fifth over it.
+      // A run beginning: the tonic, low and wide, opening up.
       for (const [i, degree] of [0, 5, 10].entries()) {
         const t = at + i * 0.075;
-        const g = env(ctx, t, 0.006, 0.5, 0.13);
+        const g = env(ctx, t, 0.006, 0.5, 0.2);
         const filter = ctx.createBiquadFilter();
         filter.type = 'lowpass';
         filter.frequency.setValueAtTime(600, t);
@@ -940,6 +924,7 @@ export function ui(v: VoiceCtx, at: number, sound: UiSound): void {
       }
       return;
     }
+
     case 'death': {
       // §18.3 says the hurt clip is the only non-musical sound in the game.
       // Death is its full stop: the same wrongness, pitched down and long, and
@@ -961,4 +946,28 @@ export function ui(v: VoiceCtx, at: number, sound: UiSound): void {
       return;
     }
   }
+}
+
+/** The whole UI vocabulary: a short filtered tick. Weight is the only variable. */
+function tick(v: VoiceCtx, at: number, gain: number, hz: number, dur: number): void {
+  const { ctx } = v;
+  const g = env(ctx, at, 0.0008, dur, gain);
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = hz;
+  bp.Q.value = 2.2;
+
+  // Noise, not a tone: a click with a pitch is a beep, and a beep is a sound
+  // the player will learn to resent.
+  const frames = Math.ceil(ctx.sampleRate * (dur + 0.01));
+  const buf = ctx.createBuffer(1, frames, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < frames; i++) {
+    data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / frames, 3);
+  }
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  src.connect(bp).connect(g).connect(v.out);
+  src.start(at);
+  src.stop(at + dur + 0.01);
 }

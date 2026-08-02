@@ -18,13 +18,14 @@ import { BRANDING } from '../branding';
 import { shapeSvg } from './gfx/shapes';
 import { inspector } from './overlays';
 import { renderPrimer } from './primer';
+import { applyPreset, VIEW_PRESETS } from './visual';
 import type { Audio } from '../audio/audio';
 import { TRACK_BY_ID, trackForAxiom } from '../audio/tracks';
 import { DEMOS, type Demo } from '../audio/demos';
 import { derivePart, type Part } from '../audio/parts';
 import { ACTION_BY_ID } from '../content/index';
 
-type Pane = 'setup' | 'library' | 'codex' | 'music' | 'primer';
+type Pane = 'setup' | 'library' | 'codex' | 'music' | 'settings' | 'primer';
 
 export interface SetupResult {
   seed: string;
@@ -97,7 +98,7 @@ export class TitleScreen {
       this.start();
     } else if (ev.key === 'Tab') {
       ev.preventDefault();
-      const order: Pane[] = ['setup', 'library', 'codex', 'music', 'primer'];
+      const order: Pane[] = ['setup', 'library', 'codex', 'music', 'settings', 'primer'];
       this.pane = order[(order.indexOf(this.pane) + 1) % order.length]!;
       this.render();
     } else if (ev.key === 'h' || ev.key === 'H' || ev.key === '?') {
@@ -126,7 +127,7 @@ export class TitleScreen {
     const panel = document.createElement('div');
     panel.className = 'panel title-panel';
 
-    const tabs = (['setup', 'library', 'codex', 'music', 'primer'] as const)
+    const tabs = (['setup', 'library', 'codex', 'music', 'settings', 'primer'] as const)
       .map(
         (p) =>
           `<span class="tab${p === this.pane ? ' on' : ''}" data-pane="${p}">` +
@@ -149,7 +150,9 @@ export class TitleScreen {
             ? this.renderCodex()
             : this.pane === 'music'
               ? this.renderMusic()
-              : `<div class="primer-pane">${renderPrimer(false)}</div>`) +
+              : this.pane === 'settings'
+                ? this.renderSettings()
+                : `<div class="primer-pane">${renderPrimer(false)}</div>`) +
       `<div class="title-foot">TAB switch · H how it works · ENTER start run</div>`;
 
     // Hover reading, in-world, in a fixed place. See `inspector`.
@@ -198,6 +201,32 @@ export class TitleScreen {
       this.audio.silence();
       this.render();
     });
+
+    for (const slider of panel.querySelectorAll<HTMLInputElement>('[data-setting]')) {
+      slider.addEventListener('input', () => {
+        const value = Number(slider.value) / 100;
+        this.audio.setVolume(value);
+        this.library.setAudio(this.library.snapshot.settings.muted, value);
+        const out = slider.parentElement?.querySelector('.set-val');
+        if (out) out.textContent = `${Math.round(value * 100)}%`;
+      });
+    }
+    panel.querySelector('.set-mute')?.addEventListener('click', () => {
+      const muted = !this.library.snapshot.settings.muted;
+      this.audio.setMuted(muted);
+      this.library.setAudio(muted, this.library.snapshot.settings.volume);
+      this.render();
+    });
+    for (const card of panel.querySelectorAll<HTMLElement>('[data-preset]')) {
+      card.addEventListener('click', () => {
+        const id = card.dataset.preset!;
+        this.library.setPreset(id);
+        // Applied immediately, and the menu is drawn over the live renderer, so
+        // the change is visible behind this panel as you pick it.
+        applyPreset(id);
+        this.render();
+      });
+    }
 
     const field = panel.querySelector<HTMLInputElement>('.seed-field');
     field?.addEventListener('input', () => {
@@ -250,11 +279,11 @@ export class TitleScreen {
       `<div class="k">seed</div>` +
       `<div class="seedrow">` +
       `<input class="seed-field" value="${this.seed}" spellcheck="false" />` +
-      `<button class="reseed">NEW</button>` +
+      `<button class="btn reseed">NEW</button>` +
       `<span class="poolnote">draft pool ${pool}/${total} nodes · ` +
       `${this.library.earnedDiscoveries.size}/${DISCOVERIES.length} discoveries</span>` +
       `</div>` +
-      `<button class="go">START RUN &nbsp;[ENTER]</button>` +
+      `<button class="btn go">START RUN &nbsp;[ENTER]</button>` +
       `</div>`
     );
   }
@@ -363,11 +392,65 @@ export class TitleScreen {
       `the drums, the key, the chord — and that comes from your Axiom.</div>` +
       rows +
       `<div class="mu-ops">` +
-      `<button class="track-auto${bed === '' ? ' on' : ''}">` +
+      `<button class="btn track-auto${bed === '' ? ' on' : ''}">` +
       `BED: FOLLOW MY AXIOM</button>` +
-      `<button class="track-stop">STOP</button>` +
+      `<button class="btn track-stop">STOP</button>` +
       `<span class="poolnote">${bed === '' ? 'using ' + trackForAxiom(this.axiomId).name : 'bed pinned to ' + (TRACK_BY_ID.get(bed)?.name ?? bed)}</span>` +
       `</div>` +
+      `</div>`
+    );
+  }
+
+  /**
+   * §20 — settings.
+   *
+   * Visuals are presets rather than sliders. Three sliders is eight combinations
+   * that look wrong for every one that looks good, and a slider at 0% turned the
+   * *game* off rather than an effect off, because they multiplied a baseline that
+   * already is the look.
+   *
+   * SCHEMATIC is the floor, not the middle: it is exactly what the game looked
+   * like before any of this existed. Everything above it is a player choosing
+   * excess, and the excess is allowed to be excessive.
+   */
+  private renderSettings(): string {
+    const set = this.library.snapshot.settings;
+    const chosen = set.preset;
+
+    const presets = VIEW_PRESETS.map(
+      (p) =>
+        `<div class="preset${p.id === chosen ? ' on' : ''}" data-preset="${p.id}">` +
+        `<span class="ps-mark">${p.id === chosen ? '▣' : '▢'}</span>` +
+        `<span class="ps-name">${p.name}</span>` +
+        `<span class="ps-note">${p.note}</span>` +
+        `</div>`,
+    ).join('');
+
+    return (
+      `<div class="settings">` +
+      `<div class="k">audio</div>` +
+      `<div class="set-row">` +
+      `<span class="set-label">VOLUME</span>` +
+      `<input class="set-slider" type="range" min="0" max="100" ` +
+      `value="${Math.round(set.volume * 100)}" data-setting="volume" />` +
+      `<span class="set-val">${Math.round(set.volume * 100)}%</span>` +
+      `<span class="set-note">master</span>` +
+      `</div>` +
+      `<div class="set-row">` +
+      `<span class="set-label">MUTE</span>` +
+      `<button class="btn set-mute${set.muted ? ' on' : ''}">` +
+      `${set.muted ? 'MUTED' : 'SOUND ON'}</button>` +
+      `<span class="set-val"></span>` +
+      `<span class="set-note">M toggles this in a run too</span>` +
+      `</div>` +
+
+      `<div class="k">look</div>` +
+      `<div class="mu-lead">Schematic is the floor — the drawing with nothing on ` +
+      `top of it. The rest add a real post-processing pass: barrel distortion, ` +
+      `per-channel aberration, scanlines, grain and radial bleed, all on the GPU. ` +
+      `None of it changes the simulation, and Heat and Meltdown still push whatever ` +
+      `you pick further than you asked.</div>` +
+      presets +
       `</div>`
     );
   }

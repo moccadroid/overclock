@@ -30,8 +30,21 @@ export class BloomPipeline {
 
   private texture: RenderTexture;
   private readonly base = new Sprite();
+  /**
+   * Three additive glow copies at widening blur radii.
+   *
+   * One sprite could not get brighter than `alpha = 1`, so every bloom setting
+   * above 1x was silently doing nothing — the "more bloom" slider was a placebo.
+   * Stacking additive copies is how bloom actually escalates: the tight one
+   * gives edges their halo, and the wide ones are what turn a screen full of
+   * light into §16.1's "chaos resolving into light" rather than into soup.
+   */
   private readonly glow = new Sprite();
+  private readonly glowWide = new Sprite();
+  private readonly glowHuge = new Sprite();
   private readonly blur = new BlurFilter();
+  private readonly blurWide = new BlurFilter();
+  private readonly blurHuge = new BlurFilter();
   /** §16.7 step 2 — chromatic aberration, as two offset tinted copies. */
   private readonly fringeR = new Sprite();
   private readonly fringeB = new Sprite();
@@ -43,16 +56,35 @@ export class BloomPipeline {
       resolution: 1,
     });
 
-    this.blur.strength = VISUAL.bloomStrength;
-    this.blur.quality = 3;
-    this.blur.resolution = VISUAL.bloomResolution;
+    for (const [filter, scale] of [
+      [this.blur, 1],
+      [this.blurWide, 3.2],
+      [this.blurHuge, 7],
+    ] as const) {
+      filter.strength = VISUAL.bloomStrength * scale;
+      filter.quality = 3;
+      filter.resolution = VISUAL.bloomResolution;
+    }
 
-    for (const sprite of [this.base, this.glow, this.fringeR, this.fringeB]) {
+    for (const sprite of [
+      this.base,
+      this.glow,
+      this.glowWide,
+      this.glowHuge,
+      this.fringeR,
+      this.fringeB,
+    ]) {
       sprite.texture = this.texture;
     }
     this.glow.filters = [this.blur];
-    this.glow.blendMode = 'add';
+    this.glowWide.filters = [this.blurWide];
+    this.glowHuge.filters = [this.blurHuge];
+    for (const sprite of [this.glow, this.glowWide, this.glowHuge]) {
+      sprite.blendMode = 'add';
+    }
     this.glow.alpha = VISUAL.bloomIntensity;
+    this.glowWide.alpha = 0;
+    this.glowHuge.alpha = 0;
 
     this.fringeR.blendMode = 'add';
     this.fringeB.blendMode = 'add';
@@ -61,7 +93,14 @@ export class BloomPipeline {
     this.fringeR.alpha = 0;
     this.fringeB.alpha = 0;
 
-    this.output.addChild(this.base, this.fringeR, this.fringeB, this.glow);
+    this.output.addChild(
+      this.base,
+      this.fringeR,
+      this.fringeB,
+      this.glow,
+      this.glowWide,
+      this.glowHuge,
+    );
   }
 
   resize(): void {
@@ -70,7 +109,14 @@ export class BloomPipeline {
     if (this.texture.width === width && this.texture.height === height) return;
     this.texture.destroy(true);
     this.texture = RenderTexture.create({ width, height, resolution: 1 });
-    for (const sprite of [this.base, this.glow, this.fringeR, this.fringeB]) {
+    for (const sprite of [
+      this.base,
+      this.glow,
+      this.glowWide,
+      this.glowHuge,
+      this.fringeR,
+      this.fringeB,
+    ]) {
       sprite.texture = this.texture as Texture;
     }
   }
@@ -85,8 +131,14 @@ export class BloomPipeline {
     this.fringeB.position.set(offset, 0);
   }
 
+  /**
+   * Bloom past 1x spills into the wider copies rather than being thrown away.
+   * 1 is the tuned §16 baseline; 4 is a deliberate excess and looks like one.
+   */
   setBloom(intensity: number): void {
-    this.glow.alpha = intensity;
+    this.glow.alpha = Math.min(1.4, intensity);
+    this.glowWide.alpha = Math.max(0, Math.min(1.1, intensity - 1.2)) * 0.75;
+    this.glowHuge.alpha = Math.max(0, Math.min(1, intensity - 2.4)) * 0.6;
   }
 
   /**
@@ -98,7 +150,9 @@ export class BloomPipeline {
     const safe = amount * VISUAL.degradationIntensity;
     const shift = safe * VISUAL.tearAmount;
     this.base.position.x = shift;
-    this.glow.position.x = shift;
+    for (const sprite of [this.glow, this.glowWide, this.glowHuge]) {
+      sprite.position.x = shift;
+    }
   }
 
   /** Render the emissive layer into the texture. Call once per frame. */

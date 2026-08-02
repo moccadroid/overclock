@@ -42,6 +42,11 @@ describe('the Library (GDD §15)', () => {
     // If settings ever migrate up to the top level, the guard has to be loosened
     // — and a loosened guard is how a damage multiplier gets in.
     expect(typeof data.settings).toBe('object');
+
+    // And the visual preset is an *id*, not three numbers. Sliders would put
+    // three floats in the Library, and three floats one refactor away from the
+    // progression fields is how the guard above eventually gets loosened.
+    expect(typeof (data.settings as { preset: unknown }).preset).toBe('string');
   });
 
   it('§15.2 — a fresh account starts with roughly 60% of the node pool', () => {
