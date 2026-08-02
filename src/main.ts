@@ -1,24 +1,22 @@
 /**
- * Boot. Milestone 1 goes straight into a run — no title, no menus, no Run Setup.
- * Those are §19.1–19.3 and land once the grammar is signed off.
+ * Boot. §19.1–19.3 — Run Setup, the Library and the Codex sit in front of a run.
  *
- * Seed and axiom come from the query string so a specific run can be reproduced
- * exactly: ?seed=abc&axiom=circuit
+ * Deep-linking survives: `?seed=abc&axiom=circuit` goes straight in without the
+ * title, because reproducing a reported run must never require clicking through
+ * a menu. Anything less than a full pair shows Run Setup with whatever was given
+ * as the default.
  */
 import { Game } from './app/game';
-
+import { TitleScreen } from './app/menu';
 import { BRANDING } from './branding';
 import { Library } from './meta/profile';
+import './app/ui.css';
 
 const params = new URLSearchParams(location.search);
-const seed = params.get('seed') ?? `run-${Math.floor(Math.random() * 1e9).toString(36)}`;
 // §15.2 — the Library decides which Axioms and nodes this account may see. It is
 // read once, here, and passed into the run as config: the sim never touches
 // storage, so a run stays reproducible from its config alone.
 const library = new Library();
-const unlockedAxioms = library.availableAxioms;
-const requested = params.get('axiom');
-const axiomId = unlockedAxioms.includes(requested ?? '') ? requested! : 'ignition';
 
 /**
  * Playtest hook: `?meltdown=90` brings the Meltdown line forward so the third
@@ -29,36 +27,56 @@ const axiomId = unlockedAxioms.includes(requested ?? '') ? requested! : 'ignitio
 const meltdownParam = Number(params.get('meltdown'));
 const meltdownAt = Number.isFinite(meltdownParam) && meltdownParam > 0 ? meltdownParam : undefined;
 
-document.title = `${BRANDING.title} — ${axiomId} — ${seed}`;
-
 const mount = document.getElementById('app');
 if (!mount) throw new Error('missing #app mount');
 
-const game = new Game({
-  seed,
-  axiomId,
-  availableNodes: library.availableNodes,
-  knownDiscoveries: library.earnedDiscoveries,
-  ...(meltdownAt === undefined ? {} : { meltdownAt }),
-}, library);
-void game.start(mount);
+const menuUi = document.createElement('div');
+menuUi.id = 'menu-ui';
+mount.appendChild(menuUi);
 
-// Reproducing a run means reproducing its seed; keep it visible and shareable.
-if (!params.get('seed')) {
+const linkedSeed = params.get('seed');
+const linkedAxiom = params.get('axiom');
+const deepLinked =
+  linkedSeed !== null && linkedAxiom !== null && library.availableAxioms.includes(linkedAxiom);
+
+async function boot(): Promise<void> {
+  const setup = deepLinked
+    ? { seed: linkedSeed!, axiomId: linkedAxiom! }
+    : await new TitleScreen(menuUi, library).present({
+        ...(linkedSeed ? { seed: linkedSeed } : {}),
+        ...(linkedAxiom ? { axiomId: linkedAxiom } : {}),
+      });
+
+  document.title = `${BRANDING.title} — ${setup.axiomId} — ${setup.seed}`;
+
+  // Reproducing a run means reproducing its seed; keep it visible and shareable.
   const url = new URL(location.href);
-  url.searchParams.set('seed', seed);
-  url.searchParams.set('axiom', axiomId);
+  url.searchParams.set('seed', setup.seed);
+  url.searchParams.set('axiom', setup.axiomId);
   history.replaceState(null, '', url);
+
+  const game = new Game(
+    {
+      seed: setup.seed,
+      axiomId: setup.axiomId,
+      availableNodes: library.availableNodes,
+      knownDiscoveries: library.earnedDiscoveries,
+      ...(meltdownAt === undefined ? {} : { meltdownAt }),
+    },
+    library,
+  );
+  await game.start(mount!);
+
+  if (import.meta.env.DEV) {
+    // Dev console handle: __oc.game.debugStep(30) advances 30s and returns a
+    // state snapshot; __oc.library.reset() wipes the Library for a fresh account.
+    (window as unknown as { __oc: unknown }).__oc = { game, library, ...setup };
+  }
+
+  console.info(
+    `[${BRANDING.title}] seed=${setup.seed} axiom=${setup.axiomId} ` +
+      `pool=${library.availableNodes.length} axioms=${library.availableAxioms.length}`,
+  );
 }
 
-if (import.meta.env.DEV) {
-  // Dev console handle: __oc.game.debugStep(30) advances 30s and returns a state
-  // snapshot; __oc.game.debugWorld exposes the live sim for inspection.
-  // __oc.library.reset() wipes the Library, for testing a fresh account.
-  (window as unknown as { __oc: unknown }).__oc = { game, seed, axiomId, library };
-}
-
-console.info(
-  `[${BRANDING.title}] seed=${seed} axiom=${axiomId} ` +
-    `pool=${library.availableNodes.length} axioms=${unlockedAxioms.length}`,
-);
+void boot();

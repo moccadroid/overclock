@@ -82,7 +82,20 @@ export class Game {
   }
 
   private onCommand(cmd: string): void {
-    if (this.mode === 'dead') return;
+    if (this.mode === 'dead') {
+      // A reload rather than a teardown. There is no path that unwinds a run in
+      // place, and inventing one to save a page load would be a lot of surface
+      // area for a guarantee the browser already gives us for free. The Library
+      // is in storage, so nothing is lost across it.
+      if (cmd === 'confirm') {
+        const url = new URL(location.href);
+        url.searchParams.set('seed', `run-${Math.floor(Math.random() * 1e9).toString(36)}`);
+        location.href = url.toString();
+      } else if (cmd === 'library') {
+        location.href = location.pathname;
+      }
+      return;
+    }
 
     if (cmd === 'editor') {
       if (this.mode === 'draft') return;

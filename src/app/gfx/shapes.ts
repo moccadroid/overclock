@@ -76,3 +76,41 @@ export function shapeIsOpen(shape: string): boolean {
 export function shapeCoreRadius(shape: string, r: number): number {
   return shape === 'circle' ? r * 0.45 : 0;
 }
+
+/**
+ * A silhouette as standalone SVG, for the DOM side of the game — Codex entries,
+ * post-mortems, anywhere the player reads about a thing rather than fights it.
+ * Drawn facing right: the arena rotates a Charger or a Lancer to its aim, and a
+ * fixed rotation is the closest still frame of that.
+ *
+ * `shape` undefined means "not a creature" — a hazard, or the player's own fire.
+ * Those get the §11.4 containment bracket rather than a body.
+ */
+export function shapeSvg(shape: string | undefined, size: number, color: string): string {
+  const r = size * 0.38;
+  const c = size / 2;
+  const open = `<svg class="glyph" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">`;
+
+  if (!shape) {
+    return (
+      open +
+      `<path d="M${c - r},${c - r} L${c - r},${c + r} M${c + r},${c - r} L${c + r},${c + r}" ` +
+      `fill="none" stroke="${color}" stroke-width="1.6"/></svg>`
+    );
+  }
+
+  const verts = shapeOutline(shape, c, c, r, 0);
+  const d =
+    verts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`).join(' ') +
+    (shapeIsOpen(shape) ? '' : ' Z');
+  const core = shapeCoreRadius(shape, r);
+  return (
+    open +
+    `<path d="${d}" fill="${color}" fill-opacity="0.12" stroke="${color}" stroke-width="1.6" ` +
+    `stroke-linejoin="round"/>` +
+    (core > 0
+      ? `<circle cx="${c}" cy="${c}" r="${core.toFixed(2)}" fill="none" stroke="${color}" stroke-width="1.2"/>`
+      : '') +
+    `</svg>`
+  );
+}

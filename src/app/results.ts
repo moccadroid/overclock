@@ -17,9 +17,9 @@ import {
 } from '../content/index';
 import type { Library } from '../meta/profile';
 import { TUNABLE } from '../sim/tunables';
-import type { DamageSource, TraceMarkerKind, World } from '../sim/world';
+import type { TraceMarkerKind, World } from '../sim/world';
 import { BRANDING } from '../branding';
-import { shapeCoreRadius, shapeIsOpen, shapeOutline } from './gfx/shapes';
+import { shapeSvg } from './gfx/shapes';
 
 const MARKER_COLOR: Record<TraceMarkerKind, string> = {
   level: '#3f5570',
@@ -132,42 +132,6 @@ function headline(world: World): string {
 }
 
 /**
- * The §10.1 silhouette, drawn from the same geometry the arena uses. A name is
- * something you have to translate; the shape is the thing you were actually
- * looking at when it killed you.
- */
-function glyph(source: DamageSource, size: number, color: string): string {
-  const r = size * 0.38;
-  const c = size / 2;
-  if (!source.shape) {
-    // A hazard rather than an enemy. The §11.4 containment vocabulary is a
-    // bracket, not a body — don't dress it up as a creature.
-    return (
-      `<svg class="pm-glyph" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">` +
-      `<path d="M${c - r},${c - r} L${c - r},${c + r} M${c + r},${c - r} L${c + r},${c + r}" ` +
-      `fill="none" stroke="${color}" stroke-width="1.6"/></svg>`
-    );
-  }
-
-  // Facing right: the arena rotates a Charger or a Lancer to its aim, and a
-  // fixed rotation here is the closest still frame of that.
-  const verts = shapeOutline(source.shape, c, c, r, 0);
-  const d =
-    verts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`).join(' ') +
-    (shapeIsOpen(source.shape) ? '' : ' Z');
-  const core = shapeCoreRadius(source.shape, r);
-  return (
-    `<svg class="pm-glyph" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">` +
-    `<path d="${d}" fill="${color}" fill-opacity="0.12" stroke="${color}" stroke-width="1.6" ` +
-    `stroke-linejoin="round"/>` +
-    (core > 0
-      ? `<circle cx="${c}" cy="${c}" r="${core.toFixed(2)}" fill="none" stroke="${color}" stroke-width="1.2"/>`
-      : '') +
-    `</svg>`
-  );
-}
-
-/**
  * §14 — "how did I die" is the one question a Results screen must answer, and
  * the honest answer has two halves: the blow that landed, and the thing that had
  * been grinding you down all run. They are usually different, and the gap
@@ -185,7 +149,7 @@ function renderPostMortem(world: World): string {
       const pct = total > 0 ? (amount / total) * 100 : 0;
       const meter = '█'.repeat(Math.max(1, Math.round(pct / 5)));
       return (
-        `<div class="pm-row">${glyph(source, 15, '#8ba3bd')}` +
+        `<div class="pm-row">${shapeSvg(source.shape, 15, '#8ba3bd')}` +
         `<span class="pm-src">${svgEscape(source.label)}</span>` +
         `<span class="pm-bar">${meter}</span>` +
         `<span class="pm-pct">${pct.toFixed(0)}%</span></div>`
@@ -196,7 +160,7 @@ function renderPostMortem(world: World): string {
   return (
     `<div class="postmortem">` +
     `<div class="k">killed by</div>` +
-    `<div class="pm-blow">${glyph(cause, 30, '#ff2a3c')}` +
+    `<div class="pm-blow">${shapeSvg(cause.shape, 30, '#ff2a3c')}` +
     `<span class="pm-name">${svgEscape(cause.label)}</span>` +
     (cause.mode ? `<span class="pm-mode">${svgEscape(cause.mode)}</span>` : '') +
     `</div>` +
@@ -300,5 +264,9 @@ export function renderResults(world: World, library: Library): string {
       </div>
     </div>
     ${wastedLine}${extractLine}
-    <div class="foot">${BRANDING.title} · run it back with the same seed by reloading</div>`;
+    <div class="foot">
+      <span class="again">RUN AGAIN [ENTER]</span>
+      <span class="again">RUN SETUP &amp; LIBRARY [L]</span>
+      <span class="dim">${BRANDING.title} · reload to replay this exact seed</span>
+    </div>`;
 }

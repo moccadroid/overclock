@@ -909,6 +909,288 @@
   margin-bottom: 16px;
   overflow-x: auto;
 }
+/* ---- §19.1-19.3 title: Run Setup, Library, Codex ---- */
+
+#menu-ui {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 12px;
+  color: var(--ink);
+  letter-spacing: 0.04em;
+  z-index: 20;
+}
+#title {
+  background: var(--bg);
+}
+.title-panel {
+  width: min(1180px, 95vw);
+  max-height: 92vh;
+  overflow-y: auto;
+  border: 1px solid var(--structure);
+  background: rgba(6, 10, 18, 0.98);
+  padding: 20px 24px 16px;
+}
+.title-head {
+  display: flex;
+  align-items: baseline;
+  gap: 28px;
+  border-bottom: 1px solid var(--structure);
+  padding-bottom: 12px;
+  margin-bottom: 18px;
+}
+.title-head .brand {
+  color: var(--white);
+  font-size: 15px;
+  letter-spacing: 0.42em;
+}
+.title-head .tabs {
+  display: flex;
+  gap: 20px;
+}
+.title-head .tab {
+  color: #3f5570;
+  letter-spacing: 0.2em;
+  cursor: pointer;
+}
+.title-head .tab:hover {
+  color: var(--ink);
+}
+.title-head .tab.on {
+  color: var(--voltaic);
+  border-bottom: 1px solid var(--voltaic);
+}
+.title-head .lifetime {
+  margin-left: auto;
+  color: #46586e;
+}
+.title-foot {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid var(--structure);
+  color: #3f5570;
+  letter-spacing: 0.18em;
+}
+.title-panel .k {
+  color: #3f5570;
+  letter-spacing: 0.22em;
+  margin: 16px 0 8px;
+}
+.title-panel .k:first-child {
+  margin-top: 0;
+}
+
+/* Run Setup. An Axiom is a Program, so it is shown as one — the same chain
+   grammar the editor and the Engine strip use, not a paragraph about it. */
+.axioms {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.axiom {
+  flex: 1 1 240px;
+  min-height: 128px;
+  padding: 14px 16px;
+  border: 1px solid var(--structure);
+  cursor: pointer;
+}
+.axiom:hover {
+  border-color: var(--ink);
+}
+.axiom.on {
+  border-color: var(--voltaic);
+  background: rgba(0, 229, 255, 0.05);
+}
+.axiom.locked {
+  cursor: default;
+  opacity: 0.55;
+  border-style: dashed;
+}
+.axiom.locked:hover {
+  border-color: var(--structure);
+}
+.ax-name {
+  color: var(--ink-bright);
+  font-size: 15px;
+  margin-bottom: 10px;
+}
+.ax-chain {
+  line-height: 1.9;
+  white-space: nowrap;
+}
+.ax-note {
+  margin-top: 8px;
+  color: #56708c;
+  line-height: 1.55;
+}
+.ax-cap {
+  margin-top: 6px;
+  color: #c9a25e;
+}
+.ax-locked {
+  color: #46586e;
+  letter-spacing: 0.24em;
+}
+
+.seedrow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.seed-field {
+  width: 260px;
+  padding: 7px 10px;
+  border: 1px solid var(--structure);
+  background: rgba(0, 0, 0, 0.4);
+  color: var(--ink-bright);
+  font: inherit;
+  letter-spacing: 0.08em;
+}
+.seed-field:focus {
+  outline: none;
+  border-color: var(--voltaic);
+}
+.reseed,
+.go {
+  padding: 7px 14px;
+  border: 1px solid var(--structure);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  letter-spacing: 0.16em;
+  cursor: pointer;
+}
+.reseed:hover,
+.go:hover {
+  border-color: var(--voltaic);
+  color: var(--voltaic);
+}
+.go {
+  margin-top: 22px;
+  padding: 11px 26px;
+  color: var(--ink-bright);
+  border-color: var(--ink);
+}
+.poolnote {
+  color: #46586e;
+}
+
+/* Library. Locked entries are shown deliberately: a lock you can read is an
+   objective, a lock you cannot is a wall. */
+.lib-cols {
+  display: flex;
+  gap: 28px;
+  align-items: flex-start;
+}
+.lib-disc {
+  flex: 1 1 62%;
+  min-width: 0;
+}
+.lib-pool {
+  flex: 1 1 38%;
+  min-width: 0;
+}
+.lib-row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  line-height: 1.75;
+  color: #3f5570;
+}
+.lib-row.got {
+  color: var(--ink);
+}
+.lib-mark {
+  color: #2f4258;
+  flex: none;
+}
+.lib-row.got .lib-mark {
+  color: #4fbf87;
+}
+.lib-name {
+  flex: 0 0 148px;
+  color: #46586e;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lib-row.got .lib-name {
+  color: #4fbf87;
+}
+.lib-body {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lib-unlock {
+  flex: 0 0 120px;
+  color: #6a5730;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lib-row.got .lib-unlock {
+  color: #d0b46a;
+}
+.nodes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.nodes .node {
+  padding: 3px 8px;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+  cursor: help;
+}
+.nodes .node.k-trigger {
+  color: var(--k-trigger);
+}
+.nodes .node.k-modifier {
+  color: var(--k-modifier);
+  border-style: dashed;
+}
+.nodes .node.k-action {
+  color: var(--k-action);
+}
+.nodes .node.locked {
+  color: #2f4258;
+  border-style: dotted;
+}
+
+/* Codex. */
+.codex-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 0;
+  border-bottom: 1px dashed rgba(42, 58, 82, 0.55);
+}
+.codex-row.unknown .cx-name,
+.codex-row.unknown .cx-desc {
+  color: #2f4258;
+}
+.cx-text {
+  flex: 1;
+  min-width: 0;
+}
+.cx-name {
+  color: var(--ink-bright);
+  letter-spacing: 0.1em;
+}
+.cx-desc {
+  color: #56708c;
+  line-height: 1.5;
+}
+.cx-stats {
+  flex: none;
+  color: #46586e;
+}
+
 /* §15.3 — the Discovery stinger. Never modal: you earn most of these mid-cascade
    with the screen full, and a pause here would punish the behaviour it rewards. */
 #stinger {
@@ -1024,7 +1306,7 @@
 .postmortem .pm-mode {
   color: #46586e;
 }
-.postmortem .pm-glyph {
+.postmortem .glyph {
   flex: none;
   overflow: visible;
 }
@@ -1056,9 +1338,21 @@
   color: #c9a25e;
 }
 .results-panel .foot {
+  display: flex;
+  align-items: baseline;
+  gap: 26px;
   margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--structure);
   color: #3f5570;
   font-size: 11px;
+}
+.results-panel .foot .again {
+  color: var(--ink-bright);
+  letter-spacing: 0.18em;
+}
+.results-panel .foot .dim {
+  margin-left: auto;
 }
 
 #results .panel {

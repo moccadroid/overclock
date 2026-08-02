@@ -1161,6 +1161,42 @@ Results screen that only looks backwards ends the session.
 
 ---
 
+## D-55 · SETTLED · The Library is shown, locks and all
+
+Progression that grants breadth rather than power has a presentation problem
+that a stat tree does not: there is no number going up. If the player cannot
+*see* the pool widening, the progression may as well not exist — which is
+roughly what had happened, since the Library was persisting correctly and was
+invisible.
+
+So locked entries are shown rather than hidden, each with the exact thing to do
+to open it. A lock you can read is an objective; a lock you cannot is a wall.
+
+One iteration inside that: locked node chips were first labelled with the name
+of the Discovery that grants them, which put "Beacon Runner" in the triggers
+row where it read as a trigger. They now carry the node's own name with a lock
+mark, and the Discovery moves to the tooltip. Hiding the name entirely was the
+other option and it is worse — the pool becomes a row of identical boxes you
+cannot want anything from, and wanting is the whole mechanism.
+
+## D-56 · SETTLED · Run Setup exists, and deep links skip it
+
+§19.1–19.3. Three panes: Run Setup, Library, Codex. An Axiom is a Program, so
+Run Setup draws it as one — the same chain grammar the editor and the Engine
+strip use, rather than a paragraph about it.
+
+`?seed=abc&axiom=circuit` still goes straight into that run without the menu.
+Reproducing a reported run must never require clicking through a screen, and a
+half-specified link (seed only, axiom only) falls back to Run Setup with what
+was given as the default.
+
+Results gained `[ENTER]` for a fresh seed and `[L]` for Run Setup. Both reload
+the page. There is no path that unwinds a run in place, and inventing one to
+save a page load would be a lot of surface area for a guarantee the browser
+already gives for free — the Library lives in storage, so nothing crosses it.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

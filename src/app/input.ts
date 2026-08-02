@@ -12,7 +12,8 @@ export type Command =
   | 'draft3'
   | 'reroll'
   | 'confirm'
-  | 'help';
+  | 'help'
+  | 'library';
 
 const MOVE_KEYS: Record<string, [number, number]> = {
   KeyW: [0, -1],
@@ -36,6 +37,8 @@ const COMMAND_KEYS: Record<string, Command> = {
   Enter: 'confirm',
   KeyH: 'help',
   Slash: 'help',
+  // Results only: back out to Run Setup rather than straight into another run.
+  KeyL: 'library',
 };
 
 export class Input {
