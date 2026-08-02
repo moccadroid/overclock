@@ -25,5 +25,119 @@
     "cycleMult": 1.8,
     "ops": [{ "target": "echo", "add": 1 }],
     "description": "Repeats everything before it once, 0.2s later, at 70% output."
+  },
+  {
+    "id": "accelerate",
+    "kind": "modifier",
+    "name": "Accelerate",
+    "cycleMult": 1.4,
+    "ops": [{ "target": "rate", "add": 0.3 }],
+    "description": "-30% trigger interval. The row fires more often."
+  },
+  {
+    "id": "enlarge",
+    "kind": "modifier",
+    "name": "Enlarge",
+    "cycleMult": 1.3,
+    "ops": [{ "target": "area", "add": 0.6 }],
+    "description": "+60% area on bursts and fields."
+  },
+  {
+    "id": "pierce",
+    "kind": "modifier",
+    "name": "Pierce",
+    "cycleMult": 1.2,
+    "ops": [{ "target": "pierce", "add": 2 }],
+    "description": "Projectiles pass through 2 more enemies."
+  },
+  {
+    "id": "ricochet",
+    "kind": "modifier",
+    "name": "Ricochet",
+    "cycleMult": 1.3,
+    "ops": [{ "target": "bounce", "add": 1 }],
+    "description": "Projectiles bounce once to a new target."
+  },
+  {
+    "id": "focus",
+    "kind": "modifier",
+    "name": "Focus",
+    "cycleMult": 1.1,
+    "ops": [
+      { "target": "count", "mul": 0 },
+      { "target": "count", "add": 1 },
+      { "target": "output", "add": 1.2 }
+    ],
+    "description": "Merges every copy into one: count becomes 1, +120% output."
+  },
+  {
+    "id": "sustain",
+    "kind": "modifier",
+    "name": "Sustain",
+    "cycleMult": 1.3,
+    "ops": [{ "target": "duration", "add": 0.8 }],
+    "description": "+80% duration on fields, orbitals and buffs."
+  },
+  {
+    "id": "leech",
+    "kind": "modifier",
+    "name": "Leech",
+    "cycleMult": 1.4,
+    "ops": [{ "target": "leech", "add": 0.03 }],
+    "description": "3% of damage dealt returns to you as Integrity."
+  },
+  {
+    "id": "volatile",
+    "kind": "modifier",
+    "name": "Volatile",
+    "cycleMult": 1.4,
+    "ops": [{ "target": "volatile", "add": 0.5 }],
+    "description": "Effects detonate at the end of their life for 50% output."
+  },
+  {
+    "id": "quantize",
+    "kind": "modifier",
+    "name": "Quantize",
+    "cycleMult": 1.2,
+    "ops": [{ "target": "quantize", "add": 1 }],
+    "description": "Snaps fires to the beat grid. +25% output when on-beat."
+  },
+  {
+    "id": "attune",
+    "kind": "modifier",
+    "name": "Attune",
+    "cycleMult": 1.2,
+    "ops": [{ "target": "attune", "add": 1 }],
+    "description": "The action takes the hue of your fullest fuel gauge."
+  },
+  {
+    "id": "overdrive",
+    "kind": "modifier",
+    "name": "Overdrive",
+    "cycleMult": 1.0,
+    "ops": [
+      { "target": "output", "add": 1.0 },
+      { "target": "overdrive", "add": 1 }
+    ],
+    "description": "+100% output. Every fire adds Heat directly, budget or no budget."
+  },
+  {
+    "id": "resonate",
+    "kind": "modifier",
+    "name": "Resonate",
+    "cycleMult": 1.5,
+    "ops": [{ "target": "resonate", "add": 1 }],
+    "description": "This row also fires whenever the row directly above it fires."
+  },
+  {
+    "id": "ground",
+    "kind": "modifier",
+    "name": "Ground",
+    "cycleMult": 1.0,
+    "ops": [
+      { "target": "ground", "add": 1 },
+      { "target": "output", "mul": 0.8 }
+    ],
+    "description": "The row above costs 30% fewer Cycles. This row outputs 20% less."
   }
 ]

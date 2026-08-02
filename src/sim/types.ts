@@ -33,7 +33,42 @@ export interface GameEvent {
 export type NodeKind = 'trigger' | 'action' | 'modifier';
 
 /** What a modifier op can transform in the fire context. */
-export type FireField = 'output' | 'count' | 'echo' | 'pierce' | 'area' | 'rate' | 'duration';
+export type FireField =
+  | 'output'
+  | 'count'
+  | 'echo'
+  | 'pierce'
+  | 'area'
+  | 'rate'
+  | 'duration'
+  /** Ricochet — projectiles bounce to a new target. */
+  | 'bounce'
+  /** Leech — fraction of damage returned as Integrity. */
+  | 'leech'
+  /** Volatile — effects detonate at end of life for this share of output. */
+  | 'volatile'
+  /** Quantize — snap fires to the audio grid, for a bonus when on-beat. */
+  | 'quantize'
+  /** Attune — the Action takes the hue of your fullest gauge. */
+  | 'attune'
+  /** Overdrive — big output, and every fire adds Heat directly. */
+  | 'overdrive'
+  /** §5.6 Resonate — this row also fires when the row above it fires. */
+  | 'resonate'
+  /** §5.6 Ground — the row above costs less; this row outputs less. */
+  | 'ground';
+
+/** §7.4 — what a Convert card exchanges. */
+export interface ConvertSpec {
+  costKind: 'integrity' | 'fuel';
+  costAmount: number;
+  gainKind: 'fuel' | 'xp' | 'heat' | 'speed';
+  gainAmount: number;
+  /** Rectify: drains the fullest gauge to fill the emptiest. */
+  rebalance?: boolean;
+  /** Stim: seconds the effect lasts. */
+  duration?: number;
+}
 
 export interface ModifierOp {
   target: FireField;
@@ -43,7 +78,17 @@ export interface ModifierOp {
   mul?: number;
 }
 
-export interface TriggerDef {
+/**
+ * §8.2 — "pool weighted by what the player owns and their Axiom". Relative draft
+ * frequency, default 1. Content needs a way to say "this is a specialist card":
+ * with five Convert cards among ten Actions, an unweighted pool hands out an
+ * Engine that deals no damage.
+ */
+export interface PoolWeighted {
+  poolWeight?: number;
+}
+
+export interface TriggerDef extends PoolWeighted {
   id: string;
   kind: 'trigger';
   name: string;
@@ -56,9 +101,9 @@ export interface TriggerDef {
   description: string;
 }
 
-export type ActionPrimitive = 'projectile' | 'burst' | 'chain' | 'zone';
+export type ActionPrimitive = 'projectile' | 'burst' | 'chain' | 'zone' | 'convert';
 
-export interface ActionDef {
+export interface ActionDef extends PoolWeighted {
   id: string;
   kind: 'action';
   name: string;
@@ -89,6 +134,8 @@ export interface ActionDef {
    * the event grammar that makes cascades work.
    */
   cooldown?: number;
+  /** §7.4 — set when `primitive` is `convert`. */
+  convert?: ConvertSpec;
   description: string;
 }
 
@@ -114,7 +161,7 @@ export interface ArenaDef {
   description: string;
 }
 
-export interface ModifierDef {
+export interface ModifierDef extends PoolWeighted {
   id: string;
   kind: 'modifier';
   name: string;

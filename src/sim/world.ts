@@ -11,10 +11,11 @@ import { Rng } from './rng';
 import { SpatialGrid, type SpatialItem } from './spatial';
 import { FlowField } from './flowfield';
 import { CycleBudget } from './cycles';
-import { Engine, type Program } from './engine';
+import { Engine, type FireContext, type Program } from './engine';
 import { LOADBEARING, SAFETY, SIM_DT, TUNABLE } from './tunables';
 import {
   HUES,
+  type ActionDef,
   type ArenaDef,
   type EnemyDef,
   type EventType,
@@ -95,6 +96,12 @@ export interface Projectile extends SpatialItem {
   corrupted: boolean;
   hits: number[];
   age: number;
+  /** Ricochet — bounces left. */
+  bounces: number;
+  /** Volatile — detonation output at end of life, 0 for none. */
+  volatile: number;
+  /** Leech — fraction of dealt damage returned as Integrity. */
+  leech: number;
 }
 
 export type PickupKind = 'fuel' | 'xp';
@@ -237,6 +244,9 @@ export interface Player {
   dashCooldown: number;
   dirX: number;
   dirY: number;
+  /** §7.4 Convert: Stim — fractional move-speed bonus, and its remaining time. */
+  speedBoost: number;
+  speedBoostTime: number;
   alive: boolean;
 }
 
@@ -279,6 +289,7 @@ export interface RunStats {
   overheats: number;
   damageTaken: number;
   beaconsChannelled: number;
+  converts: number;
   /** Seconds spent in each Heat tier — the instrument for tuning §6.3. */
   tierSeconds: [number, number, number, number];
   /** Total Cycles the engine asked for. Compare against capacity x time. */
@@ -373,6 +384,7 @@ export class World {
     overheats: 0,
     damageTaken: 0,
     beaconsChannelled: 0,
+    converts: 0,
     tierSeconds: [0, 0, 0, 0],
     cyclesSpent: 0,
     peakHeat: 0,
@@ -421,6 +433,8 @@ export class World {
       dashCooldown: 0,
       dirX: 0,
       dirY: -1,
+      speedBoost: 0,
+      speedBoostTime: 0,
       alive: true,
     };
 
@@ -586,20 +600,44 @@ export class World {
     program.tickEvents++;
     this.stats.fires++;
 
+    // §5.5 Overdrive — "every fire adds Heat directly", budget or no budget.
+    // This is the node that lets a player choose instability rather than be
+    // handed it, which §6.3 calls an intended archetype.
+    if (compiled.ctx.overdrive > 0) {
+      this.budget.addHeat(TUNABLE.overdriveHeatPerFire * compiled.ctx.overdrive);
+    }
+
+    // §5.5 Quantize — snap to the beat grid. Landing on-beat pays a bonus; the
+    // grid exists in the simulation now so audio can lock to the same clock.
+    let beatBonus = 1;
+    if (compiled.ctx.quantize > 0) {
+      const step = 60 / TUNABLE.beatsPerMinute / 4;
+      const phase = (this.time % step) / step;
+      beatBonus = phase < 0.25 || phase > 0.75 ? 1 + TUNABLE.quantizeBonus : 1;
+    }
+
     for (const exec of compiled.executions) {
       if (exec.delay <= 0) {
-        this.execute(index, exec.outputMul, depth, x, y);
+        this.execute(index, exec.outputMul * beatBonus, depth, x, y);
       } else if (this.scheduled.length < SAFETY.maxScheduledFires) {
         this.scheduled.push({
           time: this.time + exec.delay,
           programIndex: index,
-          outputMul: exec.outputMul,
+          outputMul: exec.outputMul * beatBonus,
           depth,
           x,
           y,
           alive: true,
         });
       }
+    }
+
+    // §5.6 Resonate — the row below also fires when this one does. Chains of
+    // Resonate form an exponential ladder, which is the point; the cascade depth
+    // cap is what keeps it finite.
+    const below = this.engine.compiled[index + 1];
+    if (below?.live && below.ctx.resonate > 0) {
+      this.fireProgram(index + 1, depth + 1, x, y);
     }
   }
 
@@ -632,11 +670,21 @@ export class World {
     const def = ACTION_BY_ID.get(program.actionId)!;
     const instances = Math.max(1, Math.round(compiled.ctx.count));
 
+    // §7.4 — Convert exchanges resources instead of dealing damage.
+    if (def.primitive === 'convert') {
+      for (let n = 0; n < instances; n++) this.runConvert(def, depth);
+      return;
+    }
+
+    // §5.5 Attune — the Action's hue shifts to your fullest gauge, which is the
+    // clean answer to adaptive resistance for a mono-hue engine.
+    const hue = compiled.ctx.attune > 0 ? this.fullestHue() : def.hue;
+
     for (let n = 0; n < instances; n++) {
       // §7.2 — fuelled fire consumes 1 fuel of the Action's hue for +50% output.
       let fuelBonus = 1;
-      if (this.fuel[def.hue] >= 1) {
-        this.fuel[def.hue] -= 1;
+      if (this.fuel[hue] >= 1) {
+        this.fuel[hue] -= 1;
         fuelBonus = 1 + TUNABLE.fueledFireOutputBonus;
       }
       const output = compiled.ctx.output * outputMul * fuelBonus * this.engine.globalOutput;
@@ -646,16 +694,26 @@ export class World {
 
       switch (def.primitive) {
         case 'projectile':
-          this.spawnProjectile(def.id, damage, depth, index, x, y, compiled.ctx.pierce, corrupted);
+          this.spawnProjectile(def.id, damage, depth, index, x, y, compiled.ctx, corrupted, hue);
           break;
         case 'burst':
-          this.doBurst(def.id, damage, depth, index, x, y, compiled.ctx.area);
+          this.doBurst(def.id, damage, depth, index, x, y, compiled.ctx.area, hue, compiled.ctx.leech);
           break;
         case 'chain':
-          this.doChain(def.id, damage, depth, index, x, y);
+          this.doChain(def.id, damage, depth, index, x, y, hue, compiled.ctx.leech);
           break;
         case 'zone':
-          this.dropZone(def.id, damage, depth, index, x, y, compiled.ctx.area, compiled.ctx.duration);
+          this.dropZone(
+            def.id,
+            damage,
+            depth,
+            index,
+            x,
+            y,
+            compiled.ctx.area,
+            compiled.ctx.duration,
+            hue,
+          );
           break;
       }
     }
@@ -670,8 +728,9 @@ export class World {
     programIndex: number,
     x: number,
     y: number,
-    pierce: number,
+    ctx: FireContext,
     corrupted: boolean,
+    hue: Hue,
   ): void {
     if (this.projectiles.length >= SAFETY.maxEntities) return;
     const def = ACTION_BY_ID.get(actionId)!;
@@ -698,14 +757,17 @@ export class World {
       vy: dy * speed,
       life: def.lifetime ?? 2,
       damage,
-      pierce: (def.pierce ?? 0) + Math.round(pierce),
-      hue: def.hue,
+      pierce: (def.pierce ?? 0) + Math.round(ctx.pierce),
+      hue,
       depth,
       programIndex,
       radius: 4,
       corrupted,
       hits: [],
       age: 0,
+      bounces: Math.round(ctx.bounce),
+      volatile: ctx.volatile,
+      leech: ctx.leech,
       alive: true,
     });
   }
@@ -718,13 +780,15 @@ export class World {
     x: number,
     y: number,
     area: number,
+    hue: Hue,
+    leech = 0,
   ): void {
     const def = ACTION_BY_ID.get(actionId)!;
     const radius = (def.radius ?? 100) * Math.max(0.1, area);
     this.grid.queryRadius(x, y, radius, (enemy) => {
-      this.damageEnemy(enemy, damage, depth, programIndex, def.hue);
+      this.damageEnemy(enemy, damage, depth, programIndex, hue, leech);
     });
-    this.pushFx('burst', def.hue, x, y, radius, [], 0.22);
+    this.pushFx('burst', hue, x, y, radius, [], 0.22);
   }
 
   private doChain(
@@ -734,6 +798,8 @@ export class World {
     programIndex: number,
     x: number,
     y: number,
+    hue: Hue,
+    leech = 0,
   ): void {
     const def = ACTION_BY_ID.get(actionId)!;
     const jumps = def.jumps ?? 3;
@@ -749,9 +815,9 @@ export class World {
       points.push(target.x, target.y);
       cx = target.x;
       cy = target.y;
-      this.damageEnemy(target, damage, depth, programIndex, def.hue);
+      this.damageEnemy(target, damage, depth, programIndex, hue, leech);
     }
-    if (points.length > 2) this.pushFx('chain', def.hue, x, y, 0, points, 0.14);
+    if (points.length > 2) this.pushFx('chain', hue, x, y, 0, points, 0.14);
   }
 
   /**
@@ -768,6 +834,7 @@ export class World {
     y: number,
     area: number,
     duration: number,
+    hue: Hue,
   ): void {
     const def = ACTION_BY_ID.get(actionId)!;
     const radius = (def.radius ?? 130) * Math.max(0.1, area);
@@ -808,7 +875,7 @@ export class World {
 
     this.zones.push({
       id: this.nextId++,
-      hue: def.hue,
+      hue,
       x: bestX,
       y: bestY,
       radius,
@@ -1369,10 +1436,19 @@ export class World {
     depth: number,
     programIndex: number,
     hue: Hue,
+    leech = 0,
   ): void {
     if (!enemy.alive || damage <= 0) return;
     // §10.3 Phasing — periodically untargetable, which breaks lock-on cadence.
     if (enemy.phased) return;
+
+    // §5.3 On Crit — a crit both hits harder and emits its own event, so crit
+    // investment is a build axis rather than a stat.
+    let crit = false;
+    if (this.rng.chance(TUNABLE.critChance)) {
+      crit = true;
+      damage *= TUNABLE.critMultiplier;
+    }
 
     // §11.1 — global adaptive resistance, plus the elite's personal version.
     let resisted = damage * (1 - this.resistance[hue]);
@@ -1384,6 +1460,26 @@ export class World {
     this.damageByHue[hue] += damage;
     enemy.hp -= resisted;
     enemy.flash = 0.04;
+
+    // §5.5 Leech — a fraction of damage dealt returns as Integrity.
+    if (leech > 0 && this.player.integrity < this.player.maxIntegrity) {
+      this.player.integrity = Math.min(
+        this.player.maxIntegrity,
+        this.player.integrity + resisted * leech,
+      );
+    }
+
+    if (crit) {
+      this.emit({
+        type: 'crit',
+        depth: depth + 1,
+        x: enemy.x,
+        y: enemy.y,
+        hue,
+        targetId: enemy.id,
+        sourceProgram: programIndex,
+      });
+    }
 
     const program = this.engine.programs[programIndex];
     if (program) {
@@ -1506,7 +1602,13 @@ export class World {
       this.emit({ type: 'dash', depth: 0, x: p.x, y: p.y });
     }
 
-    const speed = TUNABLE.playerMoveSpeed * (p.dashTimer > 0 ? TUNABLE.dashSpeedMult : 1);
+    p.speedBoostTime = Math.max(0, p.speedBoostTime - dt);
+    if (p.speedBoostTime <= 0) p.speedBoost = 0;
+
+    const speed =
+      TUNABLE.playerMoveSpeed *
+      (p.dashTimer > 0 ? TUNABLE.dashSpeedMult : 1) *
+      (1 + p.speedBoost);
     p.vx = mx * speed;
     p.vy = my * speed;
     if (p.dashTimer > 0 && len < 0.01) {
@@ -1817,7 +1919,7 @@ export class World {
         proj.y > this.arena.height + 40 ||
         this.insideRuin(proj.x, proj.y)
       ) {
-        proj.alive = false;
+        this.expireProjectile(proj);
         continue;
       }
 
@@ -1852,10 +1954,124 @@ export class World {
           }
         }
         proj.hits.push(enemy.id);
-        this.damageEnemy(enemy, proj.damage, proj.depth, proj.programIndex, proj.hue);
-        if (proj.hits.length > proj.pierce) proj.alive = false;
+        this.damageEnemy(enemy, proj.damage, proj.depth, proj.programIndex, proj.hue, proj.leech);
+        if (proj.hits.length > proj.pierce) {
+          // §5.5 Ricochet — spend a bounce to redirect at a fresh target rather
+          // than dying. Pierce is exhausted first, so the two stack sensibly.
+          const next =
+            proj.bounces > 0
+              ? this.grid.nearest(proj.x, proj.y, 420, (e) => proj.hits.includes(e.id))
+              : null;
+          if (next) {
+            proj.bounces--;
+            const dx = next.x - proj.x;
+            const dy = next.y - proj.y;
+            const len = Math.hypot(dx, dy) || 1;
+            const speed = Math.hypot(proj.vx, proj.vy) || 1;
+            proj.vx = (dx / len) * speed;
+            proj.vy = (dy / len) * speed;
+            proj.hits = [];
+            proj.life = Math.max(proj.life, 0.6);
+          } else {
+            this.expireProjectile(proj);
+          }
+        }
       });
     }
+  }
+
+  /** The hue you are currently richest in. Used by Attune and by Bleed. */
+  fullestHue(): Hue {
+    let best: Hue = 'thermal';
+    for (const hue of HUES) if (this.fuel[hue] > this.fuel[best]) best = hue;
+    return best;
+  }
+
+  private emptiestHue(): Hue {
+    let worst: Hue = 'thermal';
+    for (const hue of HUES) if (this.fuel[hue] < this.fuel[worst]) worst = hue;
+    return worst;
+  }
+
+  /**
+   * §7.4 — the arbitrage layer. Convert exchanges one resource for another, and
+   * the exchange rates are called out as "the most sensitive tuning surface in
+   * the game": degenerate loops like Bleed + Leech are *expected and welcome*
+   * as long as they cost Cycles.
+   *
+   * A Convert only fires when it can pay, and emits On Convert when it resolves.
+   */
+  private runConvert(def: ActionDef, depth: number): void {
+    const spec = def.convert;
+    if (!spec) return;
+
+    // Rectify moves fuel between gauges rather than spending it outright.
+    if (spec.rebalance) {
+      const from = this.fullestHue();
+      const to = this.emptiestHue();
+      if (from === to || this.fuel[from] < spec.costAmount) return;
+      this.fuel[from] -= spec.costAmount;
+      this.fuel[to] = Math.min(TUNABLE.fuelGaugeCap, this.fuel[to] + spec.gainAmount);
+      this.finishConvert(def, depth);
+      return;
+    }
+
+    // Pay.
+    let payHue: Hue = 'thermal';
+    if (spec.costKind === 'integrity') {
+      // Never let a Convert kill you outright: it is a trade, not a gamble.
+      if (this.player.integrity <= spec.costAmount + 1) return;
+      this.player.integrity -= spec.costAmount;
+    } else {
+      payHue = this.fullestHue();
+      if (this.fuel[payHue] < spec.costAmount) return;
+      this.fuel[payHue] -= spec.costAmount;
+    }
+
+    // Receive.
+    switch (spec.gainKind) {
+      case 'fuel': {
+        const target = spec.costKind === 'integrity' ? this.fullestHue() : payHue;
+        this.fuel[target] = Math.min(TUNABLE.fuelGaugeCap, this.fuel[target] + spec.gainAmount);
+        break;
+      }
+      case 'xp':
+        this.gainXp(this.xpToNext * spec.gainAmount);
+        break;
+      case 'heat':
+        this.budget.addHeat(-spec.gainAmount);
+        break;
+      case 'speed':
+        this.player.speedBoost = Math.max(this.player.speedBoost, spec.gainAmount);
+        this.player.speedBoostTime = Math.max(this.player.speedBoostTime, spec.duration ?? 3);
+        break;
+    }
+    this.finishConvert(def, depth);
+  }
+
+  private finishConvert(def: ActionDef, depth: number): void {
+    this.stats.converts++;
+    this.pushFx('burst', def.hue, this.player.x, this.player.y, 34, [], 0.2);
+    this.emit({ type: 'convert', depth: depth + 1, x: this.player.x, y: this.player.y });
+  }
+
+  /** §5.5 Volatile — "effect detonates at end of life for 50% output". */
+  private expireProjectile(proj: Projectile): void {
+    if (!proj.alive) return;
+    proj.alive = false;
+    if (proj.volatile <= 0) return;
+    const radius = TUNABLE.volatileRadius;
+    this.grid.queryRadius(proj.x, proj.y, radius, (enemy) => {
+      this.damageEnemy(
+        enemy,
+        proj.damage * proj.volatile,
+        proj.depth,
+        proj.programIndex,
+        proj.hue,
+        proj.leech,
+      );
+    });
+    this.pushFx('burst', proj.hue, proj.x, proj.y, radius, [], 0.18);
   }
 
   private updatePickups(dt: number): void {

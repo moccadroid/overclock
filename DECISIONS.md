@@ -740,6 +740,49 @@ they could only be told apart by size. The Drifter now carries a concentric core
 
 ---
 
+## D-34 · SETTLED · The rest of the grammar, and the Convert layer
+
+All 16 modifiers, all 10 triggers, crits, and §7.4's five Convert cards.
+
+Three needed real engine work rather than data:
+
+- **Ground** (§5.6) is the first node whose effect reaches *outside its own row*:
+  it discounts the row above. That has to be applied after every row has
+  compiled, and it is what finally makes row order a mechanical axis rather than
+  a display order.
+- **Resonate** (§5.6) fires the row below whenever this row fires. Chains form an
+  exponential ladder; the cascade depth cap is what keeps it finite.
+- **Quantize** (§5.5) needed a beat grid. There is now a deterministic 110 BPM
+  clock in the simulation, which audio will lock to later rather than inventing
+  its own.
+
+**Convert** (§7.4) exchanges resources instead of dealing damage: Bleed trades
+Integrity for fuel, Coolant trades fuel for Heat relief, Cash Out for XP, Stim
+for speed, Rectify rebalances gauges. A Convert only fires when it can pay, never
+spends your last Integrity, and emits On Convert when it resolves — so the
+economy-engine archetype (§5.3) has something to listen to. The GDD calls these
+exchange rates "the most sensitive tuning surface in the game" and welcomes
+degenerate loops like Bleed + Leech as long as they cost Cycles; that is now
+possible to build.
+
+**Rectify deviates**: §7.4 has the hue pair "chosen at draft". Rather than ship
+six variants or add a draft-time sub-choice, it moves fuel from your fullest
+gauge to your emptiest, which is self-balancing and needs no extra UI.
+
+### Pool weighting, which the expansion forced
+
+Adding five Convert cards put them at half of all Actions, and the measured
+result was an Engine full of cards that deal no damage: kills collapsed from
+~12,000 to 101 and Cycle demand to 3% of budget. §8.2 always said the pool is
+"weighted by what the player owns and their Axiom", but there was no way for
+content to express rarity. Nodes now carry an optional `poolWeight`; Converts sit
+at 0.34. Kills recovered to 2,048 and cadence returned to band at 31.4s median.
+
+Worth remembering as a general lesson: adding content to a uniform pool silently
+rebalances everything already in it.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

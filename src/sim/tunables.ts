@@ -79,6 +79,23 @@ export const TUNABLE = {
   affixPhaseDuration: 1,
   affixAnchoredZone: 190,
 
+  // ---- §5.3 / §5.5 node behaviour ----
+  /** §8.2 — base crit chance. Crits hit harder and emit their own event. */
+  critChance: 0.05,
+  critMultiplier: 2,
+  /**
+   * Overdrive buys output with Heat directly, bypassing the budget. Deliberately
+   * modest per fire: against the 8/sec decay it is nearly free on a slow Clock
+   * and genuinely dangerous on a high-frequency cascade, which is the tradeoff
+   * worth having.
+   */
+  overdriveHeatPerFire: 1.5,
+  /** Volatile detonation radius. */
+  volatileRadius: 90,
+  /** §18.2 — the beat grid. Quantize snaps to it; audio will lock to it later. */
+  beatsPerMinute: 110,
+  quantizeBonus: 0.25,
+
   // ---- §7 fuel ----
   /**
    * §7.3 — "when ground shards exceed ~200, the oldest merge into fewer, richer

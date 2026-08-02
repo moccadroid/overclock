@@ -112,6 +112,60 @@ describe('cost model (GDD §5.3–5.5, §6.1)', () => {
   });
 });
 
+describe('topology nodes — row order as a build axis (GDD §5.6)', () => {
+  it('Ground discounts the row above it, and only the row above', () => {
+    const e = new Engine();
+    e.programs[0]!.triggerId = 'clock';
+    e.programs[0]!.actionId = 'nova';
+    e.programs[1]!.triggerId = 'clock';
+    e.programs[1]!.actionId = 'bolt';
+    e.programs[2]!.triggerId = 'clock';
+    e.programs[2]!.actionId = 'nova';
+    e.recompile();
+
+    const undiscounted = e.compiled[0]!.cycleCost;
+    const untouched = e.compiled[2]!.cycleCost;
+
+    e.programs[1]!.modifierIds[0] = 'ground';
+    e.recompile();
+
+    expect(e.compiled[0]!.cycleCost).toBeCloseTo(undiscounted * 0.7, 8);
+    // The row below the Ground row is unaffected.
+    expect(e.compiled[2]!.cycleCost).toBeCloseTo(untouched, 8);
+    // And the Ground row pays for it in output.
+    expect(e.compiled[1]!.ctx.output).toBeCloseTo(0.8, 8);
+  });
+
+  it('Ground on the first row discounts nothing', () => {
+    const e = new Engine();
+    e.programs[0]!.triggerId = 'clock';
+    e.programs[0]!.actionId = 'bolt';
+    e.programs[0]!.modifierIds[0] = 'ground';
+    e.recompile();
+    expect(e.compiled[0]!.cycleCost).toBeGreaterThan(0);
+    expect(Number.isFinite(e.compiled[0]!.cycleCost)).toBe(true);
+  });
+
+  it('moving a Ground row changes which row is discounted', () => {
+    const e = new Engine();
+    for (let i = 0; i < 3; i++) {
+      e.programs[i]!.triggerId = 'clock';
+      e.programs[i]!.actionId = 'nova';
+    }
+    e.programs[2]!.modifierIds[0] = 'ground';
+    e.recompile();
+    // Row 1 is discounted, row 0 is not.
+    const row0Before = e.compiled[0]!.cycleCost;
+    expect(e.compiled[1]!.cycleCost).toBeLessThan(row0Before);
+
+    // Move Ground up one: now row 0 is the one being discounted, and row 1 pays
+    // full price again.
+    e.moveProgram(2, 1);
+    expect(e.compiled[0]!.cycleCost).toBeLessThan(row0Before);
+    expect(e.compiled[2]!.cycleCost).toBeCloseTo(row0Before, 8);
+  });
+});
+
 describe('Engine structure', () => {
   it('starts with the design-locked number of Program slots', () => {
     const e = new Engine();

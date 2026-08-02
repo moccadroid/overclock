@@ -56,6 +56,11 @@ export class CycleBudget {
     return this.stall > 0;
   }
 
+  /** Direct Heat change — Overdrive adds, Coolant subtracts. */
+  addHeat(amount: number): void {
+    this.heat = Math.max(0, Math.min(100, this.heat + amount));
+  }
+
   setStaticLoad(load: number): void {
     this.staticLoad = load;
     if (this.available > this.headroom) this.available = this.headroom;

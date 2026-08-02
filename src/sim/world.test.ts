@@ -475,12 +475,22 @@ describe('runaway containment and arena legibility', () => {
   it('spawns arrive from all sides, not in one directional queue', () => {
     const w = new World({ seed: 'compass', axiomId: 'ignition' });
     const quadrants = new Set<number>();
+    const seen = new Set<number>();
     let counted = 0;
-    for (let i = 0; i < 60 * 90 && counted < 120; i++) {
-      const before = w.enemies.length;
-      w.advance(NO_INPUT);
-      for (let j = before; j < w.enemies.length; j++) {
-        const e = w.enemies[j]!;
+    // Track by id: the enemy array is compacted every tick, so index-based
+    // "which of these are new" detection samples the wrong entities.
+    for (const e of w.enemies) seen.add(e.id);
+
+    // The pilot has to actually kill things: once density is at target the
+    // director correctly stops spawning, and a stationary player produces almost
+    // no arrivals to measure.
+    for (let i = 0; i < 60 * 120 && counted < 260; i++) {
+      w.player.alive = true;
+      w.player.integrity = w.player.maxIntegrity;
+      w.advance(botInput(w));
+      for (const e of w.enemies) {
+        if (seen.has(e.id)) continue;
+        seen.add(e.id);
         const angle = Math.atan2(e.y - w.player.y, e.x - w.player.x);
         quadrants.add(Math.floor(((angle + Math.PI) / (Math.PI * 2)) * 8) % 8);
         counted++;
@@ -488,6 +498,155 @@ describe('runaway containment and arena legibility', () => {
     }
     // All eight compass octants should see arrivals; a procession would not.
     expect(quadrants.size).toBeGreaterThanOrEqual(7);
+  });
+});
+
+describe('the rest of the grammar (GDD §5.5, §5.6, §7.4)', () => {
+  function bare(seed: string): World {
+    const w = new World({ seed, axiomId: 'ignition' });
+    w.enemies.length = 0;
+    w.engine.programs.forEach((p) => {
+      p.triggerId = null;
+      p.actionId = null;
+      p.modifierIds.fill(null);
+    });
+    w.engine.recompile();
+    w.syncBudget();
+    return w;
+  }
+
+  it('§5.6 Resonate — the row below also fires when the row above does', () => {
+    const w = bare('resonate');
+    const a = w.engine.programs[0]!;
+    a.triggerId = 'clock';
+    a.actionId = 'bolt';
+    const b = w.engine.programs[1]!;
+    b.triggerId = 'on_wound'; // never fires on its own here
+    b.actionId = 'bolt';
+    w.engine.recompile();
+    w.syncBudget();
+    runPiloted(w, 30);
+    const withoutResonate = w.engine.programs[1]!.fireCount;
+
+    const w2 = bare('resonate');
+    const a2 = w2.engine.programs[0]!;
+    a2.triggerId = 'clock';
+    a2.actionId = 'bolt';
+    const b2 = w2.engine.programs[1]!;
+    b2.triggerId = 'on_wound';
+    b2.actionId = 'bolt';
+    b2.modifierIds[0] = 'resonate';
+    w2.engine.recompile();
+    w2.syncBudget();
+    runPiloted(w2, 30);
+
+    // On Wound fires occasionally on its own (the horde still exists), so the
+    // contract is the multiplier, not zero-versus-nonzero.
+    expect(w2.engine.programs[1]!.fireCount).toBeGreaterThan(withoutResonate * 4 + 5);
+  });
+
+  it('§5.5 Attune — the action takes the hue of your fullest gauge', () => {
+    const w = bare('attune');
+    w.fuel.thermal = 0;
+    w.fuel.voltaic = 0;
+    w.fuel.void = 80;
+    const p = w.engine.programs[0]!;
+    p.triggerId = 'clock';
+    p.actionId = 'bolt'; // thermal by default
+    p.modifierIds[0] = 'attune';
+    w.engine.recompile();
+    w.syncBudget();
+
+    w.spawnEnemy('drifter', w.player.x + 90, w.player.y, 'thermal');
+    for (let i = 0; i < 200; i++) w.advance(NO_INPUT);
+    expect(w.projectiles.some((proj) => proj.hue === 'void')).toBe(true);
+  });
+
+  it('§5.5 Overdrive — buys output with Heat directly, budget or no budget', () => {
+    const w = bare('overdrive');
+    const p = w.engine.programs[0]!;
+    p.triggerId = 'clock';
+    p.actionId = 'bolt';
+    p.modifierIds[0] = 'overdrive';
+    w.engine.recompile();
+    w.syncBudget();
+    // Far inside budget, so any Heat at all must be Overdrive's. Sampled at the
+    // moment of a fire: at a slow Clock rate the 8/sec decay erases it between
+    // fires, which is exactly the intended tradeoff.
+    let heatAtFire = 0;
+    for (let i = 0; i < 60 * 20 && heatAtFire === 0; i++) {
+      const before = w.stats.fires;
+      w.advance(NO_INPUT);
+      if (w.stats.fires > before) heatAtFire = w.budget.heat;
+    }
+    expect(heatAtFire).toBeGreaterThan(0);
+    expect(w.engine.compiled[0]!.ctx.output).toBeCloseTo(2, 8);
+  });
+
+  it('§5.5 Leech — returns a share of damage as Integrity', () => {
+    const w = bare('leech');
+    w.player.integrity = 40;
+    const p = w.engine.programs[0]!;
+    p.triggerId = 'clock';
+    p.actionId = 'nova';
+    p.modifierIds[0] = 'leech';
+    w.engine.recompile();
+    w.syncBudget();
+    for (let i = 0; i < 40; i++) w.spawnEnemy('bulwark', w.player.x + 60, w.player.y + i, 'thermal');
+    for (let i = 0; i < 300; i++) {
+      // Contact damage from the test dummies would swamp the signal; this test
+      // is about whether Leech returns Integrity, not about surviving them.
+      w.player.iframes = 999;
+      w.advance(NO_INPUT);
+    }
+    expect(w.player.integrity).toBeGreaterThan(40);
+  });
+
+  it('§7.4 Convert: Bleed — trades Integrity for fuel, and emits On Convert', () => {
+    const w = bare('bleed');
+    w.player.integrity = 90;
+    w.fuel.thermal = 10;
+    const p = w.engine.programs[0]!;
+    p.triggerId = 'clock';
+    p.actionId = 'convert_bleed';
+    w.engine.recompile();
+    w.syncBudget();
+
+    for (let i = 0; i < 60 * 6; i++) w.advance(NO_INPUT);
+    expect(w.player.integrity).toBeLessThan(90);
+    expect(w.fuel.thermal).toBeGreaterThan(10);
+    expect(w.stats.converts).toBeGreaterThan(0);
+  });
+
+  it('§7.4 Convert: Coolant — spends fuel to shed Heat', () => {
+    const w = bare('coolant');
+    w.fuel.voltaic = 90;
+    w.budget.heat = 80;
+    const p = w.engine.programs[0]!;
+    p.triggerId = 'clock';
+    p.actionId = 'convert_coolant';
+    w.engine.recompile();
+    w.syncBudget();
+
+    for (let i = 0; i < 60 * 4; i++) w.advance(NO_INPUT);
+    expect(w.budget.heat).toBeLessThan(80);
+    expect(w.fuel.voltaic).toBeLessThan(90);
+  });
+
+  it('a Convert that cannot be paid for simply does not fire', () => {
+    const w = bare('broke');
+    w.player.integrity = 3; // less than Bleed's cost
+    const before = w.player.integrity;
+    const p = w.engine.programs[0]!;
+    p.triggerId = 'clock';
+    p.actionId = 'convert_bleed';
+    w.engine.recompile();
+    w.syncBudget();
+
+    for (let i = 0; i < 60 * 6; i++) w.advance(NO_INPUT);
+    // Never trades away the last of your Integrity.
+    expect(w.player.integrity).toBe(before);
+    expect(w.stats.converts).toBe(0);
   });
 });
 
@@ -601,6 +760,9 @@ describe('pressure attacks the build, not the health bar (GDD §11)', () => {
         corrupted: false,
         hits: [],
         age: 0,
+        bounces: 0,
+        volatile: 0,
+        leech: 0,
         alive: true,
       });
       for (let i = 0; i < 30; i++) w.advance(NO_INPUT);
@@ -643,6 +805,9 @@ describe('pressure attacks the build, not the health bar (GDD §11)', () => {
         corrupted: false,
         hits: [],
         age: 0,
+        bounces: 0,
+        volatile: 0,
+        leech: 0,
         alive: true,
       });
       for (let i = 0; i < 90; i++) w.advance(NO_INPUT);
@@ -669,7 +834,7 @@ describe('pressure attacks the build, not the health bar (GDD §11)', () => {
       w.projectiles.push({
         id: 9200 + i, x: 0, y: 0, vx: 0, vy: 0, life: 9, damage: 0, pierce: 0,
         hue: 'thermal', depth: 0, programIndex: 0, radius: 4, corrupted: false,
-        hits: [], age: 0, alive: true,
+        hits: [], age: 0, bounces: 0, volatile: 0, leech: 0, alive: true,
       });
     }
     expect(w.waveWeightFor(template)).toBeGreaterThan(idle);

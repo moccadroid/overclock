@@ -31,5 +31,53 @@
     "cycleCost": 1,
     "listens": "pickup",
     "description": "Fires when you collect fuel or XP."
+  },
+  {
+    "id": "on_crit",
+    "kind": "trigger",
+    "name": "On Crit",
+    "cycleCost": 1,
+    "listens": "crit",
+    "description": "Fires when a hit crits. Scales with crit investment."
+  },
+  {
+    "id": "on_dash",
+    "kind": "trigger",
+    "name": "On Dash",
+    "cycleCost": 2,
+    "listens": "dash",
+    "description": "Fires when you dash. Makes mobility a build axis."
+  },
+  {
+    "id": "on_wound",
+    "kind": "trigger",
+    "name": "On Wound",
+    "cycleCost": 2,
+    "listens": "wound",
+    "description": "Fires when you take damage. Pairs with Leech."
+  },
+  {
+    "id": "on_wave",
+    "kind": "trigger",
+    "name": "On Wave",
+    "cycleCost": 3,
+    "listens": "wave",
+    "description": "Fires when a wave arrives. The burst archetype."
+  },
+  {
+    "id": "on_overheat",
+    "kind": "trigger",
+    "name": "On Overheat",
+    "cycleCost": 3,
+    "listens": "overheat",
+    "description": "Fires when Heat hits 100. Weaponises the penalty."
+  },
+  {
+    "id": "on_convert",
+    "kind": "trigger",
+    "name": "On Convert",
+    "cycleCost": 2,
+    "listens": "convert",
+    "description": "Fires when a conversion resolves. Economy-engine builds."
   }
 ]

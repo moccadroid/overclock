@@ -38,6 +38,83 @@
     "description": "Persistent damage zone at the densest nearby enemy cluster."
   },
   {
+    "id": "convert_bleed",
+    "kind": "action",
+    "name": "Convert: Bleed",
+    "hue": "thermal",
+    "cycleCost": 2,
+    "primitive": "convert",
+    "poolWeight": 0.34,
+    "damage": 0,
+    "cooldown": 0.8,
+    "convert": { "costKind": "integrity", "costAmount": 5, "gainKind": "fuel", "gainAmount": 10 },
+    "description": "Spend 5 Integrity for 10 fuel in your fullest gauge."
+  },
+  {
+    "id": "convert_rectify",
+    "kind": "action",
+    "name": "Convert: Rectify",
+    "hue": "voltaic",
+    "cycleCost": 2,
+    "primitive": "convert",
+    "poolWeight": 0.34,
+    "damage": 0,
+    "cooldown": 0.8,
+    "convert": {
+      "costKind": "fuel",
+      "costAmount": 15,
+      "gainKind": "fuel",
+      "gainAmount": 10,
+      "rebalance": true
+    },
+    "description": "Move 15 fuel from your fullest gauge into 10 in your emptiest."
+  },
+  {
+    "id": "convert_cashout",
+    "kind": "action",
+    "name": "Convert: Cash Out",
+    "hue": "void",
+    "cycleCost": 2,
+    "primitive": "convert",
+    "poolWeight": 0.34,
+    "damage": 0,
+    "cooldown": 1.5,
+    "convert": { "costKind": "fuel", "costAmount": 20, "gainKind": "xp", "gainAmount": 1 },
+    "description": "Spend 20 fuel for one level's worth of XP."
+  },
+  {
+    "id": "convert_coolant",
+    "kind": "action",
+    "name": "Convert: Coolant",
+    "hue": "voltaic",
+    "cycleCost": 2,
+    "primitive": "convert",
+    "poolWeight": 0.34,
+    "damage": 0,
+    "cooldown": 0.6,
+    "convert": { "costKind": "fuel", "costAmount": 10, "gainKind": "heat", "gainAmount": 25 },
+    "description": "Spend 10 fuel to shed 25 Heat."
+  },
+  {
+    "id": "convert_stim",
+    "kind": "action",
+    "name": "Convert: Stim",
+    "hue": "thermal",
+    "cycleCost": 2,
+    "primitive": "convert",
+    "poolWeight": 0.34,
+    "damage": 0,
+    "cooldown": 1.2,
+    "convert": {
+      "costKind": "fuel",
+      "costAmount": 10,
+      "gainKind": "speed",
+      "gainAmount": 0.3,
+      "duration": 3
+    },
+    "description": "Spend 10 fuel for +30% move speed, 3s."
+  },
+  {
     "id": "arc",
     "kind": "action",
     "name": "Arc",

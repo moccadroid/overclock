@@ -27,10 +27,34 @@ export interface FireContext {
   /** Trigger rate multiplier (Accelerate). */
   rate: number;
   duration: number;
+  bounce: number;
+  leech: number;
+  volatile: number;
+  quantize: number;
+  attune: number;
+  overdrive: number;
+  resonate: number;
+  ground: number;
 }
 
 export function baseFireContext(): FireContext {
-  return { output: 1, count: 1, echo: 0, pierce: 0, area: 1, rate: 1, duration: 1 };
+  return {
+    output: 1,
+    count: 1,
+    echo: 0,
+    pierce: 0,
+    area: 1,
+    rate: 1,
+    duration: 1,
+    bounce: 0,
+    leech: 0,
+    volatile: 0,
+    quantize: 0,
+    attune: 0,
+    overdrive: 0,
+    resonate: 0,
+    ground: 0,
+  };
 }
 
 /**
@@ -200,6 +224,20 @@ export class Engine {
   /** Recompute compiled state. Call after any structural change. */
   recompile(): void {
     this.compiled = this.programs.map(compileProgram);
+
+    // §5.6 Ground — "the Program above it costs -30% Cycles". This is the only
+    // node whose effect reaches outside its own row, so it has to be applied
+    // after every row has compiled, and it is why row order is a build axis.
+    for (let i = 0; i < this.compiled.length; i++) {
+      const grounding = this.compiled[i]!;
+      if (grounding.ctx.ground <= 0 || i === 0) continue;
+      const above = this.compiled[i - 1]!;
+      if (!above.live) continue;
+      const discount = 1 - 0.3 * Math.min(2, grounding.ctx.ground);
+      above.cycleCost *= discount;
+      above.staticCost *= discount;
+    }
+
     while (this.clocks.length < this.programs.length) this.clocks.push(0);
     this.clocks.length = this.programs.length;
     while (this.lastFired.length < this.programs.length) this.lastFired.push(-Infinity);

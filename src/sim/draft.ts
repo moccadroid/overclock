@@ -64,7 +64,7 @@ function weightFor(world: World, node: NodeDef): number {
   const byId = bias[node.id];
   const byHue = hue ? bias[hue] : undefined;
   const base = node.kind === 'modifier' ? 12 : 10;
-  return base * (byId ?? byHue ?? 1);
+  return base * (byId ?? byHue ?? 1) * (node.poolWeight ?? 1);
 }
 
 /** Roll a fresh set of draft cards. */

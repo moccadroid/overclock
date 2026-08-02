@@ -43,6 +43,7 @@ const triggerSchema: Schema = {
   listens: { type: 'string', required: true, oneOf: EVENT_TYPES },
   interval: { type: 'number', min: 0.01 },
   description: { type: 'string', required: true },
+  poolWeight: { type: 'number', min: 0 },
 };
 
 const actionSchema: Schema = {
@@ -51,7 +52,22 @@ const actionSchema: Schema = {
   name: { type: 'string', required: true },
   hue: { type: 'string', required: true, oneOf: ['thermal', 'voltaic', 'void'] },
   cycleCost: { type: 'number', required: true, min: 0 },
-  primitive: { type: 'string', required: true, oneOf: ['projectile', 'burst', 'chain', 'zone'] },
+  primitive: {
+    type: 'string',
+    required: true,
+    oneOf: ['projectile', 'burst', 'chain', 'zone', 'convert'],
+  },
+  convert: {
+    type: 'object',
+    fields: {
+      costKind: { type: 'string', required: true, oneOf: ['integrity', 'fuel'] },
+      costAmount: { type: 'number', required: true, min: 0 },
+      gainKind: { type: 'string', required: true, oneOf: ['fuel', 'xp', 'heat', 'speed'] },
+      gainAmount: { type: 'number', required: true, min: 0 },
+      rebalance: { type: 'boolean' },
+      duration: { type: 'number', min: 0 },
+    },
+  },
   damage: { type: 'number', required: true, min: 0 },
   speed: { type: 'number', min: 0 },
   lifetime: { type: 'number', min: 0 },
@@ -62,6 +78,7 @@ const actionSchema: Schema = {
   tickInterval: { type: 'number', min: 0.01 },
   cooldown: { type: 'number', min: 0 },
   description: { type: 'string', required: true },
+  poolWeight: { type: 'number', min: 0 },
 };
 
 const arenaSchema: Schema = {
@@ -103,7 +120,23 @@ const modifierSchema: Schema = {
         target: {
           type: 'string',
           required: true,
-          oneOf: ['output', 'count', 'echo', 'pierce', 'area', 'rate', 'duration'],
+          oneOf: [
+            'output',
+            'count',
+            'echo',
+            'pierce',
+            'area',
+            'rate',
+            'duration',
+            'bounce',
+            'leech',
+            'volatile',
+            'quantize',
+            'attune',
+            'overdrive',
+            'resonate',
+            'ground',
+          ],
         },
         add: { type: 'number' },
         mul: { type: 'number' },
@@ -111,6 +144,7 @@ const modifierSchema: Schema = {
     },
   },
   description: { type: 'string', required: true },
+  poolWeight: { type: 'number', min: 0 },
 };
 
 const enemyIds = new Set((enemiesRaw as { id: string }[]).map((e) => e.id));
@@ -207,6 +241,7 @@ const axiomSchema: Schema = {
   poolBias: { type: 'object', required: true },
   capacityDelta: { type: 'number', required: true },
   description: { type: 'string', required: true },
+  poolWeight: { type: 'number', min: 0 },
 };
 
 const registries: RegistrySet = {

@@ -148,6 +148,10 @@ export function botDraftChoice(world: World, cards: readonly DraftCard[]): numbe
       else if (node.kind === 'trigger') score = rebuilding ? 20 : needsTrigger ? 8 : 4;
       else if (node.kind === 'action') {
         score = rebuilding ? 20 : needsAction ? 8 : 4;
+        // A Convert occupies an Action slot but deals no damage. This pilot has
+        // no economy strategy, so it treats them as a last resort rather than
+        // filling its Engine with cards that produce nothing.
+        if (node.primitive === 'convert') score = 0.5;
         // §11.1 — a pilot that never diversifies gets taxed to 60% resistance on
         // its only hue, which measures the tax rather than the game. Prefer hues
         // the engine is currently light on.
