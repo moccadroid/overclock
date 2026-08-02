@@ -1131,6 +1131,30 @@ describe('pressure attacks the build, not the health bar (GDD §11)', () => {
     }
     expect(w.waveWeightFor(template)).toBeGreaterThan(idle);
   });
+
+  it('§14 — records what landed the final blow and what did the grinding', () => {
+    // A Results screen that cannot answer "how did I die" teaches nothing.
+    const w = quietWorld('postmortem');
+    // Disarm the Engine, or the starter Program kills the attacker mid-test.
+    for (const p of w.engine.programs) p.actionId = null;
+    w.engine.recompile();
+    w.player.maxIntegrity = 400;
+    w.player.integrity = 400;
+
+    // Chip away with contact damage first, so the tally and the final blow can
+    // disagree — that is the interesting case, and the one worth reporting.
+    expect(w.spawnEnemy('mote', w.player.x + 10, w.player.y, 'thermal')).toBeTruthy();
+    for (let i = 0; i < 300 && w.player.alive; i++) w.advance(NO_INPUT);
+    const chipped = [...w.damageBySource.keys()];
+    expect(chipped.some((k) => k.includes('contact'))).toBe(true);
+
+    // Now let it finish the job and confirm the cause is captured.
+    w.player.integrity = 1;
+    for (let i = 0; i < 300 && w.player.alive; i++) w.advance(NO_INPUT);
+    expect(w.player.alive).toBe(false);
+    expect(w.deathCause).toBeTruthy();
+    expect(w.damageBySource.get(w.deathCause!)).toBeGreaterThan(0);
+  });
 });
 
 describe('cascade physics (GDD §5.2)', () => {
@@ -1234,6 +1258,24 @@ describe('Cycle budget (GDD §6)', () => {
     expect(b.heat).toBe(TUNABLE.overheatHeatReset);
     expect(b.stalled).toBe(true);
     expect(b.stall).toBeCloseTo(TUNABLE.overheatStallSeconds, 6);
+  });
+
+  it('reports which way Heat is moving, not just where it is', () => {
+    // The gauge sat at zero and then leapt, so the player never saw the
+    // mechanism — only the punishment. The rate is what makes it a dial.
+    const b = new CycleBudget(100);
+    overdrawTick(b, 4000);
+    expect(b.heatRate).toBeGreaterThan(0);
+
+    b.beginTick(SIM_DT);
+    b.endTick(SIM_DT);
+    expect(b.heatRate).toBeLessThan(0);
+
+    // Cold and idle is neither building nor venting — don't claim it is.
+    b.heat = 0;
+    b.beginTick(SIM_DT);
+    b.endTick(SIM_DT);
+    expect(b.heatRate).toBe(0);
   });
 
   it('reports instability tiers on the documented thresholds', () => {

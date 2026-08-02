@@ -1014,6 +1014,87 @@ Action's shape.
 
 ---
 
+## D-46 · SETTLED · Heat was a punishment nobody watched arrive
+
+Heat only moves when you are over or under budget, so the gauge sat at zero for
+minutes and then leapt to a stall. The player experienced a penalty, never a
+mechanism. Three changes, all legibility, none touching the model:
+
+- `CycleBudget.heatRate` is now published, and the HUD says `▲ +N/s` or
+  `▼ venting`. Venting is the half that matters: it is the proof that easing off
+  works.
+- The Heat bar wears its own tier boundaries. The track is drawn green to 40,
+  amber to 70, red to 100, at low brightness where unlit — §16.2's brightness
+  hierarchy rather than a colour that changes under you. You can see the zone
+  you are in and the one you are heading into.
+- The Cycle draw moved off screen-centre and onto the Engine strip, above the
+  rows that cause it. Each row already reports its share; this is the total they
+  add up to, against supply. A number in the middle of the screen with no
+  referent is worse than no number.
+
+## D-47 · SETTLED · Cascade depth is priced in Cycles, not in deleted damage
+
+`On Hit → Nova` self-triggers, and at depth it deleted the screen. Blocking
+self-triggering rows was rejected outright: §5.2 names `On Kill → Split → Bolt →
+each bolt kills → more bolts` as the *intended* cascade, and §23.1 says price a
+power break, never remove it.
+
+The throttle moved onto the cost side. `cascadeOutputFalloff` 0.85 → 0.78 and
+`cascadeCostGrowth` 0.25 → 0.5: at depth 5, roughly 29% output for 3.5× the
+price. Measured across the harness sweep, Circuit's demand fell from 282% of
+budget to 178% while time in Instability rose (89% nominal, peak Heat 53) and
+kills went *up* (1,920 → 2,229). That is the shape wanted — the cascade still
+runs, but you can watch the bill arrive on a gauge instead of quietly noticing
+things die slower and blaming the game.
+
+Nova's own numbers came down with it (damage 8 → 5, radius 130 → 112).
+
+## D-48 · SETTLED · The draft pool inverted, and Gain replaces the missing ceiling
+
+Reported ratio in play: "a TON of triggers and weapons but basically ZERO
+modifiers or stats". The pool had been weighted action-heavy in an earlier
+correction, when it was starving players of weapons, and overshot. You need
+perhaps six triggers and six Actions across a whole run; modifiers you can
+absorb forever, because they are what makes an existing row better.
+
+Base weights are now modifier 26 / action 13 / trigger 7, with a wider filler
+slice. Measured over 400 runs × 22 drafts: **modifier 43.1% · stat 16.3% ·
+action 15.7% · trigger 11.0%** — the requested ordering.
+
+Nerfing Nova removes a ceiling, so something has to give it back. **Gain**
+(+8% damage on every Action, multiplicative with everything) is the new stat
+card, weighted to appear about twice as often as the utility stats. It is
+deliberately boring per card and deliberately unbounded in aggregate: act one is
+tuned for base numbers, act three gets its ×3 from a stack of these.
+
+## D-49 · SETTLED · Pull warps space instead of drawing a picture of warping
+
+The vortex was ten sets of converging strokes laid over the arena — "very large
+and ugly". The grid already had a distortion idiom (`warpedLine`, bending around
+the avatar under load), so Pull now feeds that instead: `WarpSource` gained a
+`swirl` term, and grid lines wind up tangentially around the vortex centre.
+Subdivision became length-based, since a fixed 10 vertices per line cannot
+resolve a 210-unit radius.
+
+What is left drawn *at* the vortex is a bright core and two short boundary arcs.
+The effect is not on top of the world; it is the world being wrong.
+
+## D-50 · SETTLED · Results says how you died
+
+`hurtPlayer` now takes a cause, and the world keeps both the final blow and a
+per-source damage tally. Results shows both, because they are usually different
+and the gap is the lesson: killed by a Lancer beam, but 60% of the run's damage
+came from Drifter contact you never bothered to outrun. Self-inflicted damage
+from Instability II corruption is named as such — "your own corrupted fire" — so
+the cost of living over budget is attributable.
+
+Convert's hue tag was also removed from its cards. §5.4 lists Convert's hue as
+"—": it neither burns fuel of its own colour nor deals damage, so the tag was a
+promise the card could not keep, and every other Action's tag has to stay true
+or the tag means nothing anywhere.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

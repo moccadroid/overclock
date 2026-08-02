@@ -100,11 +100,16 @@ export const TUNABLE = {
    * further it travels from the thing that started it.
    *
    * Output falls off geometrically with depth; Cycle cost climbs linearly. At
-   * depth 5 that is roughly 44% output for 2.25x the price, which throttles a
+   * depth 5 that is roughly 29% output for 3.5x the price, which throttles a
    * runaway without ever refusing to run it.
+   *
+   * The weight sits deliberately on the cost side. Deleted damage is invisible —
+   * the player just notices things dying slower and blames the game. Cost is
+   * legible: it drains Cycles, which becomes Heat, which is now a gauge you can
+   * watch climb. Same throttle, but the player can see the bill.
    */
-  cascadeOutputFalloff: 0.85,
-  cascadeCostGrowth: 0.25,
+  cascadeOutputFalloff: 0.78,
+  cascadeCostGrowth: 0.5,
   /** Orbitals stack, so they need a ceiling and a per-enemy hit cadence. */
   maxOrbitals: 14,
   orbitalHitCooldown: 0.45,

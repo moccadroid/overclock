@@ -29,6 +29,19 @@ const HUE_COLOR: Record<Hue, number> = {
   void: PALETTE.void,
 };
 
+/**
+ * Something that bends the grid. `pull` is a radial displacement in world units,
+ * negative to push outward; `swirl` is a tangential rotation in radians at the
+ * centre. Both fall off to nothing at `radius`.
+ */
+interface WarpSource {
+  x: number;
+  y: number;
+  radius: number;
+  pull: number;
+  swirl: number;
+}
+
 const VIEW_HEIGHT = 900;
 const VIEW_WIDTH_MIN = 1200;
 const VIEW_WIDTH_MAX = 1900;
@@ -249,11 +262,35 @@ export class Renderer {
     const view = this.camera.view;
     const step = VISUAL.gridSpacing;
     const load = world.budget.dynamicFraction;
-    const warp = VISUAL.gridWarpAmount * load * VISUAL.degradationIntensity;
-    const radius = VISUAL.gridWarpRadius;
-    const px = world.player.x;
-    const py = world.player.y;
     const arena = world.arena;
+
+    // Everything that bends the world, in one list. The avatar pushes space
+    // outward under load; a vortex pulls it in and twists it. Drawing Pull as a
+    // distortion of the grid rather than a wad of strokes on top of it is the
+    // difference between "an ugly thing is here" and "space is wrong here".
+    const sources: WarpSource[] = [
+      {
+        x: world.player.x,
+        y: world.player.y,
+        radius: VISUAL.gridWarpRadius,
+        pull: -VISUAL.gridWarpAmount * load * VISUAL.degradationIntensity,
+        swirl: 0,
+      },
+    ];
+    for (const z of world.zones) {
+      if (z.force <= 0) continue;
+      const t = Math.max(0, z.life / z.maxLife);
+      // Peaks just after it lands and eases off as it dies, like the pull itself.
+      const strength = Math.sin(Math.min(1, (1 - t) * 3) * Math.PI * 0.5) * t;
+      sources.push({
+        x: z.x,
+        y: z.y,
+        radius: z.radius * 1.35,
+        pull: 64 * strength,
+        swirl: 1.15 * strength,
+      });
+    }
+    const warping = sources.some((s) => Math.abs(s.pull) > 0.05);
 
     const x0 = Math.max(0, Math.floor(view.x / step) * step);
     const x1 = Math.min(arena.width, view.x + view.width + step);
@@ -262,10 +299,10 @@ export class Renderer {
 
     // Vertical lines, subdivided so they can bend around the avatar.
     for (let x = x0; x <= x1; x += step) {
-      this.warpedLine(g, x, Math.max(0, view.y - step), x, Math.min(arena.height, y1), px, py, radius, warp, true);
+      this.warpedLine(g, x, Math.max(0, view.y - step), x, Math.min(arena.height, y1), sources, warping);
     }
     for (let y = y0; y <= y1; y += step) {
-      this.warpedLine(g, Math.max(0, view.x - step), y, Math.min(arena.width, x1), y, px, py, radius, warp, false);
+      this.warpedLine(g, Math.max(0, view.x - step), y, Math.min(arena.width, x1), y, sources, warping);
     }
     g.stroke({
       width: 1,
@@ -286,27 +323,43 @@ export class Renderer {
     ay: number,
     bx: number,
     by: number,
-    px: number,
-    py: number,
-    radius: number,
-    warp: number,
-    vertical: boolean,
+    sources: WarpSource[],
+    warping: boolean,
   ): void {
-    if (warp < 0.05) {
+    if (!warping) {
       g.moveTo(ax, ay).lineTo(bx, by);
       return;
     }
-    const steps = VISUAL.gridSubdivisions;
+    // Subdivide by length, not by a fixed count: a 260-unit warp radius needs
+    // vertices inside it, and the grid line may span the whole arena.
+    const length = Math.hypot(bx - ax, by - ay);
+    const steps = Math.max(VISUAL.gridSubdivisions, Math.ceil(length / VISUAL.gridWarpStep));
     for (let i = 0; i <= steps; i++) {
       const t = i / steps;
-      let x = ax + (bx - ax) * t;
-      let y = ay + (by - ay) * t;
-      const d = Math.hypot(x - px, y - py);
-      if (d < radius) {
-        // Push the line away from the avatar, strongest at the centre.
-        const push = (1 - d / radius) ** 2 * warp;
-        if (vertical) x += Math.sign(x - px || 1) * push;
-        else y += Math.sign(y - py || 1) * push;
+      const bareX = ax + (bx - ax) * t;
+      const bareY = ay + (by - ay) * t;
+      let x = bareX;
+      let y = bareY;
+      for (const s of sources) {
+        if (Math.abs(s.pull) < 0.05) continue;
+        const dx = bareX - s.x;
+        const dy = bareY - s.y;
+        const d = Math.hypot(dx, dy);
+        if (d >= s.radius || d < 0.001) continue;
+        // Radial displacement, strongest at the centre and vanishing at the rim.
+        const falloff = (1 - d / s.radius) ** 2;
+        const shift = (falloff * s.pull) / d;
+        x -= dx * shift;
+        y -= dy * shift;
+        // Tangential twist. This is what makes a vortex read as a vortex: the
+        // straight lines of the world visibly wind up around it.
+        if (s.swirl !== 0) {
+          const twist = falloff * s.swirl;
+          const c = Math.cos(twist);
+          const sn = Math.sin(twist);
+          x += (dx * c - dy * sn - dx);
+          y += (dx * sn + dy * c - dy);
+        }
       }
       if (i === 0) g.moveTo(x, y);
       else g.lineTo(x, y);
@@ -492,30 +545,20 @@ export class Renderer {
       const t = Math.max(0, z.life / z.maxLife);
       const color = HUE_COLOR[z.hue];
       const spin = z.life * 0.9;
-      // A vortex must not look like a Field: one is a place that hurts, the
-      // other is a place that *moves you*. Converging strokes, drawn sweeping
-      // inward, say which.
+      // A vortex must not look like a Field: one is a place that hurts, the other
+      // is a place that *moves you*. The distortion lives in drawGrid — space
+      // itself winds up around the point. All that belongs here is the singularity
+      // it winds around, small and bright, and a rim marking where it stops.
       if (z.force > 0) {
-        const swirl = (1 - t) * 5;
-        for (let i = 0; i < 10; i++) {
-          const a = (i / 10) * Math.PI * 2 + swirl;
-          const outer = z.radius;
-          const inner = z.radius * (0.18 + t * 0.3);
-          for (let s = 0; s < 5; s++) {
-            const f0 = s / 5;
-            const f1 = (s + 1) / 5;
-            const r0 = outer + (inner - outer) * f0;
-            const r1 = outer + (inner - outer) * f1;
-            const a0 = a + f0 * 1.5;
-            const a1 = a + f1 * 1.5;
-            g.moveTo(z.x + Math.cos(a0) * r0, z.y + Math.sin(a0) * r0).lineTo(
-              z.x + Math.cos(a1) * r1,
-              z.y + Math.sin(a1) * r1,
-            );
-          }
+        const core = 4 + t * 7;
+        g.circle(z.x, z.y, core).fill({ color, alpha: BAND.entity * (0.5 + 0.5 * t) });
+        g.circle(z.x, z.y, core * 2.1).stroke({ width: 1.5, color, alpha: BAND.inFlight * t });
+        // Two short arcs at the boundary: an annotation, not a fence.
+        for (let i = 0; i < 2; i++) {
+          const a = spin * 1.6 + i * Math.PI;
+          arcSegment(g, z.x, z.y, z.radius * (0.94 - (1 - t) * 0.35), a, a + 0.5);
         }
-        g.stroke({ width: 2, color, alpha: BAND.entity * t });
-        g.circle(z.x, z.y, z.radius * (0.16 + t * 0.28)).fill({ color, alpha: 0.3 * t });
+        g.stroke({ width: 1, color, alpha: BAND.structure * 1.4 * t });
         continue;
       }
 

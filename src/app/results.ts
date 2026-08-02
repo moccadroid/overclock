@@ -124,6 +124,39 @@ function headline(world: World): string {
   return 'GARBAGE COLLECTED';
 }
 
+/**
+ * §14 — "how did I die" is the one question a Results screen must answer, and
+ * the honest answer has two halves: the blow that landed, and the thing that had
+ * been grinding you down all run. They are usually different, and the gap
+ * between them is the lesson.
+ */
+function renderPostMortem(world: World): string {
+  if (!world.deathCause) return '';
+
+  const sorted = [...world.damageBySource.entries()].sort((a, b) => b[1] - a[1]);
+  const total = sorted.reduce((s, [, v]) => s + v, 0);
+  const rows = sorted
+    .slice(0, 5)
+    .map(([source, amount]) => {
+      const pct = total > 0 ? (amount / total) * 100 : 0;
+      const meter = '█'.repeat(Math.max(1, Math.round(pct / 5)));
+      return (
+        `<div class="pm-row"><span class="pm-src">${svgEscape(source)}</span>` +
+        `<span class="pm-bar">${meter}</span>` +
+        `<span class="pm-pct">${pct.toFixed(0)}%</span></div>`
+      );
+    })
+    .join('');
+
+  return (
+    `<div class="postmortem">` +
+    `<div class="k">killed by</div>` +
+    `<div class="pm-blow">${svgEscape(world.deathCause)}</div>` +
+    `<div class="k">damage taken, by source</div>${rows}` +
+    `</div>`
+  );
+}
+
 export function renderResults(world: World): string {
   const score = world.finalScore();
   const wasted = world.kernels === 0 ? world.wastedKernelPercent : 0;
@@ -169,6 +202,7 @@ export function renderResults(world: World): string {
       <div class="snapshot">
         <div class="k">final engine</div>
         <pre>${svgEscape(renderEngine(world))}</pre>
+        ${renderPostMortem(world)}
         <div class="k">seed</div>
         <pre>  ${svgEscape(world.config.seed)} · ${svgEscape(world.config.axiomId)}</pre>
       </div>

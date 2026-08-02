@@ -23,6 +23,12 @@ export class CycleBudget {
   /** Diagnostics for the HUD ring and the harness. */
   spentThisTick = 0;
   deficitThisTick = 0;
+  /**
+   * Signed Heat change per second. Heat only moves when you are over or under
+   * budget, so without this the gauge sits at zero and then leaps — the player
+   * never sees the mechanism, only the punishment. Positive = building.
+   */
+  heatRate = 0;
 
   constructor(capacity: number = TUNABLE.cycleCapacityBase) {
     this.capacity = capacity;
@@ -110,14 +116,19 @@ export class CycleBudget {
    * caller must emit the On Overheat event (§5.3) — builds catch it deliberately.
    */
   endTick(dt: number): boolean {
-    if (this.stall > 0) return false;
+    if (this.stall > 0) {
+      this.heatRate = 0;
+      return false;
+    }
     if (this.overdrawn) {
       const gain = Math.min(
         TUNABLE.heatGainMaxPerSec,
         TUNABLE.heatGainPerOverdraw * this.overdrawRatio(dt),
       );
+      this.heatRate = gain;
       this.heat += gain * dt;
     } else {
+      this.heatRate = this.heat > 0 ? -TUNABLE.heatDecayPerSec : 0;
       this.heat = Math.max(0, this.heat - TUNABLE.heatDecayPerSec * dt);
     }
     if (this.heat >= 100) {

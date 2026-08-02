@@ -11,6 +11,29 @@ function bar(value: number, max: number, width: number): string {
   return '█'.repeat(filled) + '·'.repeat(width - filled);
 }
 
+/**
+ * A bar that wears its own thresholds. The track is drawn green / amber / red
+ * along its length, so you can see which zone you are in *and* which one you are
+ * heading into. Heat's tiers sit at 40 / 70 / 100 and load's pain starts at
+ * capacity — both read as "stay in the green" without needing a legend.
+ */
+function zoneBar(value: number, max: number, width: number, stops: number[]): string {
+  const filled = Math.max(0, Math.min(width, Math.round((value / max) * width)));
+  const classes = ['z-ok', 'z-warn', 'z-crit'];
+  let out = '';
+  let start = 0;
+  for (let z = 0; z < stops.length; z++) {
+    const stop = Math.round((stops[z]! / max) * width);
+    const lit = Math.max(0, Math.min(stop, filled) - start);
+    const dim = stop - start - lit;
+    const cls = classes[z] ?? 'z-crit';
+    if (lit > 0) out += `<span class="${cls}">${'█'.repeat(lit)}</span>`;
+    if (dim > 0) out += `<span class="${cls} dim">${'·'.repeat(dim)}</span>`;
+    start = stop;
+  }
+  return out;
+}
+
 function clock(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
@@ -71,22 +94,28 @@ export class Hud {
     const heat = world.budget.heat;
     const tier = world.budget.tier;
     const tierName = ['NOMINAL', 'INSTABILITY I', 'INSTABILITY II', 'OVERHEAT'][tier]!;
-    const heatClass = tier >= 1 ? 'hot' : '';
     // §19.4 — at 20:00 the clock is replaced by the Meltdown multiplier.
     const topLine =
       world.phase === 'meltdown'
         ? `<span class="meltdown">MELTDOWN ×${world.meltdownMultiplier.toFixed(2)}` +
           `   +${clock(world.meltdownTime)}</span>`
         : `${clock(world.time)}   THREAT ${world.threat.toFixed(1)}`;
-    // Heat is caused by drawing more Cycles than you generate, and the game has
-    // to say so — otherwise it reads as an unexplained penalty. Show the draw
-    // against the supply, and name the fix.
-    const demand = Math.round(world.demandAverage);
-    const supply = Math.round(world.budget.capacity);
-    const over = demand > supply * 1.05;
-    const cause = over
-      ? `<span class="hot">DRAWING ${demand}/s · CAPACITY ${supply}/s — OVER BUDGET</span>`
-      : `<span class="cool">drawing ${demand}/s of ${supply}/s</span>`;
+
+    // Heat used to be reported as a bare number that sat at zero and then leapt.
+    // Two things fix that: the bar carries its own tier colours (40 / 70 / 100),
+    // and the rate says which way it is moving. Venting is as informative as
+    // building — it is the proof that easing off works.
+    const rate = world.budget.heatRate;
+    let heatFlow: string;
+    if (world.budget.stalled) {
+      heatFlow = `<span class="z-crit">STALLED ${world.budget.stall.toFixed(1)}s</span>`;
+    } else if (rate > 0.05) {
+      heatFlow = `<span class="z-crit">▲ +${rate.toFixed(0)}/s</span>`;
+    } else if (rate < -0.05) {
+      heatFlow = `<span class="z-ok">▼ ${rate.toFixed(0)}/s venting</span>`;
+    } else {
+      heatFlow = `<span class="cool">stable</span>`;
+    }
     const advice =
       world.budget.stalled || heat > 55
         ? `<span class="advice">scrap a program, draft capacity, or fire less</span>`
@@ -94,9 +123,9 @@ export class Hud {
 
     this.tc.innerHTML =
       `${topLine}\n` +
-      `<span class="${heatClass}">HEAT ${bar(heat, 100, 12)} ${tierName}` +
-      `${world.budget.stalled ? '  ·  STALLED' : ''}</span>\n` +
-      cause +
+      `HEAT ${zoneBar(heat, 100, 16, [40, 70, 100])} ` +
+      `<span class="${tier >= 2 ? 'z-crit' : tier >= 1 ? 'z-warn' : 'z-ok'}">${tierName}</span>` +
+      `   ${heatFlow}` +
       (advice ? `\n${advice}` : '') +
       (world.surgeTime > 0
         ? `\n<span class="surge">REBUILD SURGE ${world.surgeTime.toFixed(0)}s · 2× XP</span>`
@@ -196,8 +225,20 @@ export class Hud {
         `${'█'.repeat(filled)}${'·'.repeat(10 - filled)}</div>`
       : '';
 
+    // The draw belongs next to the rows that cause it, not floating in the middle
+    // of the screen where it reads as an unexplained number. Every line below
+    // shows its own share; this is the total those shares add up to, against what
+    // the Engine can supply.
+    const demand = world.demandAverage;
+    const supply = world.budget.capacity;
+    const pct = supply > 0 ? demand / supply : 0;
+    const load =
+      `<div class="load">DRAW ${zoneBar(demand, supply * 1.5, 14, [supply * 0.8, supply, supply * 1.5])}` +
+      `  <span class="${pct > 1 ? 'z-crit' : pct > 0.8 ? 'z-warn' : 'z-ok'}">` +
+      `${Math.round(demand)}</span><span class="num">/${Math.round(supply)} c/s</span></div>`;
+
     this.engine.innerHTML =
-      `<div class="prog head">ENGINE — TAB to edit</div>` + lines.join('') + channel;
+      `<div class="prog head">ENGINE — TAB to edit</div>` + load + lines.join('') + channel;
   }
 }
 

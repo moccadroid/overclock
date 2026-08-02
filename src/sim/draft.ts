@@ -13,7 +13,7 @@ import type { World } from './world';
 import { axiom as getAxiom } from '../content/index';
 
 /** §8.2 — the deliberately boring floor that keeps a draft from being dead. */
-export type StatKind = 'crit' | 'magnet' | 'speed' | 'integrity';
+export type StatKind = 'crit' | 'magnet' | 'speed' | 'integrity' | 'power';
 
 export type DraftCard =
   | { kind: 'node'; nodeId: string }
@@ -42,6 +42,16 @@ export const STAT_CARDS: Record<StatKind, { title: string; body: string; apply: 
       body: '+8% move speed.',
       apply: (w) => {
         w.bonuses.speed += 0.08;
+      },
+    },
+    // The scaling that lets a deliberately weak Action become monstrous by the
+    // end of a run. Base numbers are tuned for act one; this is how act three
+    // gets its ×3. It multiplies *everything*, so it stays small per card.
+    power: {
+      title: 'Gain',
+      body: '+8% damage on every Action you own.',
+      apply: (w) => {
+        w.bonuses.power += 0.08;
       },
     },
     integrity: {
@@ -101,11 +111,15 @@ function weightFor(world: World, node: NodeDef): number {
   const byId = bias[node.id];
   const byHue = hue ? bias[hue] : undefined;
 
-  // With 16 modifiers, 10 triggers and 10 actions, a flat base put Actions at
-  // under a fifth of the pool — a full run could hand out a single weapon. The
-  // roster is lopsided by design (§22 ships 14 modifiers), so the weights have
-  // to compensate rather than mirror it.
-  let base = node.kind === 'modifier' ? 10 : node.kind === 'trigger' ? 13 : 24;
+  // Intended frequency: modifiers > stats > actions > triggers.
+  //
+  // You need perhaps six triggers and six actions across a whole run, but you
+  // can absorb modifiers forever — they are what makes an existing row better,
+  // and they are the scaling that lets a build become monstrous late. Weighting
+  // actions highest (an earlier correction, when the pool was starving you of
+  // weapons) overshot into the opposite problem: a pile of triggers and weapons
+  // with nothing to sharpen them.
+  let base = node.kind === 'modifier' ? 26 : node.kind === 'trigger' ? 7 : 13;
 
   // §8.2 — "pool weighted by what the player owns". An empty slot pulls its own
   // kind toward you, so a half-built Engine finishes itself.
@@ -135,17 +149,27 @@ export function rollDraft(world: World): DraftOffer {
     // §8.2 — capacity upgrades and (here) a Program slot are the floor that keeps
     // a draft from ever being dead.
     const slotAvailable = world.engine.programs.length < LOADBEARING.programSlotsMax;
+    // Stats sit second in the intended frequency, so the filler slice is wider.
     const fillerWeight =
-      remaining.length === 0 ? 1 : world.phase === 'meltdown' ? 0.34 : 0.18;
+      remaining.length === 0 ? 1 : world.phase === 'meltdown' ? 0.4 : 0.3;
     const rollFiller = remaining.length === 0 || world.rng.chance(fillerWeight);
 
     if (rollFiller) {
       const roll = world.rng.next();
-      if (slotAvailable && roll < 0.25) {
+      if (slotAvailable && roll < 0.18) {
         cards.push({ kind: 'program_slot' });
-      } else if (roll < 0.62) {
+      } else if (roll < 0.72) {
         // §8.2 — a small, deliberately boring stat pool.
-        const stats: StatKind[] = ['crit', 'magnet', 'speed', 'integrity'];
+        // Weighted by hand rather than uniformly: Gain is the scaling curve, so
+        // it shows up roughly twice as often as the utility stats.
+        const stats: StatKind[] = [
+          'power',
+          'power',
+          'crit',
+          'magnet',
+          'speed',
+          'integrity',
+        ];
         cards.push({ kind: 'stat', stat: world.rng.pick(stats) });
       } else {
         cards.push({ kind: 'capacity', amount: TUNABLE.capacityUpgradeAmount });
@@ -187,7 +211,12 @@ export function describeCard(card: DraftCard): { title: string; body: string; ta
   if (!node) return { title: card.nodeId, body: '', tag: '?' };
   const cost =
     node.kind === 'modifier' ? `x${node.cycleMult} Cycles` : `${node.cycleCost} Cycles`;
-  const hue = node.kind === 'action' ? ` · ${node.hue}` : '';
+  // §5.4 lists Convert's hue as "—": it neither burns fuel of its own colour nor
+  // deals damage, so a hue tag on it is a promise the card cannot keep. Every
+  // other Action's tag means "this is the gauge it drains and the resistance it
+  // faces", and that has to stay true or the tag means nothing anywhere.
+  const hue =
+    node.kind === 'action' && node.primitive !== 'convert' ? ` · ${node.hue}` : '';
   return {
     title: node.name,
     body: `${node.description}  [${cost}${hue}]`,

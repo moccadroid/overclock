@@ -80,6 +80,11 @@
 #hud-engine .prog {
   white-space: nowrap;
 }
+#hud-engine .load {
+  white-space: nowrap;
+  margin-bottom: 5px;
+  letter-spacing: -0.5px;
+}
 #hud-engine .prog.dead {
   color: #37485e;
 }
@@ -147,6 +152,27 @@
 }
 .hot {
   color: var(--signal);
+}
+/* Zoned gauges. The whole point is that the track is legible before you reach
+   it, so the unlit portion keeps its hue and only drops in brightness — §16.2's
+   brightness hierarchy doing the work instead of a colour change. */
+.z-ok {
+  color: #4fbf87;
+}
+.z-warn {
+  color: #d59a3c;
+}
+.z-crit {
+  color: #e0503c;
+}
+.z-ok.dim {
+  color: #24493a;
+}
+.z-warn.dim {
+  color: #4d3c1d;
+}
+.z-crit.dim {
+  color: #4f231d;
 }
 .resist {
   color: #8b6a3a;
@@ -882,6 +908,34 @@
 .results-panel .snapshot pre {
   margin-bottom: 16px;
   overflow-x: auto;
+}
+.postmortem {
+  margin-bottom: 16px;
+}
+.postmortem .pm-blow {
+  color: var(--signal);
+  margin-bottom: 14px;
+}
+.postmortem .pm-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  line-height: 1.6;
+}
+.postmortem .pm-src {
+  flex: 0 0 42%;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.postmortem .pm-bar {
+  color: #7a3a34;
+  letter-spacing: -1px;
+}
+.postmortem .pm-pct {
+  color: #46586e;
+  margin-left: auto;
 }
 .results-panel .wasted {
   margin-top: 18px;

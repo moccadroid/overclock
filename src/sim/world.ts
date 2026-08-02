@@ -419,7 +419,14 @@ export class World {
   /** Node ids removed from this run's pool by Purge (§8.3). */
   purged = new Set<string>();
   /** §8.2 — accumulated stat-card bonuses. Deliberately small and boring. */
-  bonuses = { crit: 0, magnet: 0, speed: 0 };
+  bonuses = { crit: 0, magnet: 0, speed: 0, power: 0 };
+  /**
+   * §14 — a Results screen that cannot say how you died teaches nothing. The
+   * final blow answers "what got me"; the tally answers "what was actually
+   * killing me all run", which is usually a different thing.
+   */
+  damageBySource = new Map<string, number>();
+  deathCause: string | null = null;
 
   threat = 0;
   /** §12 — the composition currently being fed into the arena. */
@@ -804,7 +811,12 @@ export class World {
       // and run out of steam as it travels, rather than being cut off.
       const depthFalloff = Math.pow(TUNABLE.cascadeOutputFalloff, depth);
       const output =
-        compiled.ctx.output * outputMul * fuelBonus * depthFalloff * this.engine.globalOutput;
+        compiled.ctx.output *
+        outputMul *
+        fuelBonus *
+        depthFalloff *
+        this.engine.globalOutput *
+        (1 + this.bonuses.power);
       const damage = def.damage * output;
       const corrupted =
         this.budget.corruptionChance > 0 && this.rng.chance(this.budget.corruptionChance);
@@ -1676,7 +1688,7 @@ export class World {
     const across = c.dirX !== 0 ? p.x - c.x : p.y - c.y;
     const inGap = Math.abs(along - c.gapAt) < TUNABLE.sweeperGapWidth / 2;
     if (!inGap && Math.abs(across) < 22 + TUNABLE.playerRadius) {
-      this.hurtPlayer(TUNABLE.sweeperDamage);
+      this.hurtPlayer(TUNABLE.sweeperDamage, 'Sweeper');
     }
   }
 
@@ -1691,7 +1703,7 @@ export class World {
     for (const gap of c.gapAngles) {
       if (Math.abs(angleDelta(angle, gap)) < 0.34) return;
     }
-    this.hurtPlayer(this.player.maxIntegrity * TUNABLE.cellDamagePercent);
+    this.hurtPlayer(this.player.maxIntegrity * TUNABLE.cellDamagePercent, 'Containment Cell');
   }
 
   /** §11.4 — shrinks the playable arena, forcing motion. */
@@ -1702,7 +1714,7 @@ export class World {
     else if (c.dirX < 0) inside = p.x > this.arena.width - c.advance;
     else if (c.dirY > 0) inside = p.y < c.advance;
     else inside = p.y > this.arena.height - c.advance;
-    if (inside) this.hurtPlayer(TUNABLE.nullFrontDamage);
+    if (inside) this.hurtPlayer(TUNABLE.nullFrontDamage, 'Null Front');
   }
 
   private mark(kind: TraceMarkerKind, label: string): void {
@@ -1955,7 +1967,7 @@ export class World {
       const dx = this.player.x - enemy.x;
       const dy = this.player.y - enemy.y;
       const reach = TUNABLE.affixVolatileRadius + TUNABLE.playerRadius;
-      if (dx * dx + dy * dy < reach * reach) this.hurtPlayer(TUNABLE.affixVolatileDamage);
+      if (dx * dx + dy * dy < reach * reach) this.hurtPlayer(TUNABLE.affixVolatileDamage, `${def.name} (Volatile)`);
     }
 
     if (def.splitsInto) {
@@ -1982,17 +1994,19 @@ export class World {
     });
   }
 
-  private hurtPlayer(amount: number): void {
+  private hurtPlayer(amount: number, cause: string): void {
     const p = this.player;
     if (p.iframes > 0) return;
     p.integrity -= amount;
     p.iframes = 0.5;
     this.stats.damageTaken += amount;
+    this.damageBySource.set(cause, (this.damageBySource.get(cause) ?? 0) + amount);
     this.pushFx('hurt', 'thermal', p.x, p.y, 0, [], 0.14);
     this.emit({ type: 'wound', depth: 0, x: p.x, y: p.y });
     if (p.integrity <= 0) {
       p.integrity = 0;
       p.alive = false;
+      this.deathCause = cause;
       // §14 — "CONTAINED" in Meltdown, "Garbage collected" before it. Never
       // shaming language either way.
       this.ending = this.phase === 'meltdown' ? 'contained' : 'died-early';
@@ -2248,7 +2262,7 @@ export class World {
       this.pushFx('hurt', fullest, this.player.x, this.player.y, 0, [], 0.16);
       return;
     }
-    if (def.contactDamage > 0) this.hurtPlayer(def.contactDamage);
+    if (def.contactDamage > 0) this.hurtPlayer(def.contactDamage, `${def.name} contact`);
   }
 
   /**
@@ -2355,7 +2369,7 @@ export class World {
       const along = px * ux + py * uy;
       const across = Math.abs(px * -uy + py * ux);
       if (along > 0 && across < 16 + TUNABLE.playerRadius) {
-        this.hurtPlayer(def.beamDamage ?? 16);
+        this.hurtPlayer(def.beamDamage ?? 16, `${def.name} beam`);
       }
       this.pushFx(
         'chain',
@@ -2412,7 +2426,7 @@ export class World {
         const dy = this.player.y - proj.y;
         const r = TUNABLE.playerRadius + proj.radius;
         if (dx * dx + dy * dy < r * r) {
-          this.hurtPlayer(4);
+          this.hurtPlayer(4, 'your own corrupted fire');
           proj.alive = false;
           continue;
         }

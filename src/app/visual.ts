@@ -83,6 +83,8 @@ export const VISUAL = {
   gridWarpRadius: 260,
   gridWarpAmount: 13,
   gridSubdivisions: 10,
+  /** World units between grid vertices while anything is warping space. */
+  gridWarpStep: 26,
 
   // ---- §16.7 degradation ladder ----
   /** 1: vertex jitter on player effects (Instability I). */
