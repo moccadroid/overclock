@@ -1927,6 +1927,35 @@ the amount was not.
 
 ---
 
+## D-94 · BUG · Filtering the stage made everything translucent
+
+A filter renders its subject into a **transparent** texture before shading it.
+Half this game composites additively, and additive blending against transparency
+does not give the same result as additive blending against the opaque canvas —
+accumulated alpha comes out low, so the whole scene arrived faded and every
+enemy looked see-through.
+
+`renderer.background` cannot fix it: that clears the canvas, not the filter's
+render target. So there is an opaque backdrop sprite first in the stage now, and
+it follows the Meltdown background tint since it is what the player actually
+sees.
+
+The same commit removes a second, subtler version of the same mistake. `glow`
+was implemented as `worldLayer.alpha`, and alpha can only ever make something
+*dimmer* — a control meant to make things burn hotter was fading them instead,
+and above 1 it silently did nothing at all. Glow is now an extra additive copy
+of the unblurred scene: adding the scene to itself is what actually brightens it.
+
+## D-95 · SETTLED · An FPS counter
+
+Top centre, one shade above the background. Smoothed, because a per-frame number
+is unreadable and always looks worse than the frame rate actually is. Findable
+when you go looking, invisible when you are not — which matters more than usual
+here, since the thing you most want to measure is a screen so full of light that
+a bright readout would be lost in it.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

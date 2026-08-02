@@ -51,6 +51,9 @@ export class Hud {
   private readonly engine: HTMLElement;
   private notice = '';
   private noticeUntil = 0;
+  private readonly fps: HTMLElement;
+  /** Smoothed, because a per-frame number is unreadable and always looks worse. */
+  private fpsAverage = 60;
 
   constructor(root: HTMLElement) {
     const make = (id: string): HTMLElement => {
@@ -79,6 +82,13 @@ export class Hud {
     this.engine = document.createElement('div');
     this.engine.id = 'hud-engine';
     root.appendChild(this.engine);
+
+    // Quiet by design: a number you can find when you go looking and never
+    // notice when you are not. It sits above everything so a full screen of
+    // light cannot hide it, which is exactly when you want to read it.
+    this.fps = document.createElement('div');
+    this.fps.id = 'hud-fps';
+    root.appendChild(this.fps);
   }
 
   /** A transient line for things that have no permanent home — mute, mostly. */
@@ -87,8 +97,15 @@ export class Hud {
     this.noticeUntil = performance.now() / 1000 + 1.8;
   }
 
+  /** Called every frame; the display only refreshes with the rest of the HUD. */
+  sample(frameDt: number): void {
+    if (frameDt <= 0) return;
+    this.fpsAverage += (1 / frameDt - this.fpsAverage) * 0.08;
+  }
+
   update(world: World): void {
     const p = world.player;
+    this.fps.textContent = `${Math.round(this.fpsAverage)} fps`;
 
     this.xpbar.style.width = `${(world.xp / world.xpToNext) * 100}%`;
 

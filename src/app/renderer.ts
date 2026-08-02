@@ -13,7 +13,7 @@
  * The brightness hierarchy in §16.2 is a law, not a guideline: the player is the
  * only object at full luminance, so you can find yourself in any chaos.
  */
-import { Application, Container, Graphics, Text } from 'pixi.js';
+import { Application, Container, Graphics, Sprite, Text, Texture } from 'pixi.js';
 import { TUNABLE } from '../sim/tunables';
 import type { Hue } from '../sim/types';
 import type { TerminalKind, World } from '../sim/world';
@@ -77,6 +77,21 @@ export class Renderer {
   private readonly gFx = new Graphics();
   private readonly gPlayer = new Graphics();
   private readonly gIndicators = new Graphics();
+  /**
+   * An opaque backdrop, first in the stage.
+   *
+   * A filter renders its subject into a *transparent* texture before shading it.
+   * Half this game composites additively, and additive blending against
+   * transparency does not produce the same result as additive blending against
+   * the opaque canvas — the accumulated alpha comes out low, so the whole scene
+   * arrives faded and every enemy looks see-through. Painting a solid rectangle
+   * underneath everything gives the filter something to blend onto and the
+   * problem disappears.
+   *
+   * `renderer.background` cannot do this job: it clears the canvas, not the
+   * filter's render target.
+   */
+  private readonly backdrop = new Sprite(Texture.WHITE);
 
   private viewWidth = VIEW_WIDTH_MIN;
   private world!: World;
@@ -122,14 +137,16 @@ export class Renderer {
       this.gProjectiles,
       this.gPlayer,
     );
-    // Emissive brightness before the blur pass. Raising this is what makes the
-    // glow have something hot to work with, which is a different knob from how
-    // wide the glow spreads — §16.1 separates them and so does the settings pane.
-    this.worldLayer.alpha = VIEW.glow;
     this.bloom.emissive.addChild(this.worldLayer);
     this.screenLayer.addChild(this.gIndicators);
 
-    this.app.stage.addChild(this.structureLayer, this.bloom.output, this.screenLayer);
+    this.backdrop.tint = PALETTE.background;
+    this.app.stage.addChild(
+      this.backdrop,
+      this.structureLayer,
+      this.bloom.output,
+      this.screenLayer,
+    );
 
     this.drawRuins();
     this.layout();
@@ -141,6 +158,8 @@ export class Renderer {
     const aspect = this.app.screen.width / Math.max(1, this.app.screen.height);
     this.viewWidth = Math.min(VIEW_WIDTH_MAX, Math.max(VIEW_WIDTH_MIN, VIEW_HEIGHT * aspect));
     this.camera.setViewSize(this.viewWidth, VIEW_HEIGHT);
+    this.backdrop.width = this.app.screen.width;
+    this.backdrop.height = this.app.screen.height;
     this.bloom.resize();
     this.lights?.resize();
     if (this.lights) this.post.setLightTexture(this.lights.source);
@@ -186,7 +205,6 @@ export class Renderer {
     this.lootPhase += frameDt * 3.6;
     this.updateShake(frameDt);
     this.applyTransform();
-    this.worldLayer.alpha = VIEW.glow;
 
     const heat = Math.min(1, world.budget.heat / 100);
     const tier = world.budget.tier;
@@ -212,13 +230,12 @@ export class Renderer {
     this.bloom.setAberration(Math.min(1, (tier >= 2 ? 0.5 + 0.5 * heat : 0) + melt * 0.55));
     this.bloom.setTear(world.budget.stalled ? (this.jitter(1) > 0 ? 1 : -1) * 0.6 : melt * 0.12);
     this.bloom.setBloom(VISUAL.bloomIntensity * VIEW.bloom * (1 + heat * 0.35 + melt * 0.5));
+    this.bloom.setGlow(VIEW.glow);
     // Step 5: the background lightens toward white as the final minutes approach.
     // The world overexposes.
-    this.app.renderer.background.color = mix(
-      PALETTE.background,
-      0x243044,
-      Math.min(0.85, melt * 0.55),
-    );
+    const background = mix(PALETTE.background, 0x243044, Math.min(0.85, melt * 0.55));
+    this.app.renderer.background.color = background;
+    this.backdrop.tint = background;
     // §16.7 — the degradation ladder pushes whatever preset the player chose
     // further than they asked, which is how Heat and Meltdown stay legible as
     // *damage to the picture* rather than as a separate effect.

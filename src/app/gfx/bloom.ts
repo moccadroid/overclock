@@ -30,6 +30,8 @@ export class BloomPipeline {
 
   private texture: RenderTexture;
   private readonly base = new Sprite();
+  /** An unblurred additive copy — see setGlow. */
+  private readonly hot = new Sprite();
   /**
    * Three additive glow copies at widening blur radii.
    *
@@ -68,6 +70,7 @@ export class BloomPipeline {
 
     for (const sprite of [
       this.base,
+      this.hot,
       this.glow,
       this.glowWide,
       this.glowHuge,
@@ -76,6 +79,8 @@ export class BloomPipeline {
     ]) {
       sprite.texture = this.texture;
     }
+    this.hot.blendMode = 'add';
+    this.hot.alpha = 0;
     this.glow.filters = [this.blur];
     this.glowWide.filters = [this.blurWide];
     this.glowHuge.filters = [this.blurHuge];
@@ -95,6 +100,7 @@ export class BloomPipeline {
 
     this.output.addChild(
       this.base,
+      this.hot,
       this.fringeR,
       this.fringeB,
       this.glow,
@@ -111,6 +117,7 @@ export class BloomPipeline {
     this.texture = RenderTexture.create({ width, height, resolution: 1 });
     for (const sprite of [
       this.base,
+      this.hot,
       this.glow,
       this.glowWide,
       this.glowHuge,
@@ -135,6 +142,19 @@ export class BloomPipeline {
    * Bloom past 1x spills into the wider copies rather than being thrown away.
    * 1 is the tuned §16 baseline; 4 is a deliberate excess and looks like one.
    */
+  /**
+   * How hot the emissive layer burns before any of it spreads.
+   *
+   * Applied as an extra additive copy of the *unblurred* scene rather than as
+   * alpha on the layer itself. Alpha can only ever make something dimmer — it
+   * was being used to make things brighter, which is why raising it faded the
+   * picture instead. Adding the scene to itself is what actually brightens it.
+   */
+  setGlow(amount: number): void {
+    this.base.alpha = 1;
+    this.hot.alpha = Math.max(0, amount - 1);
+  }
+
   setBloom(intensity: number): void {
     this.glow.alpha = Math.min(1.4, intensity);
     this.glowWide.alpha = Math.max(0, Math.min(1.1, intensity - 1.2)) * 0.75;

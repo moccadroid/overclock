@@ -316,6 +316,7 @@ export class Game {
     this.stinger.update(elapsed);
 
     // The HUD is text-heavy; 20Hz is plenty and keeps DOM work off the frame.
+    this.hud.sample(elapsed);
     this.uiTimer += elapsed;
     if (this.uiTimer > 0.05) {
       this.uiTimer = 0;
