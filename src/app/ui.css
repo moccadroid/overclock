@@ -1277,6 +1277,15 @@
   flex: none;
   color: #46586e;
 }
+.cx-dmg {
+  color: #c48a80;
+}
+.cx-pct {
+  color: #7a3a34;
+}
+.cx-safe {
+  color: #4fbf87;
+}
 
 /* §15.3 — the Discovery stinger. Never modal: you earn most of these mid-cascade
    with the screen full, and a pause here would punish the behaviour it rewards. */

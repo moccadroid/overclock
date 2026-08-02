@@ -268,6 +268,17 @@ export interface DamageSource {
   mode?: string;
 }
 
+/** A blow landed on the player. Presentation-only, like VisualDeath. */
+export interface VisualHurt {
+  x: number;
+  y: number;
+  amount: number;
+  /** What did it — the enemy's name, or the hazard's. */
+  label: string;
+  /** Fraction of max Integrity, so the renderer can size the shout. */
+  severity: number;
+}
+
 export interface VisualDeath {
   x: number;
   y: number;
@@ -424,6 +435,15 @@ export class World {
   fx: Fx[] = [];
   /** Drained by the renderer each frame; capped so a headless run cannot grow it. */
   visualDeaths: VisualDeath[] = [];
+  /**
+   * §17.1 — every blow you take, as a number, drained by the renderer.
+   *
+   * Damage numbers are usually noise: eight thousand kills a run means eight
+   * thousand of them, and none is worth reading. Damage *taken* is the opposite
+   * — i-frames mean at most two a second, and until now you could only learn how
+   * hard a Lancer hits by dying and reading the post-mortem.
+   */
+  visualHurts: VisualHurt[] = [];
 
   fuel: Record<Hue, number> = { thermal: 0, voltaic: 0, void: 0 };
   /**
@@ -2080,6 +2100,15 @@ export class World {
     if (tallied) tallied.amount += amount;
     else this.damageBySource.set(cause.id, { source: cause, amount });
     this.pushFx('hurt', 'thermal', p.x, p.y, 0, [], 0.14);
+    if (this.visualHurts.length < 32) {
+      this.visualHurts.push({
+        x: p.x,
+        y: p.y,
+        amount,
+        label: cause.label,
+        severity: p.maxIntegrity > 0 ? amount / p.maxIntegrity : 0,
+      });
+    }
     this.emit({ type: 'wound', depth: 0, x: p.x, y: p.y });
     if (p.integrity <= 0) {
       p.integrity = 0;

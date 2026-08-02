@@ -77,6 +77,8 @@ export class Renderer {
   private viewWidth = VIEW_WIDTH_MIN;
   private world!: World;
   private readonly beaconLabels: Text[] = [];
+  /** §17.1 — floating damage-taken numbers. Pooled: Text allocation is not free. */
+  private readonly hurtLabels: { text: Text; life: number; x: number; y: number }[] = [];
 
   /** §17.2 — screenshake: tiny, frequent, hard ceiling regardless of chaos. */
   private shake = 0;
@@ -166,6 +168,7 @@ export class Renderer {
     }
 
     this.drainDeaths(world);
+    this.drainHurts(world, frameDt);
     this.trackDash(world);
     this.particles.update(frameDt);
     this.lootPhase += frameDt * 3.6;
@@ -224,6 +227,62 @@ export class Renderer {
       this.shake = Math.min(VISUAL.shakeMax, this.shake + VISUAL.shakePerKill * 0.12);
     }
     world.visualDeaths.length = 0;
+  }
+
+  /**
+   * Damage numbers, but only for damage taken.
+   *
+   * A number over every kill is eight thousand numbers a run and none of them
+   * gets read. A number over every blow *you* take is at most two a second —
+   * i-frames see to that — and it is the one piece of combat information the
+   * game never gave you. It is also the answer to "why am I suddenly dead": you
+   * see the 12 land, and which shape sent it.
+   */
+  private drainHurts(world: World, frameDt: number): void {
+    for (const hurt of world.visualHurts) {
+      const entry =
+        this.hurtLabels.find((h) => h.life <= 0) ??
+        (this.hurtLabels.length < 24
+          ? (() => {
+              const text = new Text({
+                text: '',
+                style: {
+                  fontFamily: 'monospace',
+                  fontSize: 15,
+                  fill: PALETTE.signal,
+                  letterSpacing: 1,
+                },
+              });
+              text.anchor.set(0.5, 1);
+              this.worldLayer.addChild(text);
+              const made = { text, life: 0, x: 0, y: 0 };
+              this.hurtLabels.push(made);
+              return made;
+            })()
+          : this.hurtLabels[0]!);
+
+      // The name rides along, because "12" tells you how bad and the label tells
+      // you what to do about it next time.
+      entry.text.text = `−${Math.round(hurt.amount)}  ${hurt.label.toUpperCase()}`;
+      entry.text.style.fontSize = 13 + Math.min(1, hurt.severity * 4) * 9;
+      entry.life = 1.1;
+      // Offset so consecutive hits do not stack into an unreadable pile.
+      entry.x = hurt.x + this.jitter(26);
+      entry.y = hurt.y - 34;
+    }
+    world.visualHurts.length = 0;
+
+    for (const h of this.hurtLabels) {
+      if (h.life <= 0) {
+        h.text.visible = false;
+        continue;
+      }
+      h.life -= frameDt;
+      h.y -= frameDt * 26;
+      h.text.visible = true;
+      h.text.position.set(h.x, h.y);
+      h.text.alpha = Math.min(1, h.life * 2.2);
+    }
   }
 
   private trackDash(world: World): void {

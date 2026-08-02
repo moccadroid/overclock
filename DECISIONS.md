@@ -1310,6 +1310,38 @@ since walking to it would buy you exactly nothing.
 
 ---
 
+## D-65 · SETTLED · Damage numbers, but only for damage taken
+
+A number over every kill is eight thousand numbers a run and not one of them
+gets read. A number over every blow *you* take is at most two a second — i-frames
+see to that — and it was the one piece of combat information the game never
+gave you. Until now the only way to learn what a Lancer hits for was to die and
+read the post-mortem.
+
+Each blow floats `−14  WARDEN`, sized by its share of your Integrity, so a Mote
+graze and a Warden slam are different events at a glance rather than the same
+red flash. The name rides along because the number tells you how bad and the
+label tells you what to do about it next time.
+
+The Codex was rewritten to lead with the same thing. It used to open with hp and
+speed — facts *about* the enemy — when what a Codex entry is for is deciding how
+to treat the thing on sight. Damage now comes first, with its share of a
+starting Integrity bar beside it, because "12" means nothing until you know you
+have a hundred. Suppressor reads "harmless on contact", which is the entry
+earning its place: it is the only enemy where the right instinct is to ignore it
+and deal with the zone instead.
+
+## D-66 · DROPPED · Blueprints (§15.2)
+
+"A new run is a new run." §15.2 is explicit that Blueprints never pre-load nodes
+— they are a recipe card you read, and a wishlist overlay during a draft. Which
+means the feature is a note-to-self with a UI attached: it exists to satisfy the
+word "persistence" rather than to do anything. Cut. The Library's Discovery
+hints already do the "here is a thing to aim at" job, and they aim at something
+you can actually get.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

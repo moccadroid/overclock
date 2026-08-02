@@ -11,7 +11,8 @@
  * them. A lock you can read is an objective; a lock you cannot is a wall.
  */
 import { ACTIONS, AXIOMS, DISCOVERIES, ENEMIES, MODIFIERS, TRIGGERS } from '../content/index';
-import type { NodeDef } from '../sim/types';
+import type { EnemyDef, NodeDef } from '../sim/types';
+import { TUNABLE } from '../sim/tunables';
 import type { Library } from '../meta/profile';
 import { BRANDING } from '../branding';
 import { shapeSvg } from './gfx/shapes';
@@ -269,12 +270,7 @@ export class TitleScreen {
         `<div class="cx-name">${known ? e.name : 'NO RECORD'}</div>` +
         `<div class="cx-desc">${known ? e.description : 'Kill one to open this entry.'}</div>` +
         `</div>` +
-        (known
-          ? `<div class="cx-stats">${e.hp} hp · ${e.speed} speed` +
-            (e.contactDamage > 0 ? ` · ${e.contactDamage} contact` : '') +
-            (e.elite ? ` · ELITE` : '') +
-            `</div>`
-          : '') +
+        (known ? `<div class="cx-stats">${threatOf(e)}</div>` : '') +
         `</div>`
       );
     }).join('');
@@ -286,6 +282,34 @@ export class TitleScreen {
       `</div>`
     );
   }
+}
+
+/**
+ * What this thing does to you, in the order you need it.
+ *
+ * The old line led with hp and speed — statistics about the enemy. What a Codex
+ * entry is *for* is deciding how to treat the thing on sight, and that starts
+ * with how hard it hits and how it reaches you. Damage is shown as a share of a
+ * starting Integrity bar too, because "12" means nothing until you know you have
+ * a hundred.
+ */
+function threatOf(e: EnemyDef): string {
+  const parts: string[] = [];
+  const hit = (amount: number, how: string): string => {
+    const pct = Math.round((amount / TUNABLE.playerIntegrity) * 100);
+    return `<span class="cx-dmg">${amount} ${how}</span> <span class="cx-pct">${pct}%</span>`;
+  };
+
+  if (e.beamDamage) parts.push(hit(e.beamDamage, 'beam'));
+  if (e.contactDamage > 0) parts.push(hit(e.contactDamage, 'contact'));
+  if (e.fuelSteal) parts.push(`<span class="cx-dmg">${e.fuelSteal} fuel</span> stolen`);
+  if (parts.length === 0) parts.push('<span class="cx-safe">harmless on contact</span>');
+
+  parts.push(`${e.hp} hp`, `${e.speed} speed`);
+  if (e.zoneRadius) parts.push('suppression zone');
+  if (e.shieldArc) parts.push('front shield');
+  if (e.elite) parts.push('ELITE');
+  return parts.join(' · ');
 }
 
 function chainOf(row: { trigger: string; modifiers: readonly string[]; action: string }): string {
