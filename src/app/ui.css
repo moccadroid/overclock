@@ -913,17 +913,31 @@
   margin-bottom: 16px;
 }
 .postmortem .pm-blow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.postmortem .pm-name {
   color: var(--signal);
-  margin-bottom: 14px;
+  font-size: 15px;
+  letter-spacing: 0.08em;
+}
+.postmortem .pm-mode {
+  color: #46586e;
+}
+.postmortem .pm-glyph {
+  flex: none;
+  overflow: visible;
 }
 .postmortem .pm-row {
   display: flex;
   gap: 8px;
-  align-items: baseline;
-  line-height: 1.6;
+  align-items: center;
+  line-height: 1.7;
 }
 .postmortem .pm-src {
-  flex: 0 0 42%;
+  flex: 0 0 38%;
   color: var(--ink);
   overflow: hidden;
   text-overflow: ellipsis;

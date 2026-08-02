@@ -22,6 +22,7 @@ import { Camera } from './camera';
 import { BAND, PALETTE, VISUAL } from './visual';
 import { BloomPipeline } from './gfx/bloom';
 import { ParticleField } from './gfx/particles';
+import { shapeCoreRadius, shapeOutline } from './gfx/shapes';
 
 const HUE_COLOR: Record<Hue, number> = {
   thermal: PALETTE.thermal,
@@ -783,11 +784,9 @@ export class Renderer {
         g.fill({ color, alpha: 0.08 * health });
       }
 
-      // Mote and Drifter share a behaviour and therefore share a silhouette
-      // (§10.1), which left them distinguishable only by size. The Drifter gets
-      // a concentric core so the two read apart at a glance.
-      if (def.shape === 'circle') {
-        g.circle(e.x, e.y, r * 0.45).stroke({ width: 1.5, color, alpha: BAND.inFlight * born });
+      const core = shapeCoreRadius(def.shape, r);
+      if (core > 0) {
+        g.circle(e.x, e.y, core).stroke({ width: 1.5, color, alpha: BAND.inFlight * born });
       }
 
       if (e.enriched) {
@@ -1172,63 +1171,6 @@ const CORNERS = [
  * what it does from silhouette alone, so every behaviour gets its own outline
  * and none of them share one.
  */
-function shapeOutline(
-  shape: string,
-  cx: number,
-  cy: number,
-  r: number,
-  rotation: number,
-): [number, number][] {
-  const points: [number, number][] = [];
-
-  if (shape === 'crescent') {
-    // Open arc: reads as "takes a bite out of something".
-    for (let i = 0; i <= 12; i++) {
-      const a = rotation + 0.9 + (i / 12) * (Math.PI * 1.5);
-      points.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]);
-    }
-    return points;
-  }
-  if (shape === 'line') {
-    // A bar aligned to its aim: it points where the beam will go.
-    const ux = Math.cos(rotation);
-    const uy = Math.sin(rotation);
-    return [
-      [cx - ux * r * 1.5, cy - uy * r * 1.5],
-      [cx + ux * r * 1.5, cy + uy * r * 1.5],
-    ];
-  }
-
-  const sides =
-    shape === 'triangle'
-      ? 3
-      : shape === 'diamond' || shape === 'square'
-        ? 4
-        : shape === 'pentagon'
-          ? 5
-          : shape === 'hexagon'
-            ? 6
-            : shape === 'dot'
-              ? 6
-              : 16;
-  const rot =
-    shape === 'square'
-      ? Math.PI / 4
-      : shape === 'diamond'
-        ? 0
-        : shape === 'triangle'
-          ? rotation
-          : shape === 'pentagon'
-            ? -Math.PI / 2
-            : 0;
-  for (let i = 0; i < sides; i++) {
-    const a = rot + (i / sides) * Math.PI * 2;
-    const radius = shape === 'diamond' && i % 2 === 1 ? r * 0.62 : r;
-    points.push([cx + Math.cos(a) * radius, cy + Math.sin(a) * radius]);
-  }
-  return points;
-}
-
 /**
  * §11.1 — enemies visibly desaturate toward the hue you have been over-using, so
  * adaptive resistance is legible in the world rather than only in the HUD.

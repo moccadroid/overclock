@@ -249,6 +249,23 @@ export interface Containment extends SpatialItem {
  * frame, never read by the simulation, and deliberately excluded from the state
  * hash so it cannot affect determinism.
  */
+/**
+ * §14 — something that took Integrity off you. Carries the enemy's identity, not
+ * a sentence about it: the Results screen draws the silhouette you have been
+ * learning all run, and a name you can match to it.
+ */
+export interface DamageSource {
+  /** Stable tally key. The enemy's id, or a slug for a hazard. */
+  id: string;
+  label: string;
+  /** Set when an enemy dealt it. */
+  enemyId?: string;
+  /** §10.1 silhouette, so the UI need not look the enemy up again. */
+  shape?: string;
+  /** How it reached you — contact, beam, detonation, containment. */
+  mode?: string;
+}
+
 export interface VisualDeath {
   x: number;
   y: number;
@@ -424,9 +441,12 @@ export class World {
    * §14 — a Results screen that cannot say how you died teaches nothing. The
    * final blow answers "what got me"; the tally answers "what was actually
    * killing me all run", which is usually a different thing.
+   *
+   * Keyed by source id so a Lancer's beam and its body are one entry: the thing
+   * to recognise next run is the Lancer, not the delivery mechanism.
    */
-  damageBySource = new Map<string, number>();
-  deathCause: string | null = null;
+  damageBySource = new Map<string, { source: DamageSource; amount: number }>();
+  deathCause: DamageSource | null = null;
 
   threat = 0;
   /** §12 — the composition currently being fed into the arena. */
@@ -1688,7 +1708,7 @@ export class World {
     const across = c.dirX !== 0 ? p.x - c.x : p.y - c.y;
     const inGap = Math.abs(along - c.gapAt) < TUNABLE.sweeperGapWidth / 2;
     if (!inGap && Math.abs(across) < 22 + TUNABLE.playerRadius) {
-      this.hurtPlayer(TUNABLE.sweeperDamage, 'Sweeper');
+      this.hurtPlayer(TUNABLE.sweeperDamage, { id: 'sweeper', label: 'Sweeper', mode: 'containment' });
     }
   }
 
@@ -1703,7 +1723,11 @@ export class World {
     for (const gap of c.gapAngles) {
       if (Math.abs(angleDelta(angle, gap)) < 0.34) return;
     }
-    this.hurtPlayer(this.player.maxIntegrity * TUNABLE.cellDamagePercent, 'Containment Cell');
+    this.hurtPlayer(this.player.maxIntegrity * TUNABLE.cellDamagePercent, {
+      id: 'cell',
+      label: 'Containment Cell',
+      mode: 'containment',
+    });
   }
 
   /** §11.4 — shrinks the playable arena, forcing motion. */
@@ -1714,7 +1738,13 @@ export class World {
     else if (c.dirX < 0) inside = p.x > this.arena.width - c.advance;
     else if (c.dirY > 0) inside = p.y < c.advance;
     else inside = p.y > this.arena.height - c.advance;
-    if (inside) this.hurtPlayer(TUNABLE.nullFrontDamage, 'Null Front');
+    if (inside) {
+      this.hurtPlayer(TUNABLE.nullFrontDamage, {
+        id: 'nullfront',
+        label: 'Null Front',
+        mode: 'containment',
+      });
+    }
   }
 
   private mark(kind: TraceMarkerKind, label: string): void {
@@ -1967,7 +1997,13 @@ export class World {
       const dx = this.player.x - enemy.x;
       const dy = this.player.y - enemy.y;
       const reach = TUNABLE.affixVolatileRadius + TUNABLE.playerRadius;
-      if (dx * dx + dy * dy < reach * reach) this.hurtPlayer(TUNABLE.affixVolatileDamage, `${def.name} (Volatile)`);
+      if (dx * dx + dy * dy < reach * reach) this.hurtPlayer(TUNABLE.affixVolatileDamage, {
+          id: def.id,
+          label: def.name,
+          enemyId: def.id,
+          shape: def.shape,
+          mode: 'Volatile detonation',
+        });
     }
 
     if (def.splitsInto) {
@@ -1994,13 +2030,15 @@ export class World {
     });
   }
 
-  private hurtPlayer(amount: number, cause: string): void {
+  private hurtPlayer(amount: number, cause: DamageSource): void {
     const p = this.player;
     if (p.iframes > 0) return;
     p.integrity -= amount;
     p.iframes = 0.5;
     this.stats.damageTaken += amount;
-    this.damageBySource.set(cause, (this.damageBySource.get(cause) ?? 0) + amount);
+    const tallied = this.damageBySource.get(cause.id);
+    if (tallied) tallied.amount += amount;
+    else this.damageBySource.set(cause.id, { source: cause, amount });
     this.pushFx('hurt', 'thermal', p.x, p.y, 0, [], 0.14);
     this.emit({ type: 'wound', depth: 0, x: p.x, y: p.y });
     if (p.integrity <= 0) {
@@ -2262,7 +2300,15 @@ export class World {
       this.pushFx('hurt', fullest, this.player.x, this.player.y, 0, [], 0.16);
       return;
     }
-    if (def.contactDamage > 0) this.hurtPlayer(def.contactDamage, `${def.name} contact`);
+    if (def.contactDamage > 0) {
+      this.hurtPlayer(def.contactDamage, {
+        id: def.id,
+        label: def.name,
+        enemyId: def.id,
+        shape: def.shape,
+        mode: 'contact',
+      });
+    }
   }
 
   /**
@@ -2369,7 +2415,13 @@ export class World {
       const along = px * ux + py * uy;
       const across = Math.abs(px * -uy + py * ux);
       if (along > 0 && across < 16 + TUNABLE.playerRadius) {
-        this.hurtPlayer(def.beamDamage ?? 16, `${def.name} beam`);
+        this.hurtPlayer(def.beamDamage ?? 16, {
+          id: def.id,
+          label: def.name,
+          enemyId: def.id,
+          shape: def.shape,
+          mode: 'beam',
+        });
       }
       this.pushFx(
         'chain',
@@ -2426,7 +2478,11 @@ export class World {
         const dy = this.player.y - proj.y;
         const r = TUNABLE.playerRadius + proj.radius;
         if (dx * dx + dy * dy < r * r) {
-          this.hurtPlayer(4, 'your own corrupted fire');
+          this.hurtPlayer(4, {
+            id: 'corrupted',
+            label: 'Your own corrupted fire',
+            mode: 'Instability II',
+          });
           proj.alive = false;
           continue;
         }

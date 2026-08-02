@@ -1145,15 +1145,20 @@ describe('pressure attacks the build, not the health bar (GDD §11)', () => {
     // disagree — that is the interesting case, and the one worth reporting.
     expect(w.spawnEnemy('mote', w.player.x + 10, w.player.y, 'thermal')).toBeTruthy();
     for (let i = 0; i < 300 && w.player.alive; i++) w.advance(NO_INPUT);
-    const chipped = [...w.damageBySource.keys()];
-    expect(chipped.some((k) => k.includes('contact'))).toBe(true);
+    const tallied = w.damageBySource.get('mote');
+    expect(tallied?.amount).toBeGreaterThan(0);
+    // The name and the silhouette both, so Results can draw the thing you saw
+    // rather than describe it in prose you have to translate back.
+    expect(tallied?.source.label).toBe('Mote');
+    expect(tallied?.source.shape).toBe('dot');
+    expect(tallied?.source.mode).toBe('contact');
 
     // Now let it finish the job and confirm the cause is captured.
     w.player.integrity = 1;
     for (let i = 0; i < 300 && w.player.alive; i++) w.advance(NO_INPUT);
     expect(w.player.alive).toBe(false);
-    expect(w.deathCause).toBeTruthy();
-    expect(w.damageBySource.get(w.deathCause!)).toBeGreaterThan(0);
+    expect(w.deathCause?.id).toBe('mote');
+    expect(w.damageBySource.get(w.deathCause!.id)?.amount).toBeGreaterThan(0);
   });
 });
 
