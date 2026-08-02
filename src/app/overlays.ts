@@ -18,7 +18,7 @@ import {
 } from '../sim/draft';
 import { MODIFIER_BY_ID, NODE_BY_ID } from '../content/index';
 import type { World } from '../sim/world';
-import { LOADBEARING } from '../sim/tunables';
+import { LOADBEARING, TUNABLE } from '../sim/tunables';
 import { inertFields, slotAccepts, type NodeSlot } from '../sim/engine';
 import { renderResults } from './results';
 import { renderPrimer } from './primer';
@@ -349,6 +349,8 @@ export class EditorOverlay extends Overlay {
       panel.appendChild(notice);
     }
 
+    panel.appendChild(this.chassisStrip(world));
+
     const hint = document.createElement('div');
     hint.className = 'hint';
     hint.textContent =
@@ -421,6 +423,70 @@ export class EditorOverlay extends Overlay {
     ops.append(confirm, cancel);
     bar.append(text, ops);
     return bar;
+  }
+
+  /**
+   * Everything you have collected that is not a node. Stat cards used to vanish
+   * on pickup — you took +4% crit and then had no way to ever see your crit
+   * chance again, which makes drafting one an act of faith.
+   *
+   * Shows the resulting value, not the bonus: "crit 21%" is a number you can
+   * reason about, "+16% crit" is a number you have to add to one you were never
+   * told. The delta rides along in dim text for the same reason.
+   */
+  private chassisStrip(world: World): HTMLElement {
+    const b = world.bonuses;
+    const strip = document.createElement('div');
+    strip.className = 'chassis';
+
+    const cell = (
+      label: string,
+      value: string,
+      delta: string,
+      title: string,
+    ): string =>
+      `<span class="stat" title="${title}"><span class="lbl">${label}</span>` +
+      `<span class="val">${value}</span>` +
+      (delta ? `<span class="delta">${delta}</span>` : '') +
+      `</span>`;
+
+    // The three global output multipliers compound, so show the product. Their
+    // individual sizes are on the Scrap and Kernel readouts in the header above.
+    const damage = (1 + b.power) * world.engine.globalOutput;
+
+    strip.innerHTML =
+      `<span class="lead">CHASSIS</span>` +
+      cell(
+        'DAMAGE',
+        `×${damage.toFixed(2)}`,
+        b.power > 0 ? `Gain +${Math.round(b.power * 100)}%` : '',
+        'Every multiplier on your output at once: Gain cards, Scrap stacks and Kernel',
+      ) +
+      cell(
+        'CRIT',
+        `${Math.round((TUNABLE.critChance + b.crit) * 100)}%`,
+        b.crit > 0 ? `+${Math.round(b.crit * 100)}` : '',
+        'Chance any hit deals double and fires On Crit',
+      ) +
+      cell(
+        'SPEED',
+        `${Math.round(TUNABLE.playerMoveSpeed * (1 + b.speed))}`,
+        b.speed > 0 ? `+${Math.round(b.speed * 100)}%` : '',
+        'Move speed in world units per second',
+      ) +
+      cell(
+        'PICKUP',
+        `${Math.round(TUNABLE.collectRadius * (1 + b.magnet))}`,
+        b.magnet > 0 ? `+${Math.round(b.magnet * 100)}%` : '',
+        'Radius at which fuel and XP come to you',
+      ) +
+      cell(
+        'INTEGRITY',
+        `${Math.ceil(world.player.integrity)}/${world.player.maxIntegrity}`,
+        '',
+        'Your health. Plating raises the ceiling and repairs on pickup',
+      );
+    return strip;
   }
 
   /** Called by chips: stage a scrap rather than performing one. */

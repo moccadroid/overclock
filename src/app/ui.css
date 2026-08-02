@@ -909,6 +909,36 @@
   margin-bottom: 16px;
   overflow-x: auto;
 }
+/* §19.6 — the collected stats, shown where the build is read. */
+.chassis {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 22px;
+  margin: 14px 0 4px;
+  padding-top: 12px;
+  border-top: 1px solid #22334a;
+}
+.chassis .lead {
+  color: #3f5570;
+  letter-spacing: 0.22em;
+}
+.chassis .stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.chassis .lbl {
+  color: #46586e;
+  letter-spacing: 0.14em;
+}
+.chassis .val {
+  color: var(--ink-bright);
+}
+.chassis .delta {
+  color: #4fbf87;
+}
+
 .postmortem {
   margin-bottom: 16px;
 }
