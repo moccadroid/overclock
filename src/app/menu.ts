@@ -18,7 +18,7 @@ import { BRANDING } from '../branding';
 import { shapeSvg } from './gfx/shapes';
 import { inspector } from './overlays';
 import { renderPrimer } from './primer';
-import { applyPreset, VIEW_PRESETS } from './visual';
+import { applyEffects, VIEW_EFFECTS } from './visual';
 import type { Audio } from '../audio/audio';
 import { TRACK_BY_ID, trackForAxiom } from '../audio/tracks';
 import { DEMOS, type Demo } from '../audio/demos';
@@ -217,16 +217,25 @@ export class TitleScreen {
       this.library.setAudio(muted, this.library.snapshot.settings.volume);
       this.render();
     });
-    for (const card of panel.querySelectorAll<HTMLElement>('[data-preset]')) {
+    for (const card of panel.querySelectorAll<HTMLElement>('[data-effect]')) {
       card.addEventListener('click', () => {
-        const id = card.dataset.preset!;
-        this.library.setPreset(id);
+        this.library.toggleEffect(card.dataset.effect!);
         // Applied immediately, and the menu is drawn over the live renderer, so
-        // the change is visible behind this panel as you pick it.
-        applyPreset(id);
+        // the change is visible behind this panel as you make it.
+        applyEffects(this.library.snapshot.settings.effects);
         this.render();
       });
     }
+    panel.querySelector('.fx-all')?.addEventListener('click', () => {
+      const on = this.library.snapshot.settings.effects;
+      const all = VIEW_EFFECTS.map((e) => e.id);
+      const target = on.length === all.length ? [] : all;
+      for (const id of all) {
+        if (target.includes(id) !== on.includes(id)) this.library.toggleEffect(id);
+      }
+      applyEffects(this.library.snapshot.settings.effects);
+      this.render();
+    });
 
     const field = panel.querySelector<HTMLInputElement>('.seed-field');
     field?.addEventListener('input', () => {
@@ -404,25 +413,22 @@ export class TitleScreen {
   /**
    * §20 — settings.
    *
-   * Visuals are presets rather than sliders. Three sliders is eight combinations
-   * that look wrong for every one that looks good, and a slider at 0% turned the
-   * *game* off rather than an effect off, because they multiplied a baseline that
-   * already is the look.
-   *
-   * SCHEMATIC is the floor, not the middle: it is exactly what the game looked
-   * like before any of this existed. Everything above it is a player choosing
-   * excess, and the excess is allowed to be excessive.
+   * Visual effects are toggles, not presets. A preset makes every choice
+   * all-or-nothing: wanting lighting but not scanlines meant taking the bundle
+   * with both. Each toggle is one effect at a value tuned to look right on its
+   * own, and they stack — everything off is §16's schematic with no shader
+   * running at all, everything on is barely legible and meant to be.
    */
   private renderSettings(): string {
     const set = this.library.snapshot.settings;
-    const chosen = set.preset;
+    const on = new Set(set.effects);
 
-    const presets = VIEW_PRESETS.map(
-      (p) =>
-        `<div class="preset${p.id === chosen ? ' on' : ''}" data-preset="${p.id}">` +
-        `<span class="ps-mark">${p.id === chosen ? '▣' : '▢'}</span>` +
-        `<span class="ps-name">${p.name}</span>` +
-        `<span class="ps-note">${p.note}</span>` +
+    const effects = VIEW_EFFECTS.map(
+      (e) =>
+        `<div class="fx${on.has(e.id) ? ' on' : ''}" data-effect="${e.id}">` +
+        `<span class="fx-mark">${on.has(e.id) ? '▣' : '▢'}</span>` +
+        `<span class="fx-name">${e.name}</span>` +
+        `<span class="fx-note">${e.note}</span>` +
         `</div>`,
     ).join('');
 
@@ -444,13 +450,15 @@ export class TitleScreen {
       `<span class="set-note">M toggles this in a run too</span>` +
       `</div>` +
 
-      `<div class="k">look</div>` +
-      `<div class="mu-lead">Schematic is the floor — the drawing with nothing on ` +
-      `top of it. The rest add a real post-processing pass: barrel distortion, ` +
-      `per-channel aberration, scanlines, grain and radial bleed, all on the GPU. ` +
-      `None of it changes the simulation, and Heat and Meltdown still push whatever ` +
-      `you pick further than you asked.</div>` +
-      presets +
+      `<div class="k">effects — ${on.size}/${VIEW_EFFECTS.length} on</div>` +
+      `<div class="mu-lead">Stack them. Everything off is the plain drawing with ` +
+      `no shader running at all; everything on is the arena lit by your own engine ` +
+      `and hard to read, which is the point. Lighting is the one that changes what ` +
+      `the picture is — the rest are lenses over it. None of it touches the ` +
+      `simulation, and Heat and Meltdown push whatever you pick further.</div>` +
+      effects +
+      `<div class="mu-ops"><button class="btn fx-all">` +
+      `${on.size === VIEW_EFFECTS.length ? 'ALL OFF' : 'ALL ON'}</button></div>` +
       `</div>`
     );
   }

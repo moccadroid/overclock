@@ -86,11 +86,11 @@ export interface LibraryData {
     volume: number;
     track: string;
     /**
-     * §20.1 — the chosen visual preset. An id, like everything else here: the
-     * numbers live in `visual.ts` where they can be tuned as a set, and §15.1's
-     * no-numbers guard stays honest by accident rather than by exception.
+     * §20.1 — which visual effects are on. Ids, like everything else here: the
+     * numbers live in `visual.ts` where they can be tuned together, and §15.1's
+     * no-numbers guard stays honest by construction rather than by exception.
      */
-    preset: string;
+    effects: string[];
   };
 }
 
@@ -103,7 +103,7 @@ function emptyData(): LibraryData {
     bestScore: 0,
     bestDepth: 0,
     bestTime: 0,
-    settings: { muted: false, volume: 0.7, track: '', preset: 'schematic' },
+    settings: { muted: false, volume: 0.7, track: '', effects: ['lighting', 'bloom'] },
   };
 }
 
@@ -139,10 +139,7 @@ export class Library {
           // '' means "let the seed choose", which is the default and the one
           // that keeps a shared seed sounding the same for everyone.
           track: typeof parsed.settings?.track === 'string' ? parsed.settings.track : '',
-          preset:
-            typeof parsed.settings?.preset === 'string'
-              ? parsed.settings.preset
-              : base.settings.preset,
+          effects: array(parsed.settings?.effects) ?? base.settings.effects,
         },
       };
     } catch {
@@ -234,8 +231,10 @@ export class Library {
     this.save();
   }
 
-  setPreset(preset: string): void {
-    this.data.settings = { ...this.data.settings, preset };
+  toggleEffect(id: string): void {
+    const on = this.data.settings.effects;
+    const effects = on.includes(id) ? on.filter((e) => e !== id) : [...on, id];
+    this.data.settings = { ...this.data.settings, effects };
     this.save();
   }
 

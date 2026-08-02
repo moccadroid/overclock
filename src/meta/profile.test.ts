@@ -43,10 +43,12 @@ describe('the Library (GDD §15)', () => {
     // — and a loosened guard is how a damage multiplier gets in.
     expect(typeof data.settings).toBe('object');
 
-    // And the visual preset is an *id*, not three numbers. Sliders would put
-    // three floats in the Library, and three floats one refactor away from the
-    // progression fields is how the guard above eventually gets loosened.
-    expect(typeof (data.settings as { preset: unknown }).preset).toBe('string');
+    // And the visual effects are *ids*, not numbers. Sliders would put floats in
+    // the Library, and floats one refactor away from the progression fields is
+    // how the guard above eventually gets loosened.
+    const effects = (data.settings as { effects: unknown }).effects;
+    expect(Array.isArray(effects)).toBe(true);
+    for (const e of effects as unknown[]) expect(typeof e).toBe('string');
   });
 
   it('§15.2 — a fresh account starts with roughly 60% of the node pool', () => {

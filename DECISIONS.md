@@ -1866,6 +1866,40 @@ exactly where it was.
 
 ---
 
+## D-92 · SETTLED · Effects are toggles, and they stack
+
+Presets were the wrong shape twice. As sliders they gave eight combinations that
+look wrong for every one that looks good. As four named bundles they made every
+choice all-or-nothing: wanting lighting but not scanlines meant taking the
+bundle with both and living with it.
+
+Six toggles, each one effect at a value tuned to look right *on its own*:
+
+| | what it does |
+|---|---|
+| **Lighting** | shots light the grid they fly over; a Nova floods the room |
+| **Bloom** | light spills past its edges, three stacked additive passes |
+| **Bleed** | anamorphic streaking outward from the centre of the frame |
+| **Chromatic** | the lens splits colour toward the edges, as real glass does |
+| **Tube** | curved glass, scanlines, darkness in the corners |
+| **Grain** | the black field is never quite black |
+
+Combined by **max**, not sum: two effects that both raise `glow` must not raise
+it twice, and an effect should look like its tuned value whether or not
+something else happens to touch the same field.
+
+Everything off is §16's schematic with no shader on the stage at all — the floor
+has to be *the* floor, or the restrained version stops being reachable and the
+whole pane becomes a correction rather than a choice. Tests assert both halves:
+that all-off leaves every field at its identity, and that every toggle changes
+*something* — a checkbox that lies is the worst kind of setting.
+
+Lighting is the one that matters. The rest are lenses over a picture; lighting
+changes what the picture is. It is first in the list for that reason and on by
+default with Bloom.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

@@ -359,3 +359,45 @@ describe('the audition list (GDD §19.2)', () => {
     expect(new Set(shapes).size).toBe(DEMOS.length);
   });
 });
+
+describe('visual effects (GDD §20.1)', () => {
+  it('everything off is exactly the untouched picture', async () => {
+    // The floor has to be *the* floor. If "all off" differs from not having the
+    // system at all, then §16's restrained schematic is no longer reachable and
+    // the whole settings pane becomes a correction rather than a choice.
+    const { VIEW, applyEffects, VIEW_EFFECTS } = await import('../app/visual');
+    applyEffects([]);
+    expect(VIEW.bloom).toBe(1);
+    expect(VIEW.glow).toBe(1);
+    expect(VIEW.shake).toBe(1);
+    for (const key of ['lit', 'haze', 'barrel', 'aberration', 'scan', 'grain', 'vignette', 'bleed'] as const) {
+      expect(VIEW[key], key).toBe(0);
+    }
+
+    // And every effect must actually do something, or it is a checkbox that
+    // lies — the worst kind of setting.
+    for (const effect of VIEW_EFFECTS) {
+      applyEffects([effect.id]);
+      const changed = (['bloom', 'glow', 'shake'] as const).some((k) => VIEW[k] !== 1);
+      const added = (['lit', 'haze', 'barrel', 'aberration', 'scan', 'grain', 'vignette', 'bleed'] as const)
+        .some((k) => VIEW[k] > 0);
+      expect(changed || added, `"${effect.id}" changes nothing`).toBe(true);
+    }
+    applyEffects([]);
+  });
+
+  it('effects stack without doubling a shared field', async () => {
+    // Combined by max, not sum: two effects that both raise glow should not
+    // raise it twice, and each effect's tuned value is what it should look like
+    // regardless of what else happens to be on.
+    const { VIEW, applyEffects, VIEW_EFFECTS } = await import('../app/visual');
+    const all = VIEW_EFFECTS.map((e) => e.id);
+    applyEffects(all);
+    const together = { ...VIEW };
+
+    let maxGlow = 1;
+    for (const e of VIEW_EFFECTS) maxGlow = Math.max(maxGlow, e.values.glow ?? 1);
+    expect(together.glow).toBe(maxGlow);
+    applyEffects([]);
+  });
+});

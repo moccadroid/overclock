@@ -106,37 +106,40 @@ export type Band = keyof typeof BAND;
 
 
 /**
- * §20.1 — visual presets.
+ * §20.1 — the visual effects, as toggles.
  *
- * Sliders were the wrong control. Three of them means eight combinations that
- * look wrong for every one that looks good, and a "0%" that turned the game off
- * rather than turning an effect off — because they were multipliers over a
- * baseline that already *is* the look.
+ * Presets were the wrong shape twice over. As sliders they gave eight
+ * combinations that look wrong for every one that looks good; as four named
+ * bundles they made every choice all-or-nothing, so wanting lighting but not
+ * scanlines meant picking the bundle that had both and living with it.
  *
- * So: presets, and **SCHEMATIC is the floor, not the middle.** It is exactly what
- * the game looked like before any of this existed — §16's restrained document,
- * which is the design. Everything above it is a player choosing excess, and the
- * excess is allowed to be genuinely excessive.
+ * Toggles are the honest control: each one is a single effect at a value tuned
+ * to look right *on its own*, and they stack. Turn everything off and you have
+ * §16's restrained schematic, unchanged and not paying for a single shader.
+ * Turn everything on and the arena is lit by your own engine and barely legible.
+ *
+ * LIGHTING is the one that matters. The rest are lens dressing on top of a
+ * picture; lighting changes what the picture *is*.
  */
-export interface ViewPreset {
+export interface ViewEffect {
   id: string;
   name: string;
   note: string;
+  /** What this effect contributes. Combined by taking the max of each field. */
+  values: Partial<ViewState>;
+}
+
+export interface ViewState {
   /** Multiplier over VISUAL.bloomIntensity. 1 = the tuned baseline. */
   bloom: number;
   /** Emissive brightness before the blur — how hot things burn. */
   glow: number;
   /** §17.2 screenshake, which some people cannot tolerate at all. */
   shake: number;
-  /**
-   * Real lighting, from the light buffer. `lit` is how much light surfaces
-   * catch — a bolt flying over the grid lighting the grid. `haze` is how much
-   * of it is visible in the air. These are the two that actually change what
-   * the game *is*; everything below them is lens dressing.
-   */
+  /** How much light surfaces catch. See gfx/lights.ts. */
   lit: number;
+  /** How much light is visible in the air. */
   haze: number;
-  /** Post-pass, all zero at the floor. See gfx/post.ts. */
   barrel: number;
   aberration: number;
   scan: number;
@@ -145,78 +148,79 @@ export interface ViewPreset {
   bleed: number;
 }
 
-export const VIEW_PRESETS: ViewPreset[] = [
+const BASE: ViewState = {
+  bloom: 1,
+  glow: 1,
+  shake: 1,
+  lit: 0,
+  haze: 0,
+  barrel: 0,
+  aberration: 0,
+  scan: 0,
+  grain: 0,
+  vignette: 0,
+  bleed: 0,
+};
+
+export const VIEW_EFFECTS: ViewEffect[] = [
   {
-    id: 'schematic',
-    name: 'Schematic',
-    note: 'the drawing, undecorated. What §16 actually asks for.',
-    bloom: 1,
-    glow: 1,
-    shake: 1,
-    lit: 0,
-    haze: 0,
-    barrel: 0,
-    aberration: 0,
-    scan: 0,
-    grain: 0,
-    vignette: 0,
-    bleed: 0,
+    id: 'lighting',
+    name: 'Lighting',
+    note: 'everything emits. Shots light the grid they fly over; a Nova floods the room.',
+    values: { lit: 0.42, haze: 0.95, glow: 1.25 },
   },
   {
-    id: 'phosphor',
-    name: 'Phosphor',
-    note: 'everything emits. Shots light the grid they fly over, on a curved tube.',
-    bloom: 1.9,
-    glow: 1.25,
-    shake: 1,
-    lit: 0.16,
-    haze: 0.35,
-    barrel: 0.06,
-    aberration: 0.3,
-    scan: 0.26,
-    grain: 0.07,
-    vignette: 0.3,
-    bleed: 0.3,
+    id: 'bloom',
+    name: 'Bloom',
+    note: 'light spills past its edges, and keeps spilling. Three stacked passes.',
+    values: { bloom: 3.1, glow: 1.5 },
   },
   {
-    id: 'overdrive',
-    name: 'Overdrive',
-    note: 'neon. Every bolt is a lamp, every detonation floods the room.',
-    bloom: 2.8,
-    glow: 1.6,
-    shake: 1.15,
-    lit: 0.34,
-    haze: 0.75,
-    barrel: 0.04,
-    aberration: 0.45,
-    scan: 0.1,
-    grain: 0.09,
-    vignette: 0.34,
-    bleed: 0.95,
+    id: 'bleed',
+    name: 'Bleed',
+    note: 'anamorphic streaking. Light smears outward from the centre of the frame.',
+    values: { bleed: 0.95 },
   },
   {
-    id: 'divergence',
-    name: 'Divergence',
-    note: 'blown out. The arena is lit by your own engine and it is too much.',
-    bloom: 3.6,
-    glow: 2,
-    shake: 1.35,
-    lit: 0.6,
-    haze: 1.25,
-    barrel: 0.12,
-    aberration: 0.85,
-    scan: 0.3,
-    grain: 0.16,
-    vignette: 0.42,
-    bleed: 1.4,
+    id: 'chromatic',
+    name: 'Chromatic',
+    note: 'the lens splits colour toward the edges, the way real glass does.',
+    values: { aberration: 0.6 },
+  },
+  {
+    id: 'tube',
+    name: 'Tube',
+    note: 'a CRT: curved glass, scanlines, and darkness in the corners.',
+    values: { barrel: 0.09, scan: 0.3, vignette: 0.36 },
+  },
+  {
+    id: 'grain',
+    name: 'Grain',
+    note: 'the black field is never quite black. Animated, subtle, alive.',
+    values: { grain: 0.11 },
   },
 ];
 
-export const VIEW_PRESET_BY_ID = new Map(VIEW_PRESETS.map((p) => [p.id, p]));
+export const VIEW_EFFECT_IDS = VIEW_EFFECTS.map((e) => e.id);
 
-/** The live view settings. Mutated by `applyPreset`; read by the renderer. */
-export const VIEW: ViewPreset = { ...VIEW_PRESETS[0]! };
+/** The live view state. Mutated by `applyEffects`; read by the renderer. */
+export const VIEW: ViewState = { ...BASE };
 
-export function applyPreset(id: string): void {
-  Object.assign(VIEW, VIEW_PRESET_BY_ID.get(id) ?? VIEW_PRESETS[0]!);
+/**
+ * Combine the enabled effects.
+ *
+ * Max rather than sum: two effects that both raise `glow` should not raise it
+ * twice, and an effect's tuned value is what it should look like whether or not
+ * something else happens to touch the same field.
+ */
+export function applyEffects(enabled: readonly string[]): void {
+  Object.assign(VIEW, BASE);
+  for (const id of enabled) {
+    const effect = VIEW_EFFECTS.find((e) => e.id === id);
+    if (!effect) continue;
+    for (const [key, value] of Object.entries(effect.values)) {
+      const k = key as keyof ViewState;
+      VIEW[k] = Math.max(VIEW[k], value as number);
+    }
+  }
 }

@@ -11,7 +11,7 @@ import { TitleScreen } from './app/menu';
 import { BRANDING } from './branding';
 import { Library } from './meta/profile';
 import { Audio } from './audio/audio';
-import { applyPreset } from './app/visual';
+import { applyEffects } from './app/visual';
 import './app/ui.css';
 
 const params = new URLSearchParams(location.search);
@@ -25,7 +25,7 @@ const library = new Library();
 const audio = new Audio();
 // §20.1 — a player's visual preferences apply before the first frame, not after
 // they have already seen the wrong one.
-applyPreset(library.snapshot.settings.preset);
+applyEffects(library.snapshot.settings.effects);
 audio.setMuted(library.snapshot.settings.muted);
 audio.setVolume(library.snapshot.settings.volume);
 
