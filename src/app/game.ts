@@ -23,6 +23,8 @@ import { Library } from '../meta/profile';
 import { Stinger } from './stinger';
 import type { Audio } from '../audio/audio';
 import { TRACK_BY_ID } from '../audio/tracks';
+import { derivePart } from '../audio/parts';
+import { ACTION_BY_ID } from '../content/index';
 
 type Mode =
   | 'running'
@@ -60,6 +62,8 @@ export class Game {
   /** Quitting a run is two clicks — a misclick throws away twenty minutes. */
   private confirmQuit = false;
   private muted = false;
+  /** Last Engine shape handed to the audio layer, so parts rebuild only on change. */
+  private arrangementSignature = '';
 
   /**
    * §15.2 — the Library is the only thing here that outlives the run. Audio is
@@ -293,6 +297,7 @@ export class Game {
     this.renderer.render(this.world, elapsed, this.mode === 'running');
 
     this.bankDiscoveries();
+    this.syncArrangement();
     this.pumpAudio();
     this.stinger.update(elapsed);
 
@@ -304,6 +309,38 @@ export class Game {
     }
 
     requestAnimationFrame((t) => this.frame(t));
+  }
+
+  /**
+   * §18.1 — the Engine *is* the arrangement, so hand it over whenever it changes.
+   *
+   * Compared as a string rather than recomputed every frame: a part is a
+   * pattern, and a pattern rebuilt sixty times a second is not one. Drafts and
+   * scraps are the only things that change a build, and both are rare.
+   */
+  private syncArrangement(): void {
+    const w = this.world;
+    const signature = w.engine.programs
+      .map((p, i) => `${p.triggerId}|${p.modifierIds.join(',')}|${p.actionId}|${w.engine.compiled[i]?.live}`)
+      .join(';');
+    if (signature === this.arrangementSignature) return;
+    this.arrangementSignature = signature;
+
+    this.audio.setParts(
+      w.engine.programs.map((program, i) => {
+        const action = program.actionId ? ACTION_BY_ID.get(program.actionId) : null;
+        return derivePart(
+          {
+            triggerId: program.triggerId,
+            modifierIds: program.modifierIds,
+            actionId: program.actionId,
+            live: w.engine.compiled[i]?.live ?? false,
+          },
+          action ? { primitive: action.primitive, hue: action.hue } : null,
+          i,
+        );
+      }),
+    );
   }
 
   /**

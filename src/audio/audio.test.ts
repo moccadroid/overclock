@@ -7,6 +7,7 @@ import { hashWorld } from '../sim/hash';
 import { SIM_DT } from '../sim/tunables';
 import { noteHz, semiHz } from './voices';
 import { CHORD_TONES, TRACKS, trackForAxiom } from './tracks';
+import { derivePart } from './parts';
 import { AXIOMS } from '../content/index';
 
 function sourcesIn(dir: string): [string, string][] {
@@ -218,5 +219,100 @@ describe('the songs (GDD §18.2)', () => {
     for (const degree of [0, 3, 5, 7, 10]) {
       expect(semiHz(degree)).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('the Engine is the arrangement (GDD §18.1)', () => {
+  const bolt = { primitive: 'projectile', hue: 'thermal' };
+  const nova = { primitive: 'burst', hue: 'thermal' };
+
+  const row = (trigger: string | null, mods: (string | null)[], action: string | null) => ({
+    triggerId: trigger,
+    modifierIds: mods,
+    actionId: action,
+    live: trigger !== null && action !== null,
+  });
+
+  it('a row that cannot fire makes no sound', () => {
+    // The editor already warns "not live". Silence makes that warning audible,
+    // and a part playing for a row that never fires would be a lie about the
+    // build — which is the one thing this system exists not to be.
+    expect(derivePart(row(null, [], 'bolt'), bolt, 0)).toBeNull();
+    expect(derivePart(row('clock', [], null), null, 0)).toBeNull();
+  });
+
+  it('the Trigger decides the rhythm', () => {
+    // A player who knows what a Trigger does should be able to hear which ones
+    // they own: Clock is a metronome, On Hit is the densest event in the game,
+    // On Crit is rare.
+    const clock = derivePart(row('clock', [], 'bolt'), bolt, 0)!;
+    const onHit = derivePart(row('on_hit', [], 'bolt'), bolt, 0)!;
+    const onCrit = derivePart(row('on_crit', [], 'bolt'), bolt, 0)!;
+
+    const count = (p: { pattern: boolean[] }) => p.pattern.filter(Boolean).length;
+    expect(count(clock)).toBe(4);
+    expect(count(onHit)).toBeGreaterThan(count(clock));
+    expect(count(onCrit)).toBeLessThan(count(clock));
+    // Clock lands on the quarters, which is what makes it read as a metronome.
+    expect([0, 4, 8, 12].every((i) => clock.pattern[i])).toBe(true);
+  });
+
+  it('the Action decides the instrument and the register', () => {
+    const pluck = derivePart(row('clock', [], 'bolt'), bolt, 0)!;
+    const burst = derivePart(row('clock', [], 'nova'), nova, 0)!;
+    expect(pluck.voice).toBe('pluck');
+    expect(burst.voice).toBe('stab');
+    // A Nova is a low burst and a Bolt is a high pluck, matching what they look
+    // like. Rows therefore stack into a mix instead of crowding one octave.
+    expect(burst.register).toBeLessThan(pluck.register);
+  });
+
+  it('Modifiers process the part the way they process the Program', () => {
+    const plain = derivePart(row('clock', [], 'bolt'), bolt, 0)!;
+    const split = derivePart(row('clock', ['split'], 'bolt'), bolt, 0)!;
+    const echo = derivePart(row('clock', ['echo'], 'bolt'), bolt, 0)!;
+    const quantized = derivePart(row('on_hit', ['quantize'], 'bolt'), bolt, 0)!;
+    const ground = derivePart(row('clock', ['ground'], 'bolt'), bolt, 0)!;
+
+    const count = (p: { pattern: boolean[] }) => p.pattern.filter(Boolean).length;
+    // Split makes three of something, so it flams.
+    expect(count(split)).toBeGreaterThan(count(plain));
+
+    // But no modifier may fill the bar. A pattern with no gaps is not a
+    // pattern, it is a drone — On Hit plus Split hit exactly that before the
+    // flam was limited to every other step.
+    for (const id of ['split', 'accelerate', 'amplify', 'sustain']) {
+      const dense = derivePart(row('on_hit', [id], 'bolt'), bolt, 0)!;
+      expect(count(dense), `${id} saturates the bar`).toBeLessThan(16);
+    }
+    // Echo repeats, so it feeds the delay.
+    expect(echo.echo).toBeGreaterThan(0);
+    // Quantize locks to the beat: nothing survives off the quarter.
+    expect(quantized.pattern.every((on, i) => !on || i % 4 === 0)).toBe(true);
+    // Ground quiets and darkens a row, so it does the same here.
+    expect(ground.gain).toBeLessThan(plain.gain);
+    expect(ground.register).toBeLessThan(plain.register);
+  });
+
+  it('rows fan out across the chord instead of doubling each other', () => {
+    // Four rows playing the same note is four copies of one line. Spreading them
+    // across chord tones is what makes an Engine sound like an arrangement.
+    const tones = [0, 1, 2, 3].map((i) => derivePart(row('clock', [], 'bolt'), bolt, i)!.tone);
+    expect(new Set(tones).size).toBeGreaterThan(1);
+  });
+
+  it('every Action primitive maps to a voice', () => {
+    // A primitive with no mapping falls back silently to a pluck, which would
+    // make a Field sound like a Bolt and look like a mixing problem.
+    const primitives = [
+      'projectile', 'burst', 'chain', 'zone', 'convert', 'mine',
+      'delayed', 'beam', 'orbital', 'buff', 'vortex', 'knockback',
+    ];
+    const voices = new Set(
+      primitives.map(
+        (primitive) => derivePart(row('clock', [], 'x'), { primitive, hue: 'void' }, 0)!.voice,
+      ),
+    );
+    expect(voices.size).toBeGreaterThanOrEqual(8);
   });
 });

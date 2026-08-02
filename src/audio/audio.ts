@@ -30,20 +30,21 @@ import type { Hue } from '../sim/types';
 import { Clock } from './clock';
 import {
   bass,
-  chord,
-  perc,
+  gatedChord,
   hat,
   hurt,
   kick,
   motif,
-  pad,
+  perc,
   playHue,
+  playPart,
   semiHz,
   stab,
   sub,
   type VoiceCtx,
 } from './voices';
 import { CHORD_TONES, TRACKS, trackForAxiom, type Track } from './tracks';
+import type { Part } from './parts';
 
 /**
  * §18.4 — polyphony cap. Three, not ten: the point of an accent is that it is
@@ -119,6 +120,12 @@ export class Audio {
   /** Previous note, for 303 glide. 0 means "no slide into this one". */
   private lastBassHz = 0;
   private lastLeadHz = 0;
+  /**
+   * §18.1 — one part per live Program. This is the arrangement, and it is
+   * literally the player's Engine. See parts.ts.
+   */
+  private parts: (Part | null)[] = [];
+  private lastPartHz: number[] = [];
   /** Smoothed, so the arrangement never flickers between layers frame to frame. */
   private smoothed = 0;
 
@@ -245,6 +252,18 @@ export class Audio {
 
   setTrack(track: Track): void {
     this.track = track;
+  }
+
+  /**
+   * Hand over the Engine as an arrangement.
+   *
+   * Called when the build changes rather than every frame: a part is a *pattern*,
+   * and a pattern that changes sixty times a second is not a pattern. This is
+   * the whole reason the music is hypnotic while the play on top of it is not.
+   */
+  setParts(parts: (Part | null)[]): void {
+    this.parts = parts;
+    this.lastPartHz = parts.map(() => 0);
   }
 
   /** The Axiom you started with is the song you hear. */
@@ -430,13 +449,58 @@ export class Audio {
       }
     }
 
-    // The pad states the chord, once per chord rather than once per bar, so it
-    // does not restate something that has not changed.
-    if (i > 0.35 && index === 0 && this.bar % t.barsPerChord === 0) {
-      pad(music, at, tones, Math.min(1, (i - 0.35) * 1.8), beat * 4 * t.barsPerChord, t.padWave);
+    // The chord, chopped onto the grid. The old sustained pad swelled for two
+    // seconds with no relationship to the beat, which is what made it sound
+    // ethereal and disconnected; harmony in this genre is carried rhythmically.
+    if (i > 0.3 && index % 8 === 4) {
+      gatedChord(music, swung, tones, Math.min(1, (i - 0.3) * 1.6), beat * 0.45, t.padWave);
     }
 
+    this.playParts(music, swung, index, tones, i);
     this.flush(at, i);
+  }
+
+  /**
+   * The Engine, playing. One line per live Program.
+   *
+   * This is §18.1's claim made literal: four rows are four interlocking
+   * sequences, and rebuilding your Engine rewrites the track. Parts fan out
+   * across the chord by index so two rows never land on the same note, which is
+   * the difference between harmony and four copies of one line.
+   */
+  private playParts(
+    music: VoiceCtx,
+    swung: number,
+    index: number,
+    tones: number[],
+    intensity: number,
+  ): void {
+    for (let p = 0; p < this.parts.length; p++) {
+      const part = this.parts[p];
+      if (!part || !part.pattern[index]) {
+        if (part) this.lastPartHz[p] = 0;
+        continue;
+      }
+      // Parts fade up with the run rather than arriving at full volume: a fresh
+      // Engine should sound like one row, not like a finished track.
+      const level = part.gain * (0.45 + intensity * 0.55);
+      const hz = semiHz(tones[part.tone % tones.length]! + 24 + part.register);
+      playPart(
+        music,
+        part.voice,
+        swung,
+        hz,
+        level,
+        part.length,
+        part.bite,
+        part.glide ? (this.lastPartHz[p] ?? 0) : 0,
+      );
+      if (part.echo > 0.01) {
+        const send = this.voice(this.echoSend);
+        playPart(send, part.voice, swung, hz, level * part.echo, part.length, part.bite);
+      }
+      this.lastPartHz[p] = hz;
+    }
   }
 
   /**
@@ -471,13 +535,16 @@ export class Audio {
     // to the 300th kill note is the system defeating its own purpose.
     for (const occasion of this.occasions.splice(0, 2)) {
       const tones = this.tones;
+      const beat = 60 / (this.clock?.bpm ?? 112);
       if (occasion.kind === 'overheat') {
         // Overheat resolves *down* a fourth: the one chord in the game that
         // sounds like something went wrong rather than right.
         sub(voice, at, semiHz(tones[0]! - 29), 1, 1.1);
-        chord(voice, at, tones.map((x) => x - 5), 0.75, 1.6, this.track.padWave);
+        this.hitChord(voice, at, tones.map((x) => x - 5), 0.8, beat);
       } else {
-        chord(voice, at, tones, 1, 2.2, this.track.padWave);
+        // Three hits on the beat rather than one long swell — an occasion should
+        // land *in* the track, not float above it.
+        this.hitChord(voice, at, tones, 1, beat);
       }
     }
 
@@ -520,6 +587,13 @@ export class Audio {
 
   private voice(out: AudioNode): VoiceCtx {
     return { ctx: this.ctx!, out };
+  }
+
+  /** An occasion chord: three hits on the beat, so it lands in the track. */
+  private hitChord(voice: VoiceCtx, at: number, tones: number[], gain: number, beat: number): void {
+    for (let i = 0; i < 3; i++) {
+      gatedChord(voice, at + beat * i * 0.5, tones, gain * (1 - i * 0.18), beat * 0.42, this.track.padWave);
+    }
   }
 
   /**

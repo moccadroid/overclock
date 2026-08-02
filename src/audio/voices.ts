@@ -17,6 +17,7 @@
  * colours, distinguishable without being told which is which.
  */
 import type { Hue } from '../sim/types';
+import type { PartVoice } from './parts';
 
 /** A minor pentatonic, in semitones. Every note in the game is from this set,
  *  which is why simultaneous events never sound wrong together. */
@@ -655,5 +656,195 @@ export function hurt(v: VoiceCtx, at: number, gain: number): void {
 export function chime(v: VoiceCtx, at: number, gain: number): void {
   for (let i = 0; i < 4; i++) {
     voltaic(v, at + i * 0.055, noteHz(12 + i * 2), gain * 0.8);
+  }
+}
+
+// ---------------------------------------------------------------- part voices
+
+/**
+ * One note of a Program's part. GDD §18.1 — see `parts.ts` for why a Program is
+ * a musical part at all.
+ *
+ * Each voice is picked so the sound matches what the Action *looks* like in the
+ * arena: a Bolt is a pluck, a Nova is a low burst, a Field is a drone that sits
+ * there, a Pull falls. Nobody needs to be taught the mapping; it lines up.
+ */
+export function playPart(
+  v: VoiceCtx,
+  voice: PartVoice,
+  at: number,
+  hz: number,
+  gain: number,
+  length: number,
+  bite: number,
+  glideFrom = 0,
+): void {
+  const { ctx } = v;
+
+  switch (voice) {
+    case 'pluck':
+      return motif(v, at, hz, gain, 'pluck');
+    case 'acid':
+      return motif(v, at, hz, gain, 'acid', glideFrom);
+    case 'bell':
+      return motif(v, at, hz, gain, 'bell');
+
+    case 'stab': {
+      // A low burst: short, fat, and felt. This is Nova.
+      const dur = 0.22 * length;
+      const g = env(ctx, at, 0.004, dur, gain * 0.34);
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(Math.min(4000, hz * (7 + bite * 10)), at);
+      filter.frequency.exponentialRampToValueAtTime(Math.max(60, hz * 1.5), at + dur * 0.7);
+      filter.Q.value = 5;
+      const o = osc(ctx, 'sawtooth', hz, at, at + dur + 0.06);
+      const o2 = osc(ctx, 'sine', hz / 2, at, at + dur + 0.06);
+      const og = ctx.createGain();
+      og.gain.value = 0.6;
+      o.connect(filter);
+      o2.connect(og).connect(filter);
+      filter.connect(g).connect(v.out);
+      return;
+    }
+
+    case 'drone': {
+      // A tone that stays. Field and Beam persist in the arena, so they persist
+      // here — but gated by the step so it still belongs to the grid rather
+      // than floating over it the way the old pad did.
+      const dur = 0.55 * length;
+      const g = env(ctx, at, 0.02, dur, gain * 0.13);
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = hz * (3 + bite * 6);
+      filter.Q.value = 2.5;
+      for (const cents of [-9, 9]) {
+        const o = osc(ctx, 'sawtooth', hz * Math.pow(2, cents / 1200), at, at + dur + 0.1);
+        const vg = ctx.createGain();
+        vg.gain.value = 0.4;
+        o.connect(vg).connect(filter);
+      }
+      filter.connect(g).connect(v.out);
+      return;
+    }
+
+    case 'tick': {
+      // A placed object arming: woody, dry, short. Mine and Rupture.
+      const dur = 0.06 * length;
+      const g = env(ctx, at, 0.001, dur, gain * 0.3);
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = hz * 3;
+      bp.Q.value = 9;
+      const o = osc(ctx, 'square', hz * 3, at, at + dur + 0.03);
+      o.connect(bp).connect(g).connect(v.out);
+      return;
+    }
+
+    case 'sweep': {
+      // Falls. Pull drags everything toward a point, so the note does too.
+      const dur = 0.34 * length;
+      const g = env(ctx, at, 0.01, dur, gain * 0.18);
+      const o = ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(hz * 2.6, at);
+      o.frequency.exponentialRampToValueAtTime(Math.max(40, hz * 0.55), at + dur);
+      o.start(at);
+      o.stop(at + dur + 0.06);
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 2400;
+      filter.Q.value = 6;
+      o.connect(filter).connect(g).connect(v.out);
+      return;
+    }
+
+    case 'noise': {
+      // Displacement, not damage. Shove is a push of air.
+      const dur = 0.1 * length;
+      const frames = Math.ceil(ctx.sampleRate * (dur + 0.02));
+      const buf = ctx.createBuffer(1, frames, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < frames; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / frames, 1.6);
+      }
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = Math.max(180, hz * 2);
+      bp.Q.value = 1.1;
+      const g = ctx.createGain();
+      g.gain.value = gain * 0.16;
+      src.connect(bp).connect(g).connect(v.out);
+      src.start(at);
+      src.stop(at + dur + 0.02);
+      return;
+    }
+
+    case 'riser': {
+      // Surge speeds the engine up, so its note climbs.
+      const dur = 0.3 * length;
+      const g = env(ctx, at, 0.02, dur, gain * 0.12);
+      const o = ctx.createOscillator();
+      o.type = 'triangle';
+      o.frequency.setValueAtTime(hz * 0.6, at);
+      o.frequency.exponentialRampToValueAtTime(hz * 1.9, at + dur);
+      o.start(at);
+      o.stop(at + dur + 0.06);
+      o.connect(g).connect(v.out);
+      return;
+    }
+
+    case 'organ': {
+      const dur = 0.2 * length;
+      const g = env(ctx, at, 0.005, dur, gain * 0.15);
+      g.connect(v.out);
+      for (const [mult, level] of [[1, 1], [2, 0.5], [3, 0.3]] as const) {
+        const o = osc(ctx, 'sine', hz * mult, at, at + dur + 0.05);
+        const vg = ctx.createGain();
+        vg.gain.value = level * 0.33;
+        o.connect(vg).connect(g);
+      }
+      return;
+    }
+  }
+}
+
+/**
+ * A chord that *hits*.
+ *
+ * The old pad had a two-second attack on an eight-bar chord: it swelled with no
+ * relationship to the grid, which is exactly what "ethereal, no connection"
+ * describes. Harmony in this genre is carried rhythmically — by stabs, by the
+ * bass, by a chord chopped into the sixteenths. So this one has a hard attack
+ * and a gate, and lands *on* the beat instead of drifting across it.
+ */
+export function gatedChord(
+  v: VoiceCtx,
+  at: number,
+  semitones: number[],
+  gain: number,
+  dur: number,
+  wave: OscillatorType = 'sawtooth',
+): void {
+  const { ctx } = v;
+  const g = env(ctx, at, 0.006, dur, gain * 0.13);
+
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.setValueAtTime(3400, at);
+  filter.frequency.exponentialRampToValueAtTime(900, at + dur);
+  filter.Q.value = 2.2;
+  filter.connect(g).connect(v.out);
+
+  for (const semi of semitones) {
+    const hz = semiHz(semi + 24);
+    for (const cents of [-5, 5]) {
+      const o = osc(ctx, wave, hz * Math.pow(2, cents / 1200), at, at + dur + 0.05);
+      const vg = ctx.createGain();
+      vg.gain.value = 0.3;
+      o.connect(vg).connect(filter);
+    }
   }
 }

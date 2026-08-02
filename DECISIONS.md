@@ -1594,6 +1594,76 @@ rather than stepped, and the bass takes accents on five of its sixteen steps.
 
 ---
 
+## D-79 · BUG · The chords were a pad, and a pad is not harmony
+
+Reported: "they sound ethereal without any connection". Literally accurate. The
+pad had a two-second attack on an eight-bar chord — it swelled in and out with
+no relationship to the grid, so it was not playing *in time with* anything.
+
+Harmony in this genre is never carried by a sustained wash. It is carried
+rhythmically: by the stab, by the bassline, by a chord chopped into sixteenths.
+The pad is gone. Chords now land on the grid with a hard attack and a gate, and
+an occasion chord is three hits on the beat rather than one long swell — it
+should land *in* the track, not float above it.
+
+## D-80 · SETTLED · The Engine is the arrangement (closes §18.1 honestly)
+
+§18.1 says "the soundtrack *is* the engine". It was not. It was a table keyed by
+Axiom, with the Engine allowed to add decoration on top — the claim was a
+comment, not a fact.
+
+**Every Program is now a part**, derived from the row itself:
+
+| Program element | Musical role |
+|---|---|
+| Action | the instrument — voice family and register |
+| Trigger | the rhythm — a 16-step pattern |
+| Modifiers | the processing |
+| Hue | the band it occupies |
+
+Each mapping is chosen so it lines up without needing to be taught. A Clock is a
+metronome, so it lands on the quarters. On Hit is the densest event in the game,
+so it is sixteenths. On Crit is rare, so it is two accents a bar. A Nova is a low
+burst and a Bolt is a high pluck, matching what they look like — so rows stack
+into a mix by themselves instead of crowding one octave. Split makes three of
+something, so it flams. Echo repeats, so it feeds the delay. Ground quiets and
+darkens a row, so it does the same to the part. A row that is not live is silent,
+which makes the editor's "not live" warning audible.
+
+Measured on a four-row build:
+
+```
+0: pluck  reg  0  X...X...X...X...            Clock > Bolt
+1: acid   reg 12  X.X.X.X.XXX.X...            On Hit > Split > Arc
+2: stab   reg-24  ..XX..X...XX..X.  echo .55  On Kill > Echo > Nova
+3: drone  reg-12  ..X...X...X...X.  len 2.2   On Pickup > Sustain > Field
+```
+
+The load-bearing idea, and the reason this is music rather than sonification:
+
+> **The pattern comes from your build. The accents come from your play.**
+
+A build is stable for minutes, so the sequence is hypnotic and repeating, which
+the genre needs. Play is second-to-second, so it lands on top as performance.
+Rebuilding your Engine audibly rewrites the track.
+
+Parts are rebuilt only when the build's signature changes, never per frame — a
+pattern that changes sixty times a second is not a pattern.
+
+## D-81 · SETTLED · A line needs air
+
+On Hit plus Split, and On Hit plus Accelerate, both filled all sixteen steps. A
+part with no gaps is not a part, it is a drone, and four of them is a wall.
+
+Fixed with a density cap applied *after* all modifiers rather than inside each
+one, because the rule is musical rather than a property of any particular
+modifier — and doing it once at the end means a modifier added later cannot
+reintroduce the bug. Offbeat sixteenths are dropped first, from the end of the
+bar, which preserves the downbeat and the part's identity. A test asserts no
+single modifier can saturate.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,
