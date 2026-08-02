@@ -3,7 +3,7 @@
     "id": "stream_motes",
     "minThreat": 0,
     "maxThreat": 99,
-    "weight": 14,
+    "weight": 7,
     "entries": [{ "enemy": "mote", "count": 2, "spread": 90 }],
     "description": "Ambient trickle. The horde is never fully cleared."
   },
@@ -32,20 +32,24 @@
     "description": "Ambient economic pressure."
   },
   {
-    "id": "opening_drift",
-    "minThreat": 0,
-    "maxThreat": 2,
-    "weight": 10,
-    "entries": [{ "enemy": "drifter", "count": 3, "spread": 80 }],
-    "description": "Opening pressure. Two bolts each."
-  },
-  {
     "id": "mote_trickle",
     "minThreat": 0,
     "maxThreat": 2.5,
     "weight": 12,
+    "opener": true,
     "entries": [{ "enemy": "mote", "count": 6, "spread": 110 }],
-    "description": "First cascade kindling. Dies to anything."
+    "description": "First cascade kindling. Dies to anything. Every run opens here."
+  },
+  {
+    "id": "opening_drift",
+    "minThreat": 0.8,
+    "maxThreat": 3.5,
+    "weight": 14,
+    "entries": [
+      { "enemy": "drifter", "count": 3, "spread": 80 },
+      { "enemy": "mote", "count": 4, "spread": 110 }
+    ],
+    "description": "Drifters arrive, still cut with swarm. Two bolts each."
   },
   {
     "id": "mote_flock",

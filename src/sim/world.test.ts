@@ -472,6 +472,18 @@ describe('runaway containment and arena legibility', () => {
     expect(w.stats.kills).toBeGreaterThan(100);
   });
 
+  it('every run opens on the gentlest composition, not a weighted roll', () => {
+    // A bad roll used to open the game on Drifters — 12 HP each against a
+    // starting Clock -> Bolt that deals 10.
+    for (const seed of ['open-a', 'open-b', 'open-c', 'open-d', 'open-e']) {
+      const w = new World({ seed, axiomId: 'ignition' });
+      for (let i = 0; i < 60 * 8; i++) w.advance(NO_INPUT);
+      expect(w.composition?.opener).toBe(true);
+      const heavy = w.enemies.filter((e) => e.alive && e.defId !== 'mote');
+      expect(heavy).toHaveLength(0);
+    }
+  });
+
   it('enemies spread across a front instead of stacking on one point', () => {
     const w = new World({ seed: 'spread', axiomId: 'ignition' });
     w.enemies.length = 0;

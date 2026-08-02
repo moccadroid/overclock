@@ -249,6 +249,13 @@ export interface WaveTemplateDef {
    * spam into Interceptors rather than into a nerf.
    */
   reactive?: 'projectiles';
+  /**
+   * The composition a run opens with. Without this the first composition is a
+   * weighted roll, and a bad roll opened the game on Drifters — twelve HP each
+   * against a starting Clock -> Bolt. The first thirty seconds should not be a
+   * dice throw.
+   */
+  opener?: boolean;
   entries: readonly { enemy: string; count: number; spread: number }[];
   description: string;
 }

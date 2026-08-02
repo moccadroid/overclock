@@ -2285,10 +2285,15 @@ export class World {
   private rotateComposition(): void {
     const eligible = WAVES.filter((w) => this.threat >= w.minThreat && this.threat <= w.maxThreat);
     if (eligible.length === 0) return;
-    this.composition = this.rng.pickWeighted(
-      eligible,
-      eligible.map((w) => this.waveWeight(w)),
-    );
+
+    // Every run opens on the designated opener, not on a weighted roll.
+    const opener = this.composition === null ? eligible.find((w) => w.opener) : undefined;
+    this.composition =
+      opener ??
+      this.rng.pickWeighted(
+        eligible,
+        eligible.map((w) => this.waveWeight(w)),
+      );
 
     // The arrival: a real burst so a new composition announces itself, sized
     // against the density target rather than the template's own counts.
