@@ -533,6 +533,30 @@ This is a deliberate departure from §9.1's "delete the entire Engine — all
 Programs, all nodes", taken because that version was measured to be strictly
 worse than not using the mechanic at all, across four attempts to rescue it.
 
+**The gradient, measured.** With the Kernel scaling linearly in sacrificed share,
+12 seeds per arm at 28 minutes:
+
+| what the pilot burns | score | vs hoarding |
+|---|---|---|
+| nothing | 32,040 | — |
+| weakest row | 32,958 | **+2.9%** |
+| strongest row | 26,773 | −16% |
+| everything | 10,222 | −68% |
+
+Partial fixed the trap — Recompiling finally beats hoarding — but it pointed the
+incentive the wrong way. Nibbling at a dead row was the only profitable use, and
+committing was still punished, which is §9.2 inverted rather than satisfied.
+
+The cause is a curve mismatch: the Kernel was linear in sacrificed share, while
+the *cost* of sacrificing is worse than linear, because losing your main producer
+collapses survival and everything downstream of it. Four 25% burns therefore paid
+the same as one 100% burn while risking almost nothing.
+
+The Kernel now scales with `share ^ 1.9`, so a large sacrifice pays
+disproportionately more than the sum of small ones. That is the knob that decides
+whether this mechanic rewards courage or timidity, and it belongs next to the
+Kernel formula on §23.2's sensitive-tuning list.
+
 Note the deliberate deviation already made: Recompile restores the Axiom starter
 rather than leaving the Engine empty. Even if the mechanic is cut or reshaped,
 that change stands — an Engine that cannot generate the XP needed to rebuild

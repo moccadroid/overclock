@@ -898,9 +898,12 @@ export class World {
   kernelPreview(indices: readonly number[]): number {
     const share = this.outputShareOf(indices);
     if (share <= 0) return 0;
+    // Super-linear in share, so committing beats nibbling — see the note on
+    // TUNABLE.kernelShareExponent.
+    const weight = Math.pow(share, TUNABLE.kernelShareExponent);
     return Math.min(
       TUNABLE.kernelMaxPercent,
-      TUNABLE.kernelBasePercent * share + TUNABLE.kernelPercentPerEps * this.outputAverage * share,
+      (TUNABLE.kernelBasePercent + TUNABLE.kernelPercentPerEps * this.outputAverage) * weight,
     );
   }
 

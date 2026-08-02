@@ -164,6 +164,17 @@ export const TUNABLE = {
   kernelBasePercent: 15,
   kernelPercentPerEps: 1.5,
   kernelMaxPercent: 220,
+  /**
+   * The Kernel scales with sacrificed share raised to this power.
+   *
+   * At 1.0 (linear) the incentive gradient runs backwards: burning your weakest
+   * row four times pays the same as burning everything once, but costs almost
+   * nothing in survival — so nibbling dominates and §9.2's "Recompiling at your
+   * peak clearly beats hoarding" is false in the other direction. Above 1, a
+   * large sacrifice pays disproportionately more than the sum of small ones,
+   * which is what makes committing the correct greedy play.
+   */
+  kernelShareExponent: 1.9,
   /** Rebuild surge: double XP, and the next few drafts widen. */
   rebuildSurgeTime: 180,
   rebuildSurgeXpMult: 6,
