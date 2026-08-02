@@ -80,6 +80,17 @@ export const TUNABLE = {
   affixAnchoredZone: 190,
 
   // ---- §7 fuel ----
+  /**
+   * §7.3 — "when ground shards exceed ~200, the oldest merge into fewer, richer
+   * shards. Invisible when it works; mandatory." It is mandatory because at this
+   * kill volume uncollected loot buries the arena: the enemies stop being
+   * visible behind their own drops.
+   */
+  pickupSoftCap: 200,
+  /** Radius within which drops of the same kind merge. */
+  consolidateRadius: 300,
+  consolidateInterval: 0.35,
+
   fuelGaugeCap: 100,
   fuelPerKill: 1,
   fuelPerElite: 5,
@@ -126,8 +137,14 @@ export const TUNABLE = {
    * is now a *composition*, and the director keeps feeding that composition in
    * until it is replaced. The screen should never empty.
    */
-  targetAliveBase: 30,
-  targetAlivePerThreat: 20,
+  /**
+   * The base has to stay low: resupply is now fast enough to reach the target
+   * almost immediately, so the target *is* the difficulty curve. A base of 30
+   * met a starting Engine with a standing wall of 30 enemies and killed every
+   * run inside five minutes.
+   */
+  targetAliveBase: 10,
+  targetAlivePerThreat: 16,
   /** Ceiling, for the §16.1 legibility budget and for frame time. */
   maxAliveHard: 900,
   /**
@@ -135,8 +152,8 @@ export const TUNABLE = {
    * has to exceed a strong engine's kill rate or the arena empties anyway — the
    * ceiling on pressure is the density target, not the rate of resupply.
    */
-  refillRateBase: 16,
-  refillRatePerThreat: 4,
+  refillRateBase: 30,
+  refillRatePerThreat: 8,
   /** How much of the deficit it tries to close each second, 0..1. */
   refillAggression: 0.55,
   /**
@@ -280,6 +297,14 @@ export const SAFETY = {
   maxEntities: 6000,
   maxFireExecutions: 256,
   maxScheduledFires: 8000,
+  /**
+   * Live persistent zones. `On Hit -> Field` is self-feeding: every hit drops a
+   * zone, every zone tick lands hits, and those hits drop more zones. Observed
+   * at 5,237 live zones against 3 remaining enemies. The Cycle economy does
+   * respond (it stalls), but a runtime cannot be left to discover that at five
+   * thousand entities. Oldest zone is evicted when the cap is reached.
+   */
+  maxZones: 45,
 } as const;
 
 /**

@@ -134,6 +134,12 @@
 .resist {
   color: #8b6a3a;
 }
+.cool {
+  color: #46586e;
+}
+.advice {
+  color: #c9a25e;
+}
 .suppressed {
   color: #93a3b3;
   letter-spacing: 0.18em;

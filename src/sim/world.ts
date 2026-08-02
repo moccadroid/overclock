@@ -332,12 +332,15 @@ export class World {
   compositionTimer = 0;
   /** Fractional spawns carried between ticks so the stream is smooth. */
   private refillDebt = 0;
+  private consolidateTimer = 0;
   beaconTimer = 20;
   recompileTimer = 0;
   wardenTimer: number = TUNABLE.wardenInterval;
   containmentTimer: number = TUNABLE.containmentFirstDelay;
   score = 0;
   eps = 0;
+  /** Smoothed Cycles/sec the engine is drawing. Shown against capacity (§6). */
+  demandAverage = 0;
 
   // ---- run structure (§9, §13.2) ----
   phase: RunPhase = 'build';
@@ -456,6 +459,7 @@ export class World {
     this.updateProjectiles(dt);
     this.updateZones(dt);
     this.updatePickups(dt);
+    this.consolidatePickups(dt);
     this.updateFx(dt);
     this.updateTerminals(input, dt);
     this.updateMeltdown(dt);
@@ -481,6 +485,11 @@ export class World {
     this.updateResistance(dt);
     this.stats.tierSeconds[this.budget.tier] += dt;
     this.stats.cyclesSpent += this.budget.spentThisTick;
+    // Smoothed so the HUD can show a stable "you are drawing X/sec" rather than
+    // a per-tick number that flickers too fast to read.
+    const demandDecay = Math.pow(0.5, dt / 0.5);
+    this.demandAverage =
+      this.demandAverage * demandDecay + this.budget.demandPerSecond(dt) * (1 - demandDecay);
     if (this.budget.heat > this.stats.peakHeat) this.stats.peakHeat = this.budget.heat;
 
     this.compact();
@@ -751,9 +760,24 @@ export class World {
     area: number,
     duration: number,
   ): void {
-    if (this.zones.length >= SAFETY.maxEntities) return;
     const def = ACTION_BY_ID.get(actionId)!;
     const radius = (def.radius ?? 130) * Math.max(0.1, area);
+
+    // Evict the oldest rather than refusing the newest: a Field build should
+    // keep feeling responsive at the cap, not silently stop working.
+    if (this.zones.length >= SAFETY.maxZones) {
+      let oldest = -1;
+      let oldestLife = Infinity;
+      for (let i = 0; i < this.zones.length; i++) {
+        const z = this.zones[i]!;
+        if (z.alive && z.life < oldestLife) {
+          oldestLife = z.life;
+          oldest = i;
+        }
+      }
+      if (oldest >= 0) this.zones[oldest]!.alive = false;
+      else return;
+    }
 
     let bestX = x;
     let bestY = y;
@@ -1219,6 +1243,11 @@ export class World {
     const offset = this.rng.next() * Math.PI * 2;
     const dist = this.rng.range(TUNABLE.spawnRingMin, TUNABLE.spawnRingMax);
 
+    // Every direction that is genuinely off-screen is equally valid, and the
+    // horde should arrive from all of them. Always taking the *most* hidden
+    // candidate made spawns queue up along one compass line, which reads as a
+    // procession rather than a swarm.
+    const viable: { x: number; y: number }[] = [];
     let best = { x: this.player.x, y: this.player.y };
     let bestHidden = -Infinity;
 
@@ -1231,12 +1260,15 @@ export class World {
         Math.abs(x - this.player.x) - halfW,
         Math.abs(y - this.player.y) - halfH,
       );
+      if (hidden > 0) viable.push({ x, y });
       if (hidden > bestHidden) {
         bestHidden = hidden;
         best = { x, y };
       }
     }
-    return best;
+    // Near an arena corner nothing may be fully hidden; fall back to the least
+    // visible option rather than spawning in the player's lap.
+    return viable.length > 0 ? viable[this.rng.int(viable.length)]! : best;
   }
 
   /** A point at a given distance band from the player that is not inside a ruin. */
@@ -1846,6 +1878,44 @@ export class World {
           this.gainXp(item.value);
         }
         this.emit({ type: 'pickup', depth: 0, x: p.x, y: p.y, hue: item.hue });
+      }
+    }
+  }
+
+  /**
+   * §7.3 — shard consolidation. Once the ground is carrying more than the soft
+   * cap, the oldest drops merge into fewer, richer ones: same kind, same hue,
+   * within a radius, value summed so nothing is lost. Invisible when it works.
+   */
+  private consolidatePickups(dt: number): void {
+    this.consolidateTimer -= dt;
+    if (this.consolidateTimer > 0) return;
+    this.consolidateTimer = TUNABLE.consolidateInterval;
+    if (this.pickups.length <= TUNABLE.pickupSoftCap) return;
+
+    // Oldest first — `pickups` is in creation order, so the surplus at the front
+    // is what has been lying around longest.
+    const surplus = this.pickups.length - TUNABLE.pickupSoftCap;
+    const r2 = TUNABLE.consolidateRadius * TUNABLE.consolidateRadius;
+    let merged = 0;
+
+    for (let i = 0; i < this.pickups.length && merged < surplus; i++) {
+      const host = this.pickups[i]!;
+      if (!host.alive) continue;
+      for (let j = i + 1; j < this.pickups.length && merged < surplus; j++) {
+        const other = this.pickups[j]!;
+        if (!other.alive) continue;
+        if (other.kind !== host.kind) continue;
+        // XP renders white regardless of which enemy dropped it, so its hue is
+        // not load-bearing and shards merge freely. Fuel must not: merging hues
+        // would silently convert one gauge into another.
+        if (host.kind === 'fuel' && other.hue !== host.hue) continue;
+        const dx = other.x - host.x;
+        const dy = other.y - host.y;
+        if (dx * dx + dy * dy > r2) continue;
+        host.value += other.value;
+        other.alive = false;
+        merged++;
       }
     }
   }

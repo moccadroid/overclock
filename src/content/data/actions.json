@@ -28,12 +28,12 @@
     "kind": "action",
     "name": "Field",
     "hue": "void",
-    "cycleCost": 5,
+    "cycleCost": 9,
     "primitive": "zone",
     "damage": 4,
-    "radius": 140,
-    "lifetime": 3.5,
-    "tickInterval": 0.35,
+    "radius": 115,
+    "lifetime": 2.2,
+    "tickInterval": 0.45,
     "description": "Persistent damage zone at the densest nearby enemy cluster."
   },
   {

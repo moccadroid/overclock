@@ -78,10 +78,26 @@ export class Hud {
         ? `<span class="meltdown">MELTDOWN ×${world.meltdownMultiplier.toFixed(2)}` +
           `   +${clock(world.meltdownTime)}</span>`
         : `${clock(world.time)}   THREAT ${world.threat.toFixed(1)}`;
+    // Heat is caused by drawing more Cycles than you generate, and the game has
+    // to say so — otherwise it reads as an unexplained penalty. Show the draw
+    // against the supply, and name the fix.
+    const demand = Math.round(world.demandAverage);
+    const supply = Math.round(world.budget.capacity);
+    const over = demand > supply * 1.05;
+    const cause = over
+      ? `<span class="hot">DRAWING ${demand}/s · CAPACITY ${supply}/s — OVER BUDGET</span>`
+      : `<span class="cool">drawing ${demand}/s of ${supply}/s</span>`;
+    const advice =
+      world.budget.stalled || heat > 55
+        ? `<span class="advice">scrap a program, draft capacity, or fire less</span>`
+        : '';
+
     this.tc.innerHTML =
       `${topLine}\n` +
       `<span class="${heatClass}">HEAT ${bar(heat, 100, 12)} ${tierName}` +
-      `${world.budget.stalled ? '  ·  STALLED' : ''}</span>` +
+      `${world.budget.stalled ? '  ·  STALLED' : ''}</span>\n` +
+      cause +
+      (advice ? `\n${advice}` : '') +
       (world.surgeTime > 0
         ? `\n<span class="surge">REBUILD SURGE ${world.surgeTime.toFixed(0)}s · 2× XP</span>`
         : '');

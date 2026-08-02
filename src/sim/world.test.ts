@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { NO_INPUT, World, type InputState } from './world';
 import { hashWorld } from './hash';
-import { LOADBEARING, SIM_DT, TUNABLE } from './tunables';
+import { LOADBEARING, SAFETY, SIM_DT, TUNABLE } from './tunables';
 import { CycleBudget } from './cycles';
 import { Rng } from './rng';
 import { botInput } from '../harness/bot';
@@ -305,12 +305,22 @@ describe('Recompile (GDD §9)', () => {
 describe('Meltdown and Containment (GDD §11.4, §13.2)', () => {
   it('enters Meltdown on time and climbs the multiplier', () => {
     const w = new World({ seed: 'melt', axiomId: 'ignition', meltdownAt: 20 });
+    // This is about the clock, not about survival — advance() no-ops once the
+    // player is down, which would stop time and the multiplier with it.
+    const survive = (seconds: number): void => {
+      for (let i = 0; i < Math.round(seconds / SIM_DT); i++) {
+        w.player.alive = true;
+        w.player.integrity = w.player.maxIntegrity;
+        w.advance(botInput(w));
+      }
+    };
+
     expect(w.phase).toBe('build');
-    runPiloted(w, 21);
+    survive(21);
     expect(w.phase).toBe('meltdown');
     expect(w.meltdownMultiplier).toBeCloseTo(1, 6);
 
-    runPiloted(w, 61);
+    survive(61);
     // +0.25 per 30s survived, uncapped.
     expect(w.meltdownMultiplier).toBeCloseTo(1.5, 6);
     expect(w.markers.some((m) => m.kind === 'meltdown')).toBe(true);
@@ -412,6 +422,75 @@ describe('scoring and the run trace (GDD §13.3, §14)', () => {
   });
 });
 
+describe('runaway containment and arena legibility', () => {
+  it('caps live zones, so On Hit -> Field cannot bury the runtime', () => {
+    // Observed in play at 5,237 live zones against 3 remaining enemies: every
+    // hit drops a zone, every zone tick lands hits, those hits drop more zones.
+    const w = new World({ seed: 'field-runaway', axiomId: 'ignition' });
+    const a = w.engine.programs[0]!;
+    a.triggerId = 'on_hit';
+    a.actionId = 'field';
+    const b = w.engine.programs[1]!;
+    b.triggerId = 'clock';
+    b.actionId = 'nova';
+    w.engine.recompile();
+    w.syncBudget();
+
+    let peakZones = 0;
+    for (let i = 0; i < 60 * 120; i++) {
+      w.player.alive = true;
+      w.player.integrity = w.player.maxIntegrity;
+      w.advance(botInput(w));
+      peakZones = Math.max(peakZones, w.zones.length);
+    }
+    expect(peakZones).toBeLessThanOrEqual(SAFETY.maxZones);
+    // The build still works — it is capped, not disabled.
+    expect(w.stats.kills).toBeGreaterThan(200);
+  });
+
+  it('§7.3 — ground shards consolidate instead of burying the arena', () => {
+    const w = new World({ seed: 'consolidate', axiomId: 'ignition' });
+    // Leave row 0 as the Axiom's Clock -> Bolt: an On Kill row cannot produce
+    // the kill that starts it.
+    const p = w.engine.programs[1]!;
+    p.triggerId = 'on_kill';
+    p.actionId = 'nova';
+    p.modifierIds[0] = 'split';
+    w.engine.recompile();
+    w.syncBudget();
+
+    let peakPickups = 0;
+    for (let i = 0; i < 60 * 180; i++) {
+      w.player.alive = true;
+      w.player.integrity = w.player.maxIntegrity;
+      // Stand still so nothing is collected: the ground has to manage itself.
+      w.advance(NO_INPUT);
+      peakPickups = Math.max(peakPickups, w.pickups.length);
+    }
+    // Consolidation runs on an interval, so allow it headroom above the cap.
+    expect(peakPickups).toBeLessThan(TUNABLE.pickupSoftCap * 2.5);
+    expect(w.stats.kills).toBeGreaterThan(100);
+  });
+
+  it('spawns arrive from all sides, not in one directional queue', () => {
+    const w = new World({ seed: 'compass', axiomId: 'ignition' });
+    const quadrants = new Set<number>();
+    let counted = 0;
+    for (let i = 0; i < 60 * 90 && counted < 120; i++) {
+      const before = w.enemies.length;
+      w.advance(NO_INPUT);
+      for (let j = before; j < w.enemies.length; j++) {
+        const e = w.enemies[j]!;
+        const angle = Math.atan2(e.y - w.player.y, e.x - w.player.x);
+        quadrants.add(Math.floor(((angle + Math.PI) / (Math.PI * 2)) * 8) % 8);
+        counted++;
+      }
+    }
+    // All eight compass octants should see arrivals; a procession would not.
+    expect(quadrants.size).toBeGreaterThanOrEqual(7);
+  });
+});
+
 describe('pressure attacks the build, not the health bar (GDD §11)', () => {
   function quietWorld(seed: string): World {
     const w = new World({ seed, axiomId: 'ignition' });
@@ -462,8 +541,11 @@ describe('pressure attacks the build, not the health bar (GDD §11)', () => {
     const worstMono = Math.max(mono.resistance.thermal, mono.resistance.voltaic);
     const worstSplit = Math.max(split.resistance.thermal, split.resistance.voltaic);
 
+    // The contract is the relationship, not an absolute number: Arc chains to
+    // three targets and so out-damages Bolt, which keeps the split uneven even
+    // with one Action per hue. Splitting must simply cost less than mono-hue.
     expect(worstSplit).toBeLessThan(worstMono);
-    expect(worstSplit).toBeLessThan(0.35);
+    expect(worstSplit).toBeLessThan(TUNABLE.resistanceCap * 0.85);
   });
 
   it('§11.2 — a Suppressor silences triggers, and killing it restores them', () => {

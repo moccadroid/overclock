@@ -130,6 +130,15 @@ export class CycleBudget {
     return c > 0 && rng.chance(c);
   }
 
+  /**
+   * Cycles the engine asked for this tick, as a rate per second. Compared
+   * against `capacity`, this is the whole Heat mechanic in one number: draw more
+   * than you make and the difference becomes Heat.
+   */
+  demandPerSecond(dt: number): number {
+    return dt > 0 ? this.spentThisTick / dt : 0;
+  }
+
   /** Fraction of the Ring that is statically reserved (§19.4). */
   get staticFraction(): number {
     return this.capacity > 0 ? Math.min(1, this.staticLoad / this.capacity) : 0;
