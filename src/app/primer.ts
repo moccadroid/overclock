@@ -17,6 +17,16 @@ interface Section {
 
 const SECTIONS: Section[] = [
   {
+    title: 'AXIOM — where the run starts',
+    body:
+      'The Axiom you pick at Run Setup is one thing: the first row of your Engine, already written for you. ' +
+      'Ignition hands you Clock -> Bolt — fire a bolt every 1.2 seconds — and that is what you are running ' +
+      'until your first draft arrives.\n\n' +
+      'It also leans the draft slightly. Ignition offers Thermal Actions a little more often, Circuit offers ' +
+      'Voltaic. A lean, not a rule: every Axiom can build anything.\n\n' +
+      'It is not a class and it does not make you stronger. It decides what you are building *from*.',
+  },
+  {
     title: 'THE ENGINE',
     body:
       'Your build is a program. Each row reads left to right: a TRIGGER says when it happens, ' +

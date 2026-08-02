@@ -1047,6 +1047,12 @@
 
 /* Run Setup. An Axiom is a Program, so it is shown as one — the same chain
    grammar the editor and the Engine strip use, not a paragraph about it. */
+.ax-lead {
+  max-width: 76ch;
+  margin: -2px 0 14px;
+  color: #56708c;
+  line-height: 1.65;
+}
 .axioms {
   display: flex;
   gap: 14px;

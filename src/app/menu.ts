@@ -178,7 +178,14 @@ export class TitleScreen {
 
     return (
       `<div class="setup">` +
-      `<div class="k">axiom — the Program you start with</div>` +
+      // "The Program you start with" assumes you already know what a Program is,
+      // which on run one is exactly the thing you do not know.
+      `<div class="k">axiom — your Engine's first row, already written</div>` +
+      `<div class="ax-lead">Every run builds one Engine out of rows that read left to right: ` +
+      `<span class="k-trigger">when</span> › <span class="k-modifier">changed how</span> › ` +
+      `<span class="k-action">do what</span>. The Axiom is the first of those rows, handed to you, ` +
+      `plus a slight lean on what the draft offers. It does not make you stronger — it decides ` +
+      `what you are building from.</div>` +
       `<div class="axioms">${cards}</div>` +
       `<div class="k">seed</div>` +
       `<div class="seedrow">` +
