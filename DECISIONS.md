@@ -783,6 +783,81 @@ rebalances everything already in it.
 
 ---
 
+## D-35 · SIGN-OFF · Rare triggers pay a bigger payload
+
+Reported: "I'm wondering what triggers like On Crit are for... many of them are
+cute, but useless. You say On Wound pairs with Leech, but it doesn't, because it
+will never fire."
+
+That is correct and it was a real design hole. Triggers differ by more than an
+order of magnitude in how often they fire — On Hit can fire fifty times a second,
+On Wave once every twenty-six — and until now every fire produced identical
+output. A rarer trigger was therefore *strictly worse at everything*, and the
+GDD's own flavour text ("On Wave: burst archetype") had nothing behind it.
+
+Triggers now carry a `payload` multiplier, folded into output at compile time so
+the editor's damage figure tells the truth:
+
+| trigger | payload | why |
+|---|---|---|
+| Clock, On Hit | ×1 | the reliable baseline everything is measured against |
+| On Kill, On Pickup | ×1.1–1.2 | frequent, mildly conditional |
+| On Convert | ×2.5 | needs an economy built first |
+| On Crit | ×3 | 5% of hits, unless you build crit |
+| On Dash | ×3.5 | gated by a 3s cooldown |
+| On Wound | ×5 | rare *and* unwanted — you must choose to get hit |
+| On Wave | ×7 | roughly every 26s |
+| On Overheat | ×8 | only if you deliberately run hot |
+
+The deliberate consequence: a rare trigger is a *burst*. On Overheat → Split →
+Nova is now a real archetype rather than a curiosity, and it weaponises the
+penalty system exactly as §5.3 says it should.
+
+**The alternative I rejected** was restricting which triggers can pair with which
+modifiers or actions. It would work, but it fights pillar 1 — "power combos
+emerge from a composable grammar; we never ship a correct build." Making every
+combination *legal but differently shaped* keeps the grammar open. Some pairings
+should still be bad; none should be pointless.
+
+On Crit also needed two supports to mean anything: crit had to be buildable and
+visible. §8.2's stat cards were specified and never built, so there was no way to
+raise crit chance at all; they exist now (Precision, Collector, Servo, Plating),
+and a crit draws a white starburst rather than relying on damage numbers that are
+off by default.
+
+---
+
+## D-36 · SETTLED · Enemies were one organism
+
+Three problems with one root cause: a shared flow field hands every enemy the
+identical vector, so they converged onto one path, stacked on the same point, and
+trailed the player in a single queue.
+
+Per-enemy corrections, none of which lose the pathing: a slow weave with a
+per-enemy phase, separation from neighbours, and a personal speed so a group does
+not arrive as one rank. Measured with forty enemies released from a single point:
+mean distance from their own centroid went from near zero to 40+ units.
+
+**Density was also global rather than local**, which is why nothing spawned ahead
+while a queue trailed behind — the tail consumed the entire budget and you could
+outrun the game. Pressure is now measured within 1500 units of the player.
+Verified by running in a straight line for a minute: 17 enemies ahead, 17 behind,
+235 units of lateral spread, density holding at 34 of a 35 target.
+
+---
+
+## D-37 · SETTLED · Field was working and invisible
+
+Reported as broken. It was firing thirty times a minute — the nerf had taken it
+to 115 radius and 2.2s life, and the zone rendering was faint enough to miss
+entirely. Restored to 140/3.2s, and zones now carry a fill tint, a heavier dashed
+ring, and a pulse on every damage tick so you can see them working.
+
+A lesson worth keeping: "it doesn't work" and "I can't see it working" are
+indistinguishable from the player's seat, and the second is the more likely.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

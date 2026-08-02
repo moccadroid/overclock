@@ -162,6 +162,21 @@ export const TUNABLE = {
    */
   targetAliveBase: 10,
   targetAlivePerThreat: 16,
+  /**
+   * Density is measured within this radius of the player, not arena-wide. A
+   * global count let a queue trailing behind you consume the whole budget, so
+   * nothing spawned ahead and you could simply outrun the game.
+   */
+  pressureRadius: 1500,
+
+  // ---- enemy movement personality ----
+  /** Slow per-enemy weave, so a shared flow field does not produce one queue. */
+  weaveRate: 1.1,
+  weaveAmount: 0.5,
+  /** Separation, so they spread across a front instead of stacking on a point. */
+  separationRadiusMult: 4.5,
+  separationStrength: 0.85,
+  speedVariance: 0.18,
   /** Ceiling, for the §16.1 legibility budget and for frame time. */
   maxAliveHard: 900,
   /**

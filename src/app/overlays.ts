@@ -100,7 +100,9 @@ export class DraftOverlay extends Overlay {
     offer.cards.forEach((card, i) => {
       const info = describeCard(card);
       const el = document.createElement('div');
-      el.className = 'card';
+      // Same colour language as the editor chips, so a card's kind is legible
+      // before you read a word of it.
+      el.className = `card kind-${info.tag.toLowerCase()}`;
       el.tabIndex = 0;
 
       const tag = document.createElement('div');
@@ -156,6 +158,7 @@ function previewSlot(world: World, card: DraftCard): string {
   if (card.kind === 'program_slot') {
     return `Programs ${world.engine.programs.length} -> ${world.engine.programs.length + 1}`;
   }
+  if (card.kind === 'stat') return 'Applies immediately';
   const node = NODE_BY_ID.get(card.nodeId);
   if (!node) return '';
   const programs = world.engine.programs;

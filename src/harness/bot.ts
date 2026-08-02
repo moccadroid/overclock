@@ -141,6 +141,10 @@ export function botDraftChoice(world: World, cards: readonly DraftCard[]): numbe
       score = headroomTight ? 9 : 2;
     } else if (card.kind === 'program_slot') {
       score = headroomTight ? 0.5 : 3;
+    } else if (card.kind === 'stat') {
+      // §8.2 calls the stat pool deliberately boring; this pilot treats it as
+      // the floor it is meant to be.
+      score = rebuilding ? 0.5 : 2.5;
     } else {
       const node = NODE_BY_ID.get(card.nodeId);
       if (!node) score = 0;

@@ -98,6 +98,17 @@ export interface TriggerDef extends PoolWeighted {
   listens: EventType;
   /** Self-scheduled triggers (Clock) declare a base interval in seconds. */
   interval?: number;
+  /**
+   * Output multiplier applied to whatever this Trigger fires, default 1.
+   *
+   * Triggers differ enormously in how often they fire — On Hit can fire fifty
+   * times a second, On Wave once every twenty-six. Without this, the rare ones
+   * are strictly worse than Clock at everything and exist only as curiosities:
+   * "On Wound pairs with Leech" is not true if On Wound never fires. Paying rare
+   * triggers a bigger payload per fire is what makes them burst archetypes
+   * (§5.3 says as much about On Wave) rather than traps.
+   */
+  payload?: number;
   description: string;
 }
 

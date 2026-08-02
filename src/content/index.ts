@@ -42,6 +42,7 @@ const triggerSchema: Schema = {
   cycleCost: { type: 'number', required: true, min: 0 },
   listens: { type: 'string', required: true, oneOf: EVENT_TYPES },
   interval: { type: 'number', min: 0.01 },
+  payload: { type: 'number', min: 0 },
   description: { type: 'string', required: true },
   poolWeight: { type: 'number', min: 0 },
 };

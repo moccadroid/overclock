@@ -489,21 +489,36 @@ export class Renderer {
       const t = Math.max(0, z.life / z.maxLife);
       const color = HUE_COLOR[z.hue];
       const spin = z.life * 0.9;
+      // A persistent Action has to be obvious that it is there and working —
+      // the first pass was faint enough to be reported as "Field never appeared"
+      // when it was in fact firing thirty times a minute.
+      g.circle(z.x, z.y, z.radius).fill({ color, alpha: 0.13 * t });
+
       const segments = 26;
       for (let i = 0; i < segments; i += 2) {
         const a0 = (i / segments) * Math.PI * 2 + spin;
         const a1 = ((i + 1) / segments) * Math.PI * 2 + spin;
         arcSegment(g, z.x, z.y, z.radius, a0, a1);
       }
-      g.stroke({ width: 2, color, alpha: BAND.inFlight * (0.5 + 0.5 * t) });
+      g.stroke({ width: 3, color, alpha: BAND.entity * (0.6 + 0.4 * t) });
 
-      // Faint interior scanline hatch, clipped to the circle by chord maths.
+      // Interior scanline hatch, clipped to the circle by chord maths.
       for (let y = -z.radius + 10; y < z.radius; y += 14) {
         const half = Math.sqrt(Math.max(0, z.radius * z.radius - y * y));
         if (half < 2) continue;
         g.moveTo(z.x - half, z.y + y).lineTo(z.x + half, z.y + y);
       }
-      g.stroke({ width: 1, color, alpha: BAND.structure * 0.55 * t });
+      g.stroke({ width: 1, color, alpha: BAND.inFlight * 0.5 * t });
+
+      // A pulse on every damage tick, so you can see it working.
+      const tickPhase = 1 - (z.tickTimer / z.tickInterval || 0);
+      if (tickPhase > 0.75) {
+        g.circle(z.x, z.y, z.radius * (0.55 + tickPhase * 0.45)).stroke({
+          width: 2,
+          color,
+          alpha: BAND.telegraph * (tickPhase - 0.75) * 4,
+        });
+      }
     }
   }
 
@@ -806,6 +821,19 @@ export class Renderer {
           }
           g.stroke({ width, color, alpha: BAND.entity * t * alpha });
         }
+      } else if (f.kind === 'crit') {
+        // A crit reads as a white starburst: unmistakable, and it does not need
+        // damage numbers to be legible (§19.4 keeps those off by default).
+        for (let i = 0; i < 6; i++) {
+          const a = (i / 6) * Math.PI * 2 + f.life * 3;
+          const inner = f.radius * (0.4 + (1 - t) * 0.5);
+          const outer = f.radius * (0.9 + (1 - t) * 0.7);
+          g.moveTo(f.x + Math.cos(a) * inner, f.y + Math.sin(a) * inner).lineTo(
+            f.x + Math.cos(a) * outer,
+            f.y + Math.sin(a) * outer,
+          );
+        }
+        g.stroke({ width: 2, color: PALETTE.player, alpha: BAND.telegraph * t });
       } else if (f.kind === 'hurt') {
         g.circle(f.x, f.y, TUNABLE.playerRadius + 18 * (1 - t)).stroke({
           width: 3,

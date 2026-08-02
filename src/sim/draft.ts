@@ -12,10 +12,47 @@ import { LOADBEARING, TUNABLE } from './tunables';
 import type { World } from './world';
 import { axiom as getAxiom } from '../content/index';
 
+/** §8.2 — the deliberately boring floor that keeps a draft from being dead. */
+export type StatKind = 'crit' | 'magnet' | 'speed' | 'integrity';
+
 export type DraftCard =
   | { kind: 'node'; nodeId: string }
   | { kind: 'capacity'; amount: number }
-  | { kind: 'program_slot' };
+  | { kind: 'program_slot' }
+  | { kind: 'stat'; stat: StatKind };
+
+export const STAT_CARDS: Record<StatKind, { title: string; body: string; apply: (w: World) => void }> =
+  {
+    crit: {
+      title: 'Precision',
+      body: '+4% crit chance. Crits hit for double and fire On Crit.',
+      apply: (w) => {
+        w.bonuses.crit += 0.04;
+      },
+    },
+    magnet: {
+      title: 'Collector',
+      body: '+30% pickup radius.',
+      apply: (w) => {
+        w.bonuses.magnet += 0.3;
+      },
+    },
+    speed: {
+      title: 'Servo',
+      body: '+8% move speed.',
+      apply: (w) => {
+        w.bonuses.speed += 0.08;
+      },
+    },
+    integrity: {
+      title: 'Plating',
+      body: '+25 max Integrity, and repairs that much now.',
+      apply: (w) => {
+        w.player.maxIntegrity += 25;
+        w.player.integrity = Math.min(w.player.maxIntegrity, w.player.integrity + 25);
+      },
+    },
+  };
 
 export interface DraftOffer {
   cards: DraftCard[];
@@ -91,8 +128,13 @@ export function rollDraft(world: World): DraftOffer {
     const rollFiller = remaining.length === 0 || world.rng.chance(fillerWeight);
 
     if (rollFiller) {
-      if (slotAvailable && world.rng.chance(0.35)) {
+      const roll = world.rng.next();
+      if (slotAvailable && roll < 0.25) {
         cards.push({ kind: 'program_slot' });
+      } else if (roll < 0.62) {
+        // §8.2 — a small, deliberately boring stat pool.
+        const stats: StatKind[] = ['crit', 'magnet', 'speed', 'integrity'];
+        cards.push({ kind: 'stat', stat: world.rng.pick(stats) });
       } else {
         cards.push({ kind: 'capacity', amount: TUNABLE.capacityUpgradeAmount });
       }
@@ -125,6 +167,10 @@ export function describeCard(card: DraftCard): { title: string; body: string; ta
       tag: 'UPGRADE',
     };
   }
+  if (card.kind === 'stat') {
+    const stat = STAT_CARDS[card.stat];
+    return { title: stat.title, body: stat.body, tag: 'STAT' };
+  }
   const node = NODE_BY_ID.get(card.nodeId);
   if (!node) return { title: card.nodeId, body: '', tag: '?' };
   const cost =
@@ -145,6 +191,8 @@ export function applyDraft(world: World, card: DraftCard): number | null {
     world.budget.capacity += card.amount;
   } else if (card.kind === 'program_slot') {
     world.engine.addProgramSlot();
+  } else if (card.kind === 'stat') {
+    STAT_CARDS[card.stat].apply(world);
   } else {
     landed = world.engine.autoSlot(card.nodeId);
   }

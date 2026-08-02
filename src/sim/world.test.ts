@@ -472,6 +472,65 @@ describe('runaway containment and arena legibility', () => {
     expect(w.stats.kills).toBeGreaterThan(100);
   });
 
+  it('enemies spread across a front instead of stacking on one point', () => {
+    const w = new World({ seed: 'spread', axiomId: 'ignition' });
+    w.enemies.length = 0;
+    w.engine.programs.forEach((p) => {
+      p.triggerId = null;
+      p.actionId = null;
+    });
+    w.engine.recompile();
+
+    // Release forty enemies from the same place: without separation they track
+    // the identical flow vector and arrive as a single stacked column.
+    for (let i = 0; i < 40; i++) {
+      w.spawnEnemy('drifter', w.player.x + 900, w.player.y + 900, 'thermal');
+    }
+    for (let i = 0; i < 60 * 6; i++) w.advance(NO_INPUT);
+
+    const alive = w.enemies.filter((e) => e.alive);
+    let sumX = 0;
+    let sumY = 0;
+    for (const e of alive) {
+      sumX += e.x;
+      sumY += e.y;
+    }
+    const cx = sumX / alive.length;
+    const cy = sumY / alive.length;
+    const spread =
+      alive.reduce((s, e) => s + Math.hypot(e.x - cx, e.y - cy), 0) / alive.length;
+
+    // Mean distance from their own centroid: a stacked column collapses to ~0.
+    expect(spread).toBeGreaterThan(40);
+  });
+
+  it('a trailing queue does not starve the front of the arena', () => {
+    // Density is a local property. With a global count, enemies left behind
+    // filled the whole budget and nothing spawned ahead, so you could outrun
+    // the game entirely.
+    const w = new World({ seed: 'local-density', axiomId: 'ignition' });
+    w.enemies.length = 0;
+    // Park a crowd far behind the player, well outside pressure range.
+    for (let i = 0; i < 250; i++) {
+      w.spawnEnemy('mote', 200 + (i % 10) * 8, 200 + Math.floor(i / 10) * 8, 'thermal');
+    }
+    w.player.x = 3600;
+    w.player.y = 2000;
+
+    for (let i = 0; i < 60 * 25; i++) {
+      w.player.alive = true;
+      w.player.integrity = w.player.maxIntegrity;
+      w.advance(NO_INPUT);
+    }
+
+    const near = w.enemies.filter(
+      (e) => e.alive && Math.hypot(e.x - w.player.x, e.y - w.player.y) < TUNABLE.pressureRadius,
+    ).length;
+    // Measured against the density the director is aiming to hold, not a magic
+    // number: with a global count this was zero.
+    expect(near).toBeGreaterThan(w.targetAlive * 0.7);
+  });
+
   it('spawns arrive from all sides, not in one directional queue', () => {
     const w = new World({ seed: 'compass', axiomId: 'ignition' });
     const quadrants = new Set<number>();

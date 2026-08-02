@@ -205,6 +205,35 @@
   letter-spacing: 0.25em;
   color: #56708c;
 }
+.card.kind-trigger {
+  border-left: 3px solid var(--k-trigger);
+}
+.card.kind-trigger .tag,
+.card.kind-trigger .title {
+  color: var(--k-trigger);
+}
+.card.kind-modifier {
+  border-left: 3px solid var(--k-modifier);
+}
+.card.kind-modifier .tag,
+.card.kind-modifier .title {
+  color: var(--k-modifier);
+}
+.card.kind-action {
+  border-left: 3px solid var(--k-action);
+}
+.card.kind-action .tag,
+.card.kind-action .title {
+  color: var(--k-action);
+}
+.card.kind-upgrade,
+.card.kind-stat {
+  border-left: 3px solid var(--k-upgrade);
+}
+.card.kind-upgrade .tag,
+.card.kind-stat .tag {
+  color: var(--k-upgrade);
+}
 .card .title {
   font-size: 17px;
   color: var(--ink-bright);
@@ -457,14 +486,32 @@
   border-color: var(--signal);
   color: var(--signal);
 }
-/* Slot kinds are told apart by border colour rather than by separators. */
+/* Node kinds carry a colour everywhere they appear — chip, draft card, engine
+   strip — so "what kind of thing is this" is answered before you read it.
+   Deliberately not the three fuel hues: those already mean something else. */
+:root {
+  --k-trigger: #5cc8ff;
+  --k-modifier: #b98cff;
+  --k-action: #ffc46b;
+  --k-upgrade: #7f98bb;
+}
 .chip.trigger {
-  border-color: #4a6a8c;
+  border-color: var(--k-trigger);
   border-left-width: 3px;
+  color: var(--k-trigger);
+}
+.chip.modifier {
+  border-color: var(--k-modifier);
+  color: var(--k-modifier);
 }
 .chip.action {
-  border-color: #7a6a3c;
+  border-color: var(--k-action);
   border-right-width: 3px;
+  color: var(--k-action);
+}
+.chip.empty {
+  border-color: var(--structure);
+  color: #3d5570;
 }
 .arrow {
   color: #3d5570;

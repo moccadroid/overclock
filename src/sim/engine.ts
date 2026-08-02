@@ -190,6 +190,9 @@ export function compileProgram(p: Program): CompiledProgram {
 
   const live = Boolean(trig && act);
   const cycleCost = live ? trig!.cycleCost + act!.cycleCost * mult : 0;
+  // §5.3 — a rare Trigger pays a bigger payload per fire. Folded into output at
+  // compile time so the editor's damage figure tells the truth.
+  if (live && trig!.payload !== undefined) ctx.output *= trig!.payload;
   const interval = trig?.interval !== undefined ? trig.interval / Math.max(0.05, ctx.rate) : 0;
 
   return {

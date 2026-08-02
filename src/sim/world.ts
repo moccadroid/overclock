@@ -76,6 +76,9 @@ export interface Enemy extends SpatialItem {
   /** Lancer: beam state timer. */
   beamTimer: number;
   beamActive: number;
+  /** Per-enemy movement personality: weave phase and a personal speed. */
+  wobble: number;
+  speedScale: number;
 }
 
 /** §10.3 — Wardens and Meltdown-tier enemies roll one or two of these. */
@@ -195,7 +198,7 @@ export interface VisualDeath {
 /** Short-lived visual records for instantaneous actions. Sim-owned so replays match. */
 export interface Fx {
   id: number;
-  kind: 'burst' | 'chain' | 'hurt';
+  kind: 'burst' | 'chain' | 'hurt' | 'crit';
   hue: Hue;
   x: number;
   y: number;
@@ -290,6 +293,7 @@ export interface RunStats {
   damageTaken: number;
   beaconsChannelled: number;
   converts: number;
+  crits: number;
   /** Seconds spent in each Heat tier — the instrument for tuning §6.3. */
   tierSeconds: [number, number, number, number];
   /** Total Cycles the engine asked for. Compare against capacity x time. */
@@ -336,6 +340,8 @@ export class World {
   purges = TUNABLE.purgesPerRun;
   /** Node ids removed from this run's pool by Purge (§8.3). */
   purged = new Set<string>();
+  /** §8.2 — accumulated stat-card bonuses. Deliberately small and boring. */
+  bonuses = { crit: 0, magnet: 0, speed: 0 };
 
   threat = 0;
   /** §12 — the composition currently being fed into the arena. */
@@ -385,6 +391,7 @@ export class World {
     damageTaken: 0,
     beaconsChannelled: 0,
     converts: 0,
+    crits: 0,
     tierSeconds: [0, 0, 0, 0],
     cyclesSpent: 0,
     peakHeat: 0,
@@ -1445,7 +1452,7 @@ export class World {
     // §5.3 On Crit — a crit both hits harder and emits its own event, so crit
     // investment is a build axis rather than a stat.
     let crit = false;
-    if (this.rng.chance(TUNABLE.critChance)) {
+    if (this.rng.chance(TUNABLE.critChance + this.bonuses.crit)) {
       crit = true;
       damage *= TUNABLE.critMultiplier;
     }
@@ -1470,6 +1477,11 @@ export class World {
     }
 
     if (crit) {
+      // A crit has to be visible or On Crit is a trigger for something the
+      // player cannot perceive. Distinct mark, not a damage number.
+      enemy.flash = Math.max(enemy.flash, 0.1);
+      this.pushFx('crit', hue, enemy.x, enemy.y, enemy.radius + 12, [], 0.24);
+      this.stats.crits++;
       this.emit({
         type: 'crit',
         depth: depth + 1,
@@ -1608,7 +1620,7 @@ export class World {
     const speed =
       TUNABLE.playerMoveSpeed *
       (p.dashTimer > 0 ? TUNABLE.dashSpeedMult : 1) *
-      (1 + p.speedBoost);
+      (1 + p.speedBoost + this.bonuses.speed);
     p.vx = mx * speed;
     p.vy = my * speed;
     if (p.dashTimer > 0 && len < 0.01) {
@@ -1739,8 +1751,43 @@ export class World {
             sy = this.flowSample.y;
           }
         }
-        e.vx = sx * def.speed;
-        e.vy = sy * def.speed;
+
+        // A shared flow field hands every enemy the identical vector, so they
+        // converge onto one path and trail the player in a single queue. Three
+        // corrections, all per-enemy, break that up without losing the pathing:
+        //
+        //  1. a slow weave, phase-offset per enemy, so paths differ
+        //  2. separation from neighbours, so they spread instead of stacking
+        //  3. a personal speed, so a group does not arrive as one rank
+        const weave = Math.sin(this.time * TUNABLE.weaveRate + e.wobble) * TUNABLE.weaveAmount;
+        const cos = Math.cos(weave);
+        const sin = Math.sin(weave);
+        let vx = sx * cos - sy * sin;
+        let vy = sx * sin + sy * cos;
+
+        let sepX = 0;
+        let sepY = 0;
+        const near = e.radius * TUNABLE.separationRadiusMult;
+        this.grid.queryRadius(e.x, e.y, near, (other) => {
+          if (other === e) return;
+          const ox = e.x - other.x;
+          const oy = e.y - other.y;
+          const d = Math.hypot(ox, oy);
+          if (d < 0.001 || d > near) return;
+          const push = (1 - d / near) / d;
+          sepX += ox * push;
+          sepY += oy * push;
+        });
+        const sepLen = Math.hypot(sepX, sepY);
+        if (sepLen > 0.001) {
+          vx += (sepX / sepLen) * TUNABLE.separationStrength;
+          vy += (sepY / sepLen) * TUNABLE.separationStrength;
+        }
+
+        const norm = Math.hypot(vx, vy) || 1;
+        const speed = def.speed * e.speedScale;
+        e.vx = (vx / norm) * speed;
+        e.vy = (vy / norm) * speed;
       }
 
       if (e.state !== 'windup') {
@@ -2083,9 +2130,10 @@ export class World {
       const dy = p.y - item.y;
       const d = Math.hypot(dx, dy) || 1;
 
-      if (d < TUNABLE.collectRadius) {
+      const magnet = TUNABLE.collectRadius * (1 + this.bonuses.magnet);
+      if (d < magnet) {
         // §17.2 — quadratic magnet ease-in.
-        const pull = 260 * (1 - d / TUNABLE.collectRadius) + 90;
+        const pull = 260 * (1 - d / magnet) + 90;
         item.x += (dx / d) * pull * dt;
         item.y += (dy / d) * pull * dt;
       } else {
@@ -2198,7 +2246,12 @@ export class World {
     const composition = this.composition;
     if (!composition) return;
 
-    const present = this.enemies.length + this.pendingSpawns.length;
+    // Count only what is near the player, not the whole arena.
+    //
+    // A global count meant a queue trailing behind you filled the entire budget,
+    // so nothing spawned ahead and you could outrun the game. Pressure is a
+    // local property: what matters is how many enemies are where you are.
+    const present = this.nearbyEnemyCount() + this.pendingSpawns.length;
     const deficit = this.targetAlive - present;
     if (deficit <= 0) {
       this.refillDebt = 0;
@@ -2214,6 +2267,19 @@ export class World {
       this.refillDebt -= 1;
       this.spawnFromComposition(composition, false, 0);
     }
+  }
+
+  /** Enemies close enough to be pressure, i.e. roughly on or near the screen. */
+  private nearbyEnemyCount(): number {
+    const r2 = TUNABLE.pressureRadius * TUNABLE.pressureRadius;
+    let count = 0;
+    for (const e of this.enemies) {
+      if (!e.alive) continue;
+      const dx = e.x - this.player.x;
+      const dy = e.y - this.player.y;
+      if (dx * dx + dy * dy <= r2) count++;
+    }
+    return count;
   }
 
   private rotateComposition(): void {
@@ -2407,6 +2473,8 @@ export class World {
       meals: 0,
       beamTimer: def.windup ?? 0,
       beamActive: 0,
+      wobble: this.rng.next() * Math.PI * 2,
+      speedScale: this.rng.range(1 - TUNABLE.speedVariance, 1 + TUNABLE.speedVariance),
       alive: true,
     };
 
