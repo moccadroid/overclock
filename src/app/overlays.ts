@@ -21,6 +21,7 @@ import type { World } from '../sim/world';
 import { LOADBEARING } from '../sim/tunables';
 import { slotAccepts, type NodeSlot } from '../sim/engine';
 import { renderResults } from './results';
+import { renderPrimer } from './primer';
 
 export class Overlay {
   readonly el: HTMLElement;
@@ -227,12 +228,23 @@ export class EditorOverlay extends Overlay {
     const head = document.createElement('div');
     head.className = 'head';
     head.innerHTML =
-      `<span>PIPELINE</span>` +
-      `<span>STATIC ${world.engine.staticLoad.toFixed(1)} / ${world.budget.capacity} CYCLES` +
-      `   HEAT ${world.budget.heat.toFixed(0)}` +
-      `   SCRAP +${(world.engine.scrapStacks * 4).toFixed(0)}%` +
-      `   KERNELS ${world.engine.kernel > 1 ? world.engine.kernel.toFixed(2) : 0}</span>`;
+      `<span>PIPELINE <span class="helphint">H for what these numbers mean</span></span>` +
+      `<span>` +
+      `<span title="Cycles permanently held by your live rows, out of the Cycles you generate each second">` +
+      `RESERVED ${world.engine.staticLoad.toFixed(1)} of ${world.budget.capacity} CYCLES/s</span>` +
+      `   <span title="Overdrawing your Cycles turns the shortfall into Heat">HEAT ${world.budget.heat.toFixed(0)}</span>` +
+      `   <span title="Permanent output bonus earned by scrapping nodes">SCRAP +${(world.engine.scrapStacks * 4).toFixed(0)}%</span>` +
+      `   KERNEL ×${world.engine.kernel.toFixed(2)}</span>`;
     panel.appendChild(head);
+
+    // Column legend, so the row numbers are labelled where they are read.
+    const legend = document.createElement('div');
+    legend.className = 'legend';
+    legend.innerHTML =
+      `<span class="idx"></span><span class="chains">TRIGGER · MODIFIERS (left to right) · ACTION</span>` +
+      `<span class="stats">share of output · cycles · damage · copies</span>` +
+      `<span class="ops"></span>`;
+    panel.appendChild(legend);
 
     world.engine.programs.forEach((program, i) => {
       const compiled = world.engine.compiled[i]!;
@@ -576,6 +588,16 @@ export class MessageOverlay extends Overlay {
     const b = document.createElement('div');
     b.textContent = body;
     panel.append(h, b);
+    this.el.appendChild(panel);
+    this.setOpen(true);
+  }
+
+  /** The primer — what the numbers mean. Opened with H at any time. */
+  showPrimer(): void {
+    this.el.replaceChildren();
+    const panel = document.createElement('div');
+    panel.className = 'panel primer-panel';
+    panel.innerHTML = renderPrimer();
     this.el.appendChild(panel);
     this.setOpen(true);
   }

@@ -183,6 +183,8 @@ export class Engine {
   compiled: CompiledProgram[] = [];
   /** Clock accumulators, parallel to `programs`. */
   clocks: number[] = [];
+  /** World time each Program last fired, for per-Action cooldowns. */
+  lastFired: number[] = [];
   /** §5.7 — permanent global output bonus from scrapping, additive. */
   scrapStacks = 0;
   /** §9 — Kernel multiplier from Recompile. Not earned until M3; always 1 in M1. */
@@ -200,6 +202,8 @@ export class Engine {
     this.compiled = this.programs.map(compileProgram);
     while (this.clocks.length < this.programs.length) this.clocks.push(0);
     this.clocks.length = this.programs.length;
+    while (this.lastFired.length < this.programs.length) this.lastFired.push(-Infinity);
+    this.lastFired.length = this.programs.length;
   }
 
   get staticLoad(): number {

@@ -21,7 +21,15 @@ import { SIM_DT } from '../sim/tunables';
 import { BRANDING } from '../branding';
 import { VISUAL } from './visual';
 
-type Mode = 'running' | 'draft' | 'editor' | 'paused' | 'dead' | 'ceremony' | 'recompile';
+type Mode =
+  | 'running'
+  | 'draft'
+  | 'editor'
+  | 'paused'
+  | 'dead'
+  | 'ceremony'
+  | 'recompile'
+  | 'primer';
 
 export class Game {
   private world: World;
@@ -79,7 +87,25 @@ export class Game {
       return;
     }
 
+    if (cmd === 'help') {
+      if (this.mode === 'primer') {
+        this.message.hide();
+        this.mode = 'running';
+      } else if (this.mode === 'running' || this.mode === 'paused') {
+        this.message.showPrimer();
+        this.mode = 'primer';
+      }
+      this.input.clear();
+      return;
+    }
+
     if (cmd === 'pause') {
+      if (this.mode === 'primer') {
+        this.message.hide();
+        this.mode = 'running';
+        this.input.clear();
+        return;
+      }
       if (this.mode === 'editor') {
         this.editor.close();
         this.mode = 'running';

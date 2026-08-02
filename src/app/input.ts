@@ -4,7 +4,15 @@
  */
 import type { InputState } from '../sim/world';
 
-export type Command = 'editor' | 'pause' | 'draft1' | 'draft2' | 'draft3' | 'reroll' | 'confirm';
+export type Command =
+  | 'editor'
+  | 'pause'
+  | 'draft1'
+  | 'draft2'
+  | 'draft3'
+  | 'reroll'
+  | 'confirm'
+  | 'help';
 
 const MOVE_KEYS: Record<string, [number, number]> = {
   KeyW: [0, -1],
@@ -26,6 +34,8 @@ const COMMAND_KEYS: Record<string, Command> = {
   KeyR: 'reroll',
   // E is held to channel beacons (§4.2), so it cannot double as a confirm key.
   Enter: 'confirm',
+  KeyH: 'help',
+  Slash: 'help',
 };
 
 export class Input {

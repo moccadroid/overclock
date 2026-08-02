@@ -78,6 +78,17 @@ export interface ActionDef {
   range?: number;
   /** zone — seconds between damage ticks */
   tickInterval?: number;
+  /**
+   * Minimum seconds between fires of this Action, per Program.
+   *
+   * Needed for persistent Actions. A Field tick damages every enemy inside it,
+   * and every one of those is a hit — so `On Hit -> Field` places a zone per
+   * enemy per tick, and each new zone does the same. Capping the live zone count
+   * does not help, because the runaway is in the *rate*. A per-Program cooldown
+   * is the honest fix: it bounds how often an Action can place, without touching
+   * the event grammar that makes cascades work.
+   */
+  cooldown?: number;
   description: string;
 }
 

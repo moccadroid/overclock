@@ -275,6 +275,85 @@
   padding: 9px 0;
   border-bottom: 1px dashed rgba(42, 58, 82, 0.6);
 }
+.legend {
+  display: flex;
+  gap: 10px;
+  color: #3f5570;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  padding-bottom: 6px;
+}
+.legend .idx {
+  width: 22px;
+  flex: 0 0 auto;
+}
+.legend .chains {
+  flex: 1;
+}
+.legend .stats {
+  width: 230px;
+  flex: 0 0 auto;
+  text-align: right;
+}
+.legend .ops {
+  width: 152px;
+  flex: 0 0 auto;
+}
+.helphint {
+  margin-left: 14px;
+  color: #46586e;
+  letter-spacing: 0.1em;
+}
+
+/* The primer. */
+.primer-panel {
+  width: min(1100px, 95vw) !important;
+  max-height: 90vh;
+  overflow-y: auto;
+  white-space: normal !important;
+  line-height: 1.65 !important;
+}
+.primer-cols {
+  columns: 2;
+  column-gap: 40px;
+  margin-top: 14px;
+}
+.primer-panel section {
+  break-inside: avoid;
+  margin-bottom: 20px;
+}
+.primer-panel h3 {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.24em;
+  color: var(--voltaic);
+}
+.primer-panel p {
+  margin: 0 0 8px;
+  color: var(--ink);
+  max-width: 46ch;
+}
+.primer-panel dl {
+  margin: 6px 0 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 3px 12px;
+  max-width: 46ch;
+}
+.primer-panel dt {
+  color: var(--ink-bright);
+  white-space: nowrap;
+}
+.primer-panel dd {
+  margin: 0;
+  color: #6b849e;
+}
+.primer-panel .foot {
+  margin-top: 10px;
+  color: #3f5570;
+  font-size: 11px;
+}
 .row .idx {
   width: 22px;
   color: #56708c;

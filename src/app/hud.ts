@@ -45,7 +45,7 @@ export class Hud {
     this.bl = make('hud-bl');
     this.bc = make('hud-bc');
     this.br = make('hud-br');
-    this.br.textContent = `${BRANDING.title} · M1 grammar slice · TAB editor · SPACE dash`;
+    this.br.textContent = `${BRANDING.title} · H help · TAB editor · SPACE dash · E channel`;
 
     // The Engine strip. §19.4 keeps the HUD minimal and puts the pipeline in the
     // editor, but a build you cannot see is a build you cannot reason about —

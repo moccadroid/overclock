@@ -566,6 +566,15 @@ export class World {
     const program = this.engine.programs[index];
     if (!compiled?.live || !program) return;
 
+    // Per-Action cooldown, checked before charging: an engine should not burn
+    // Cycles — and therefore generate Heat — on a fire that was never going to
+    // happen. See ActionDef.cooldown for why persistent Actions need this.
+    const action = program.actionId ? ACTION_BY_ID.get(program.actionId) : undefined;
+    if (action?.cooldown) {
+      if (this.time - (this.engine.lastFired[index] ?? -Infinity) < action.cooldown) return;
+      this.engine.lastFired[index] = this.time;
+    }
+
     this.budget.spend(compiled.cycleCost);
 
     if (this.budget.rollMisfire(this.rng)) {

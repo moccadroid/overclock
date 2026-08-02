@@ -60,6 +60,7 @@ const actionSchema: Schema = {
   jumps: { type: 'number', min: 0 },
   range: { type: 'number', min: 0 },
   tickInterval: { type: 'number', min: 0.01 },
+  cooldown: { type: 'number', min: 0 },
   description: { type: 'string', required: true },
 };
 
