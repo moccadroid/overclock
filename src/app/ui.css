@@ -83,6 +83,23 @@
 #hud-engine .prog.dead {
   color: #37485e;
 }
+#hud-engine .k-trigger {
+  color: var(--k-trigger);
+}
+#hud-engine .k-modifier {
+  color: var(--k-modifier);
+}
+#hud-engine .k-action {
+  color: var(--k-action);
+}
+#hud-engine .k-sep {
+  color: #33465c;
+}
+#hud-engine .prog.dead .k-trigger,
+#hud-engine .prog.dead .k-modifier,
+#hud-engine .prog.dead .k-action {
+  color: #37485e;
+}
 #hud-engine .warn {
   color: #7a5a2a;
 }
@@ -211,16 +228,28 @@
   letter-spacing: 0.25em;
   color: #56708c;
 }
-/* Cards echo the chips: form, not hue. */
+/* Cards echo the chips: colour plus form. */
 .card.kind-trigger {
-  border-left: 4px solid var(--k-ink);
+  border-left: 4px solid var(--k-trigger);
+}
+.card.kind-trigger .tag,
+.card.kind-trigger .title {
+  color: var(--k-trigger);
 }
 .card.kind-modifier {
   border-style: dashed;
-  border-color: #55708c;
+  border-color: var(--k-modifier);
+}
+.card.kind-modifier .tag,
+.card.kind-modifier .title {
+  color: var(--k-modifier);
 }
 .card.kind-action {
-  border-right: 4px solid var(--k-ink);
+  border-right: 4px solid var(--k-action);
+}
+.card.kind-action .tag,
+.card.kind-action .title {
+  color: var(--k-action);
 }
 .card.kind-upgrade,
 .card.kind-stat {
@@ -490,9 +519,17 @@
    blue/violet/amber, which is exactly voltaic/void/thermal and made every chip
    look like it had a hue. Border weight plus a grammar word carries it instead,
    and the words teach the sentence: WHEN ... DO ... */
+/* Kind colours, chosen to sit *outside* the three fuel hues. Thermal is amber
+   #FFB000, Voltaic cyan #00E5FF, Void violet #B44CFF, and signal red is
+   reserved for harm — so mint, steel and pale gold are the room left. This is a
+   small, deliberate widening of §16.3's palette for UI chrome only; nothing in
+   the arena uses these. */
 :root {
   --k-ink: #9db4cc;
   --k-dim: #46586e;
+  --k-trigger: #5fe3a1;
+  --k-modifier: #93a7bd;
+  --k-action: #ffe9a8;
 }
 .chip .kindword {
   font-size: 9px;
@@ -501,19 +538,27 @@
   margin-right: 7px;
 }
 .chip.trigger {
-  border-color: var(--k-ink);
+  border-color: var(--k-trigger);
   border-left-width: 4px;
-  color: var(--ink-bright);
+  color: var(--k-trigger);
+}
+.chip.trigger .kindword {
+  color: var(--k-trigger);
+  opacity: 0.65;
 }
 .chip.modifier {
   border-style: dashed;
-  border-color: #55708c;
-  color: var(--k-ink);
+  border-color: var(--k-modifier);
+  color: var(--k-modifier);
 }
 .chip.action {
-  border-color: var(--k-ink);
+  border-color: var(--k-action);
   border-right-width: 4px;
-  color: var(--ink-bright);
+  color: var(--k-action);
+}
+.chip.action .kindword {
+  color: var(--k-action);
+  opacity: 0.65;
 }
 .chip.empty {
   border-color: var(--structure);

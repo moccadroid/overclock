@@ -164,10 +164,16 @@ export class Hud {
         return `<div class="prog dead">${i + 1}  —</div>`;
       }
 
-      const parts: string[] = [nodeName(program.triggerId) ?? '·'];
-      for (const m of program.modifierIds) if (m) parts.push(nodeName(m) ?? m);
-      parts.push(nodeName(program.actionId) ?? '·');
-      const chain = parts.join(' › ');
+      // Same kind colours as the chips and cards, so the strip reads as the
+      // same language rather than a separate list.
+      const parts: string[] = [
+        `<span class="k-trigger">${nodeName(program.triggerId) ?? '·'}</span>`,
+      ];
+      for (const m of program.modifierIds) {
+        if (m) parts.push(`<span class="k-modifier">${nodeName(m) ?? m}</span>`);
+      }
+      parts.push(`<span class="k-action">${nodeName(program.actionId) ?? '·'}</span>`);
+      const chain = parts.join('<span class="k-sep"> › </span>');
 
       if (!compiled.live) {
         return `<div class="prog dead">${i + 1}  ${chain}   <span class="warn">not live</span></div>`;
