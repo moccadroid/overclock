@@ -454,34 +454,51 @@
   column-gap: 40px;
   margin-top: 14px;
 }
-.primer-panel section {
+/* Inside the title screen the primer is a pane, not a panel — the frame, the
+   scrolling and the foot already exist around it. */
+.primer-pane {
+  max-height: 62vh;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+.primer-pane .primer-cols {
+  columns: 3;
+  margin-top: 0;
+}
+.primer-panel section,
+.primer-pane section {
   break-inside: avoid;
   margin-bottom: 20px;
 }
-.primer-panel h3 {
+.primer-panel h3,
+.primer-pane h3 {
   margin: 0 0 6px;
   font-size: 11px;
   font-weight: 400;
   letter-spacing: 0.24em;
   color: var(--voltaic);
 }
-.primer-panel p {
+.primer-panel p,
+.primer-pane p {
   margin: 0 0 8px;
   color: var(--ink);
   max-width: 46ch;
 }
-.primer-panel dl {
+.primer-panel dl,
+.primer-pane dl {
   margin: 6px 0 0;
   display: grid;
   grid-template-columns: max-content 1fr;
   gap: 3px 12px;
   max-width: 46ch;
 }
-.primer-panel dt {
+.primer-panel dt,
+.primer-pane dt {
   color: var(--ink-bright);
   white-space: nowrap;
 }
-.primer-panel dd {
+.primer-panel dd,
+.primer-pane dd {
   margin: 0;
   color: #6b849e;
 }

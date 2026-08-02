@@ -91,13 +91,13 @@ const SECTIONS: Section[] = [
     rows: [
       ['bar + %', "this row's share of your total output — the fastest way to spot dead weight"],
       ['Nc', 'Cycles this row reserves while it is live'],
-      ['×N', 'damage multiplier from this row’s modifier chain'],
-      ['N×', 'how many copies of the action each trigger produces'],
+      ['N dmg', 'what one hit from this row actually lands, after every multiplier you own'],
+      ['×N', 'how many hits each trigger produces'],
     ],
   },
 ];
 
-export function renderPrimer(): string {
+export function renderPrimer(chrome = true): string {
   const sections = SECTIONS.map((s) => {
     const rows = s.rows
       ? `<dl>${s.rows
@@ -109,9 +109,11 @@ export function renderPrimer(): string {
     );
   }).join('');
 
+  const cols = `<div class="primer-cols">${sections}</div>`;
+  if (!chrome) return cols;
   return (
     `<div class="headline">HOW THIS WORKS</div>` +
-    `<div class="primer-cols">${sections}</div>` +
+    cols +
     `<div class="foot">${BRANDING.title} · capacity starts at ${TUNABLE.cycleCapacityBase} Cycles/sec · ` +
     `H or ESC to close</div>`
   );

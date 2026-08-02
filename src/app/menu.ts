@@ -16,8 +16,9 @@ import type { Library } from '../meta/profile';
 import { BRANDING } from '../branding';
 import { shapeSvg } from './gfx/shapes';
 import { inspector } from './overlays';
+import { renderPrimer } from './primer';
 
-type Pane = 'setup' | 'library' | 'codex';
+type Pane = 'setup' | 'library' | 'codex' | 'primer';
 
 export interface SetupResult {
   seed: string;
@@ -75,8 +76,13 @@ export class TitleScreen {
       this.start();
     } else if (ev.key === 'Tab') {
       ev.preventDefault();
-      const order: Pane[] = ['setup', 'library', 'codex'];
+      const order: Pane[] = ['setup', 'library', 'codex', 'primer'];
       this.pane = order[(order.indexOf(this.pane) + 1) % order.length]!;
+      this.render();
+    } else if (ev.key === 'h' || ev.key === 'H' || ev.key === '?') {
+      // H opens the primer in-run, so it does the same here. The tab is the real
+      // affordance though: a key you have to already know about is not a way in.
+      this.pane = this.pane === 'primer' ? 'setup' : 'primer';
       this.render();
     }
   }
@@ -95,11 +101,11 @@ export class TitleScreen {
     const panel = document.createElement('div');
     panel.className = 'panel title-panel';
 
-    const tabs = (['setup', 'library', 'codex'] as const)
+    const tabs = (['setup', 'library', 'codex', 'primer'] as const)
       .map(
         (p) =>
           `<span class="tab${p === this.pane ? ' on' : ''}" data-pane="${p}">` +
-          `${p === 'setup' ? 'RUN SETUP' : p.toUpperCase()}</span>`,
+          `${p === 'setup' ? 'RUN SETUP' : p === 'primer' ? 'HOW IT WORKS' : p.toUpperCase()}</span>`,
       )
       .join('');
 
@@ -114,8 +120,10 @@ export class TitleScreen {
         ? this.renderSetup()
         : this.pane === 'library'
           ? this.renderLibrary()
-          : this.renderCodex()) +
-      `<div class="title-foot">TAB switch · ENTER start run</div>`;
+          : this.pane === 'codex'
+            ? this.renderCodex()
+            : `<div class="primer-pane">${renderPrimer(false)}</div>`) +
+      `<div class="title-foot">TAB switch · H how it works · ENTER start run</div>`;
 
     // Hover reading, in-world, in a fixed place. See `inspector`.
     panel.insertBefore(inspector(panel), panel.querySelector('.title-foot'));
