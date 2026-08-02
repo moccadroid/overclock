@@ -858,6 +858,64 @@ indistinguishable from the player's seat, and the second is the more likely.
 
 ---
 
+## D-38 · SETTLED · The draft was starving you of weapons
+
+Reported: a whole run yielding one weapon. Measured across 60 seeds, Actions were
+**under a fifth** of everything offered.
+
+The cause is that the v1 roster is lopsided by design — §22 ships 14 modifiers
+against 14 actions, but half of those actions are Converts, and a flat per-kind
+base weight mirrors the roster rather than correcting for it. Weights now
+compensate (actions 24, triggers 13, modifiers 10), and an empty slot pulls its
+own kind toward you: a row with a trigger and no action doubles the odds of being
+offered an action. Actions are now 28% of offers.
+
+Worth recording so it is not misread later: measuring runs afterwards showed
+weapons-held tracks *survival*, not offers — level 3 ends with one weapon, level
+15 with five. A short run looks identical to a starved pool from the inside.
+
+---
+
+## D-39 · SETTLED · Node kinds are told apart by form, not colour
+
+The first attempt coloured triggers blue, modifiers violet and actions amber —
+which is almost exactly voltaic, void and thermal. Every chip looked like it had
+a hue. §16.3 is explicit that the seven colours are the entire vocabulary and
+that there is no decorative colour, so kind-colouring was never available.
+
+Kinds are carried by **form** instead: a thick left border for triggers, a thick
+right border for actions, a dashed border for modifiers — plus the grammar words
+`WHEN` and `DO` on the chips themselves. The words do double duty, naming the
+kind and teaching the sentence each row spells out.
+
+---
+
+## D-40 · SETTLED · Fuel had no visible economy
+
+Reported: "the bolt shoots thermal, my thermal is always 0, the others are up.
+What's the point?"
+
+Both halves of that were invisible rather than broken. A gauge pinned at zero
+means the engine is spending that hue exactly as fast as it arrives — the bonus
+working. A gauge sitting full means nothing you own can spend it. Neither was
+stated anywhere.
+
+The gauges now show the flow: `−4.2/s spent` when a hue is being burned for the
+bonus, `nothing spends this` when it is accumulating uselessly, alongside the
+existing resistance tax. The primer's fuel section explains all three readings.
+
+---
+
+## D-41 · SETTLED · Fleeing was free
+
+Local density stopped a trailing queue from starving the front, but running still
+worked: what you left behind stayed inside the pressure radius while the road
+ahead stayed clear. 60% of spawns are now placed ahead of the player's travel
+while they are moving. Measured fleeing in a straight line for 90s: 9 enemies
+ahead against 2 behind, where it used to be the reverse.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

@@ -113,12 +113,27 @@ export class Hud {
     // §19.4 — the three fuel gauges, each carrying its adaptive-resistance
     // percentage (§11.1). Resistance is always visible: it is a tax the player
     // is choosing to pay, so it can never be a surprise.
+    // A gauge pinned at zero and a gauge sitting full are both confusing without
+    // the flow behind them: the first means "burning it as fast as it arrives",
+    // the second "nothing you own can spend this". Say which.
     const gauge = (hue: 'thermal' | 'voltaic' | 'void', label: string): string => {
       const resist = world.resistance[hue];
       const tax = resist > 0.01 ? ` <span class="resist">−${Math.round(resist * 100)}%</span>` : '';
+      const burn = world.fuelBurn[hue];
+      const gain = world.fuelGain[hue];
+
+      let flow: string;
+      if (burn > 0.2) {
+        flow = `<span class="burning">−${burn < 10 ? burn.toFixed(1) : burn.toFixed(0)}/s spent</span>`;
+      } else if (gain > 0.2) {
+        flow = `<span class="idle">nothing spends this</span>`;
+      } else {
+        flow = '';
+      }
+
       return (
         `<span class="${hue}">${label} ${bar(world.fuel[hue], 100, 14)} ` +
-        `${String(Math.floor(world.fuel[hue])).padStart(3)}</span>${tax}`
+        `${String(Math.floor(world.fuel[hue])).padStart(3)}</span>${tax}  ${flow}`
       );
     };
     this.bl.innerHTML =

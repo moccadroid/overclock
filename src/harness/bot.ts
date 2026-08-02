@@ -125,7 +125,12 @@ export function botDraftChoice(world: World, cards: readonly DraftCard[]): numbe
   // include the empty-engine case. Written as "has an action but no trigger" it
   // is false for a freshly Recompiled Engine, and the pilot then drafts
   // modifiers onto nothing forever — which is exactly what it did.
-  const live = world.engine.compiled.some((c) => c.live);
+  const liveRows = world.engine.compiled.filter((c) => c.live).length;
+  const live = liveRows > 0;
+  // Widen before deepening: a second and third firing row beats a third modifier
+  // stacked on the first. Without this the pilot ended seven-minute runs holding
+  // a single weapon even when Actions were a third of the pool.
+  const wantMoreRows = liveRows < 3;
   const needsTrigger = world.engine.programs.some((p) => p.triggerId === null);
   const needsAction = world.engine.programs.some((p) => p.actionId === null);
   const rebuilding = !live;
@@ -149,9 +154,10 @@ export function botDraftChoice(world: World, cards: readonly DraftCard[]): numbe
       const node = NODE_BY_ID.get(card.nodeId);
       if (!node) score = 0;
       // While rebuilding, completing a firing Program beats everything.
-      else if (node.kind === 'trigger') score = rebuilding ? 20 : needsTrigger ? 8 : 4;
-      else if (node.kind === 'action') {
-        score = rebuilding ? 20 : needsAction ? 8 : 4;
+      else if (node.kind === 'trigger') {
+        score = rebuilding ? 20 : needsTrigger ? 8 : wantMoreRows ? 7 : 4;
+      } else if (node.kind === 'action') {
+        score = rebuilding ? 20 : needsAction ? 8 : wantMoreRows ? 7 : 4;
         // A Convert occupies an Action slot but deals no damage. This pilot has
         // no economy strategy, so it treats them as a last resort rather than
         // filling its Engine with cards that produce nothing.

@@ -168,6 +168,11 @@ export const TUNABLE = {
    * nothing spawned ahead and you could simply outrun the game.
    */
   pressureRadius: 1500,
+  /**
+   * Share of spawns placed ahead of the player's travel while they are moving.
+   * Fleeing should cost something without becoming a wall.
+   */
+  forwardSpawnBias: 0.6,
 
   // ---- enemy movement personality ----
   /** Slow per-enemy weave, so a shared flow field does not produce one queue. */

@@ -508,6 +508,14 @@ function chip(
   if (nodeId) {
     const node = NODE_BY_ID.get(nodeId);
     const mult = MODIFIER_BY_ID.get(nodeId)?.cycleMult;
+    // The grammar word does double duty: it names the kind and teaches the
+    // sentence the row is spelling out.
+    if (kind !== 'modifier') {
+      const word = document.createElement('span');
+      word.className = 'kindword';
+      word.textContent = kind === 'trigger' ? 'WHEN' : 'DO';
+      el.appendChild(word);
+    }
     const name = document.createElement('span');
     name.textContent = node ? `${node.name}${mult ? ` ×${mult}` : ''}` : nodeId;
     el.appendChild(name);

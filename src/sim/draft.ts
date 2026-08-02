@@ -100,7 +100,19 @@ function weightFor(world: World, node: NodeDef): number {
   const hue = hueOf(node);
   const byId = bias[node.id];
   const byHue = hue ? bias[hue] : undefined;
-  const base = node.kind === 'modifier' ? 12 : 10;
+
+  // With 16 modifiers, 10 triggers and 10 actions, a flat base put Actions at
+  // under a fifth of the pool — a full run could hand out a single weapon. The
+  // roster is lopsided by design (§22 ships 14 modifiers), so the weights have
+  // to compensate rather than mirror it.
+  let base = node.kind === 'modifier' ? 10 : node.kind === 'trigger' ? 13 : 24;
+
+  // §8.2 — "pool weighted by what the player owns". An empty slot pulls its own
+  // kind toward you, so a half-built Engine finishes itself.
+  const programs = world.engine.programs;
+  if (node.kind === 'action' && programs.some((p) => p.actionId === null && p.triggerId)) base *= 2;
+  if (node.kind === 'trigger' && programs.some((p) => p.triggerId === null && p.actionId)) base *= 2;
+
   return base * (byId ?? byHue ?? 1) * (node.poolWeight ?? 1);
 }
 

@@ -327,6 +327,19 @@ export class World {
   visualDeaths: VisualDeath[] = [];
 
   fuel: Record<Hue, number> = { thermal: 0, voltaic: 0, void: 0 };
+  /**
+   * Fuel spent and gained per second, per hue, smoothed.
+   *
+   * Without these the economy is opaque: a gauge pinned at zero looks broken
+   * when it actually means "your engine is burning this exactly as fast as it
+   * arrives", and a gauge sitting full looks healthy when it actually means
+   * "nothing you own can spend this".
+   */
+  fuelBurn: Record<Hue, number> = { thermal: 0, voltaic: 0, void: 0 };
+  fuelGain: Record<Hue, number> = { thermal: 0, voltaic: 0, void: 0 };
+  private fuelBurnTick: Record<Hue, number> = { thermal: 0, voltaic: 0, void: 0 };
+  private fuelGainTick: Record<Hue, number> = { thermal: 0, voltaic: 0, void: 0 };
+
   /** §11.1 — smoothed damage dealt per hue, the basis of adaptive resistance. */
   private damageByHue: Record<Hue, number> = { thermal: 0, voltaic: 0, void: 0 };
   /** Current resistance per hue, 0..cap. Always visible in the HUD (§19.4). */
@@ -501,6 +514,16 @@ export class World {
       this.stats.overheats++;
       this.emit({ type: 'overheat', depth: 0, x: this.player.x, y: this.player.y });
       if (!this.budget.stalled) this.drainEvents();
+    }
+
+    const fuelDecay = Math.pow(0.5, dt / 1.5);
+    for (const hue of HUES) {
+      this.fuelBurn[hue] =
+        this.fuelBurn[hue] * fuelDecay + (this.fuelBurnTick[hue] / dt) * (1 - fuelDecay);
+      this.fuelGain[hue] =
+        this.fuelGain[hue] * fuelDecay + (this.fuelGainTick[hue] / dt) * (1 - fuelDecay);
+      this.fuelBurnTick[hue] = 0;
+      this.fuelGainTick[hue] = 0;
     }
 
     this.updateResistance(dt);
@@ -692,6 +715,7 @@ export class World {
       let fuelBonus = 1;
       if (this.fuel[hue] >= 1) {
         this.fuel[hue] -= 1;
+        this.fuelBurnTick[hue] += 1;
         fuelBonus = 1 + TUNABLE.fueledFireOutputBonus;
       }
       const output = compiled.ctx.output * outputMul * fuelBonus * this.engine.globalOutput;
@@ -1326,6 +1350,15 @@ export class World {
     const offset = this.rng.next() * Math.PI * 2;
     const dist = this.rng.range(TUNABLE.spawnRingMin, TUNABLE.spawnRingMax);
 
+    // Bias arrivals toward where the player is heading. Running away should not
+    // be free: local density alone still let you outrun the horde, because what
+    // you left behind stayed inside the pressure radius while the road ahead
+    // stayed clear. Not a wall — just enough that fleeing costs something.
+    const moveLen = Math.hypot(this.player.vx, this.player.vy);
+    const forward = moveLen > 20 && this.rng.chance(TUNABLE.forwardSpawnBias);
+    const fx = forward ? this.player.vx / moveLen : 0;
+    const fy = forward ? this.player.vy / moveLen : 0;
+
     // Every direction that is genuinely off-screen is equally valid, and the
     // horde should arrive from all of them. Always taking the *most* hidden
     // candidate made spawns queue up along one compass line, which reads as a
@@ -1343,7 +1376,12 @@ export class World {
         Math.abs(x - this.player.x) - halfW,
         Math.abs(y - this.player.y) - halfH,
       );
-      if (hidden > 0) viable.push({ x, y });
+      if (hidden > 0) {
+        // When biasing forward, only keep candidates roughly ahead of travel.
+        if (!forward || (Math.cos(angle) * fx + Math.sin(angle) * fy) > 0.25) {
+          viable.push({ x, y });
+        }
+      }
       if (hidden > bestHidden) {
         bestHidden = hidden;
         best = { x, y };
@@ -2146,7 +2184,9 @@ export class World {
       if (d < TUNABLE.playerRadius + 6) {
         item.alive = false;
         if (item.kind === 'fuel') {
-          this.fuel[item.hue] = Math.min(TUNABLE.fuelGaugeCap, this.fuel[item.hue] + item.value);
+          const before = this.fuel[item.hue];
+          this.fuel[item.hue] = Math.min(TUNABLE.fuelGaugeCap, before + item.value);
+          this.fuelGainTick[item.hue] += this.fuel[item.hue] - before;
         } else {
           this.gainXp(item.value);
         }

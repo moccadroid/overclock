@@ -134,6 +134,12 @@
 .resist {
   color: #8b6a3a;
 }
+.burning {
+  color: #7f98bb;
+}
+.idle {
+  color: #5a4a2e;
+}
 .cool {
   color: #46586e;
 }
@@ -205,34 +211,26 @@
   letter-spacing: 0.25em;
   color: #56708c;
 }
+/* Cards echo the chips: form, not hue. */
 .card.kind-trigger {
-  border-left: 3px solid var(--k-trigger);
-}
-.card.kind-trigger .tag,
-.card.kind-trigger .title {
-  color: var(--k-trigger);
+  border-left: 4px solid var(--k-ink);
 }
 .card.kind-modifier {
-  border-left: 3px solid var(--k-modifier);
-}
-.card.kind-modifier .tag,
-.card.kind-modifier .title {
-  color: var(--k-modifier);
+  border-style: dashed;
+  border-color: #55708c;
 }
 .card.kind-action {
-  border-left: 3px solid var(--k-action);
-}
-.card.kind-action .tag,
-.card.kind-action .title {
-  color: var(--k-action);
+  border-right: 4px solid var(--k-ink);
 }
 .card.kind-upgrade,
 .card.kind-stat {
-  border-left: 3px solid var(--k-upgrade);
+  border-left: 4px solid var(--structure);
 }
-.card.kind-upgrade .tag,
-.card.kind-stat .tag {
-  color: var(--k-upgrade);
+.card.kind-trigger .tag::before {
+  content: 'WHEN · ';
+}
+.card.kind-action .tag::before {
+  content: 'DO · ';
 }
 .card .title {
   font-size: 17px;
@@ -486,28 +484,36 @@
   border-color: var(--signal);
   color: var(--signal);
 }
-/* Node kinds carry a colour everywhere they appear — chip, draft card, engine
-   strip — so "what kind of thing is this" is answered before you read it.
-   Deliberately not the three fuel hues: those already mean something else. */
+/* Node kinds are distinguished by FORM, not colour.
+   §16.3 reserves amber/cyan/violet for the three fuel hues and says those seven
+   colours are the entire vocabulary — the first attempt at kind-colouring used
+   blue/violet/amber, which is exactly voltaic/void/thermal and made every chip
+   look like it had a hue. Border weight plus a grammar word carries it instead,
+   and the words teach the sentence: WHEN ... DO ... */
 :root {
-  --k-trigger: #5cc8ff;
-  --k-modifier: #b98cff;
-  --k-action: #ffc46b;
-  --k-upgrade: #7f98bb;
+  --k-ink: #9db4cc;
+  --k-dim: #46586e;
+}
+.chip .kindword {
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  color: var(--k-dim);
+  margin-right: 7px;
 }
 .chip.trigger {
-  border-color: var(--k-trigger);
-  border-left-width: 3px;
-  color: var(--k-trigger);
+  border-color: var(--k-ink);
+  border-left-width: 4px;
+  color: var(--ink-bright);
 }
 .chip.modifier {
-  border-color: var(--k-modifier);
-  color: var(--k-modifier);
+  border-style: dashed;
+  border-color: #55708c;
+  color: var(--k-ink);
 }
 .chip.action {
-  border-color: var(--k-action);
-  border-right-width: 3px;
-  color: var(--k-action);
+  border-color: var(--k-ink);
+  border-right-width: 4px;
+  color: var(--ink-bright);
 }
 .chip.empty {
   border-color: var(--structure);

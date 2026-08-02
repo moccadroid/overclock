@@ -58,10 +58,15 @@ const SECTIONS: Section[] = [
   {
     title: 'FUEL — the three colours',
     body:
-      'Enemies drop fuel in their own colour. When an action fires, it spends one fuel of its colour for ' +
-      '+50% output.\n\n' +
-      'But the horde adapts: lean on one colour and enemies start resisting it, up to 60%. The gauges show ' +
-      'that tax. Spread your damage, or hit hard enough that you do not care.',
+      'Enemies drop fuel in their own colour. When an action fires it spends one fuel of its colour for ' +
+      '+50% output. Fuel is throughput, not permission — you always fire, you just hit harder when fuelled.\n\n' +
+      'So a gauge sitting at zero is not broken. It means your engine is spending that colour as fast as it ' +
+      'arrives, which is the bonus working. A gauge sitting full means nothing you own can spend it.',
+    rows: [
+      ['−N/s spent', 'that colour is being burned for the bonus — this is good'],
+      ['nothing spends this', 'you own no action of that colour. Attune, Rectify, or a new action fixes it'],
+      ['−N%', 'the horde has adapted to that colour. Spread out, or hit hard enough not to care'],
+    ],
   },
   {
     title: 'EPS — your score',
