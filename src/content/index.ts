@@ -71,7 +71,7 @@ const actionSchema: Schema = {
       'knockback',
     ],
   },
-  origin: { type: 'string', oneOf: ['player', 'event', 'target', 'cluster'] },
+  origin: { type: 'string', oneOf: ['player', 'event', 'cluster'] },
   armTime: { type: 'number', min: 0 },
   triggerRadius: { type: 'number', min: 0 },
   delay: { type: 'number', min: 0 },

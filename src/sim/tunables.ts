@@ -126,10 +126,17 @@ export const TUNABLE = {
    * kill volume uncollected loot buries the arena: the enemies stop being
    * visible behind their own drops.
    */
-  pickupSoftCap: 200,
-  /** Radius within which drops of the same kind merge. */
-  consolidateRadius: 300,
-  consolidateInterval: 0.35,
+  /**
+   * §7.3 puts this at ~200, but at 200 a big kill visibly *loses* loot: the mass
+   * of drops is the reward, and merging them away makes a screen-clear read as
+   * sad rather than triumphant. There is frame budget for far more, so
+   * consolidation is now a safety valve against unbounded growth rather than a
+   * routine tidy-up — it should almost never be visible.
+   */
+  pickupSoftCap: 700,
+  /** Radius within which drops of the same kind merge. Local, so piles keep their shape. */
+  consolidateRadius: 90,
+  consolidateInterval: 0.6,
 
   fuelGaugeCap: 100,
   fuelPerKill: 1,

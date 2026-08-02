@@ -492,6 +492,33 @@ export class Renderer {
       const t = Math.max(0, z.life / z.maxLife);
       const color = HUE_COLOR[z.hue];
       const spin = z.life * 0.9;
+      // A vortex must not look like a Field: one is a place that hurts, the
+      // other is a place that *moves you*. Converging strokes, drawn sweeping
+      // inward, say which.
+      if (z.force > 0) {
+        const swirl = (1 - t) * 5;
+        for (let i = 0; i < 10; i++) {
+          const a = (i / 10) * Math.PI * 2 + swirl;
+          const outer = z.radius;
+          const inner = z.radius * (0.18 + t * 0.3);
+          for (let s = 0; s < 5; s++) {
+            const f0 = s / 5;
+            const f1 = (s + 1) / 5;
+            const r0 = outer + (inner - outer) * f0;
+            const r1 = outer + (inner - outer) * f1;
+            const a0 = a + f0 * 1.5;
+            const a1 = a + f1 * 1.5;
+            g.moveTo(z.x + Math.cos(a0) * r0, z.y + Math.sin(a0) * r0).lineTo(
+              z.x + Math.cos(a1) * r1,
+              z.y + Math.sin(a1) * r1,
+            );
+          }
+        }
+        g.stroke({ width: 2, color, alpha: BAND.entity * t });
+        g.circle(z.x, z.y, z.radius * (0.16 + t * 0.28)).fill({ color, alpha: 0.3 * t });
+        continue;
+      }
+
       // A persistent Action has to be obvious that it is there and working —
       // the first pass was faint enough to be reported as "Field never appeared"
       // when it was in fact firing thirty times a minute.
@@ -636,24 +663,29 @@ export class Renderer {
       g.stroke({ width: 1, color: PALETTE.player, alpha: BAND.structure * 0.9 });
     }
 
+    // Each orbital is a thick, tapering arc *of its own orbit* with a bright
+    // leading head. It reads as a body riding a track rather than a creature,
+    // it stays legible when a dozen of them stack, and no enemy owns the shape.
     for (const o of world.orbitals) {
-      if (!this.camera.isVisible(o.x, o.y, o.radius + 24)) continue;
+      if (!this.camera.isVisible(o.x, o.y, o.orbitRadius + 24)) continue;
       const color = HUE_COLOR[o.hue];
       const fade = Math.min(1, o.life / 1.5);
-      const r = o.radius + 4;
+      const px = world.player.x;
+      const py = world.player.y;
 
-      // Motion trail along the orbit.
-      arcSegment(g, world.player.x, world.player.y, o.orbitRadius, o.angle - 0.42, o.angle);
-      g.stroke({ width: 2, color, alpha: BAND.inFlight * 0.55 * fade });
-
-      // Four-point star: two crossed spikes with a bright core.
-      for (let i = 0; i < 4; i++) {
-        const a = o.angle * 2 + (i / 4) * Math.PI * 2;
-        const long = i % 2 === 0 ? r * 1.5 : r * 0.75;
-        g.moveTo(o.x, o.y).lineTo(o.x + Math.cos(a) * long, o.y + Math.sin(a) * long);
+      const segments = 5;
+      const span = 0.34;
+      for (let s = 0; s < segments; s++) {
+        const f0 = s / segments;
+        const f1 = (s + 1) / segments;
+        arcSegment(g, px, py, o.orbitRadius, o.angle - span * f1, o.angle - span * f0);
+        g.stroke({
+          width: 1 + (1 - f0) * 4,
+          color,
+          alpha: BAND.entity * (1 - f0) * fade,
+        });
       }
-      g.stroke({ width: 2.5, color, alpha: BAND.entity * fade });
-      g.circle(o.x, o.y, r * 0.42).fill({ color: PALETTE.player, alpha: BAND.inFlight * fade });
+      g.circle(o.x, o.y, 3.4).fill({ color: PALETTE.player, alpha: BAND.entity * fade });
     }
   }
 
@@ -1167,10 +1199,11 @@ function desaturate(color: number, amount: number): number {
   return (mixTo(r) << 16) | (mixTo(g) << 8) | mixTo(b);
 }
 
-/** Merged drops carry more value, so they draw bigger. Sub-linear, or a big
- *  merge would eclipse the player. */
+/** Merged drops carry more value, so they draw bigger. Sub-linear, and capped
+ *  tighter now that merging is rare — a merged pile should read as chunky, not
+ *  as a single object that ate the others. */
 function pickupScale(value: number): number {
-  return Math.min(2.6, 1 + Math.log2(Math.max(1, value)) * 0.34);
+  return Math.min(1.9, 1 + Math.log2(Math.max(1, value)) * 0.26);
 }
 
 function polygonPath(g: Graphics, points: readonly [number, number][]): void {

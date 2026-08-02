@@ -177,7 +177,7 @@ export interface ActionDef extends PoolWeighted {
    * that are meaningless anywhere but on the avatar (Mine, Orbital, Surge)
    * anchor there regardless.
    */
-  origin?: 'player' | 'event';
+  origin?: 'player' | 'event' | 'cluster';
 
   /** §7.4 — set when `primitive` is `convert`. */
   convert?: ConvertSpec;

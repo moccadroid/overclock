@@ -825,8 +825,10 @@ describe('the action roster (GDD §5.4)', () => {
   it('Beam hits everything along the line, not just the target', () => {
     const w = rig('beam', 'beam');
     const line: number[] = [];
+    // Spaced to sit inside Beam's range, so this tests the line-hit rather than
+    // the reach.
     for (let i = 1; i <= 5; i++) {
-      const e = w.spawnEnemy('bulwark', w.player.x + i * 120, w.player.y, 'thermal')!;
+      const e = w.spawnEnemy('bulwark', w.player.x + i * 85, w.player.y, 'thermal')!;
       line.push(e.id);
     }
     for (let i = 0; i < 120; i++) w.advance(NO_INPUT);

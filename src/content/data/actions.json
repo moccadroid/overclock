@@ -30,6 +30,7 @@
     "hue": "void",
     "cycleCost": 9,
     "primitive": "zone",
+    "origin": "cluster",
     "damage": 4,
     "radius": 140,
     "lifetime": 3.2,
@@ -70,8 +71,8 @@
     "hue": "voltaic",
     "cycleCost": 4,
     "primitive": "beam",
-    "damage": 14,
-    "range": 900,
+    "damage": 11,
+    "range": 520,
     "beamWidth": 13,
     "description": "Instant line to the farthest enemy in range. Hits everything on the way."
   },
@@ -115,7 +116,7 @@
     "lifetime": 1.6,
     "tickInterval": 0.3,
     "cooldown": 0.4,
-    "description": "Vortex: drags everything nearby into one place. Sets up your bursts."
+    "description": "Sucks every nearby enemy into a single point for 1.6s. Deals almost no damage — it exists to bunch the horde up for whatever fires next."
   },
   {
     "id": "shove",

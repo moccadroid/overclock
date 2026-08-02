@@ -996,7 +996,10 @@ export class World {
     let bestX = x;
     let bestY = y;
     let bestCount = -1;
-    const samples = Math.min(6, this.enemies.length);
+    // Only Field hunts for a cluster (§5.4: "at the densest nearby enemy
+    // cluster"). Pull happens where its trigger happened, or it reads as a
+    // vortex appearing at random.
+    const samples = def.origin === 'cluster' ? Math.min(6, this.enemies.length) : 0;
     for (let i = 0; i < samples; i++) {
       const candidate = this.enemies[this.rng.int(this.enemies.length)]!;
       if (!candidate.alive) continue;
