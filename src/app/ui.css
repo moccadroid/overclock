@@ -1249,6 +1249,77 @@
   border-style: dotted;
 }
 
+/* Music. */
+.mu-lead {
+  max-width: 78ch;
+  margin: -2px 0 14px;
+  color: #56708c;
+  line-height: 1.65;
+}
+.track {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-bottom-color: rgba(42, 58, 82, 0.55);
+  cursor: pointer;
+}
+.track:hover {
+  border-color: var(--structure);
+}
+.track.on {
+  border-color: var(--voltaic);
+  background: rgba(0, 229, 255, 0.05);
+}
+.track.playing .tr-mark {
+  color: #4fbf87;
+}
+.tr-mark {
+  flex: none;
+  color: #2f4258;
+}
+.track.on .tr-mark {
+  color: var(--voltaic);
+}
+.tr-name {
+  flex: 0 0 170px;
+  color: var(--ink-bright);
+  letter-spacing: 0.1em;
+}
+.tr-blurb {
+  flex: 1;
+  min-width: 0;
+  color: #56708c;
+}
+.tr-tag {
+  flex: 0 0 80px;
+  text-align: right;
+  color: #6a5730;
+}
+.mu-ops {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+}
+.mu-ops button {
+  padding: 7px 14px;
+  border: 1px solid var(--structure);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  letter-spacing: 0.14em;
+  cursor: pointer;
+}
+.mu-ops button:hover {
+  border-color: var(--voltaic);
+  color: var(--voltaic);
+}
+.mu-ops button.on {
+  border-color: var(--voltaic);
+  color: var(--voltaic);
+}
+
 /* Codex. */
 .codex-row {
   display: flex;

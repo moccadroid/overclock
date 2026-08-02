@@ -21,7 +21,8 @@ import { SIM_DT } from '../sim/tunables';
 import { VISUAL } from './visual';
 import { Library } from '../meta/profile';
 import { Stinger } from './stinger';
-import { Audio } from '../audio/audio';
+import type { Audio } from '../audio/audio';
+import { TRACK_BY_ID } from '../audio/tracks';
 
 type Mode =
   | 'running'
@@ -44,8 +45,6 @@ export class Game {
   private ceremony!: CeremonyOverlay;
   private recompileChoice!: RecompileOverlay;
   private stinger!: Stinger;
-  /** §18 — one-way. The sim never learns this exists. */
-  private readonly audio = new Audio();
 
   private mode: Mode = 'running';
   private accumulator = 0;
@@ -62,8 +61,16 @@ export class Game {
   private confirmQuit = false;
   private muted = false;
 
-  /** §15.2 — the Library is the only thing here that outlives the run. */
-  constructor(config: RunConfig, private readonly library: Library) {
+  /**
+   * §15.2 — the Library is the only thing here that outlives the run. Audio is
+   * shared with the title screen so a preview and a run are the same instrument,
+   * and so the AudioContext survives the handover between them.
+   */
+  constructor(
+    config: RunConfig,
+    private readonly library: Library,
+    private readonly audio: Audio,
+  ) {
     this.world = new World(config);
   }
 
@@ -89,6 +96,12 @@ export class Game {
     this.muted = this.library.snapshot.settings.muted;
     this.audio.setMuted(this.muted);
     this.audio.setVolume(this.library.snapshot.settings.volume);
+    // A chosen track wins; otherwise the Axiom decides, so the Program you
+    // start with is also the sound you start with.
+    const chosen = this.library.snapshot.settings.track;
+    const track = chosen ? TRACK_BY_ID.get(chosen) : undefined;
+    if (track) this.audio.setTrack(track);
+    else this.audio.setTrackForAxiom(this.world.config.axiomId);
     this.audio.start();
 
     this.lastFrame = performance.now();
@@ -117,7 +130,7 @@ export class Game {
     if (cmd === 'mute') {
       this.muted = !this.muted;
       this.audio.setMuted(this.muted);
-      this.library.setAudio(this.muted, 0.7);
+      this.library.setAudio(this.muted, this.library.snapshot.settings.volume);
       this.hud.flash(this.muted ? 'AUDIO MUTED  [M]' : 'AUDIO ON  [M]');
       return;
     }

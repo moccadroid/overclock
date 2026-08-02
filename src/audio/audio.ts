@@ -31,15 +31,19 @@ import { Clock } from './clock';
 import {
   bass,
   chord,
+  clap,
   hat,
   hurt,
   kick,
-  noteHz,
+  motif,
   pad,
   playHue,
+  semiHz,
+  stab,
   sub,
   type VoiceCtx,
 } from './voices';
+import { CHORD_TONES, TRACKS, trackForAxiom, type Track } from './tracks';
 
 /**
  * §18.4 — polyphony cap. Three, not ten: the point of an accent is that it is
@@ -47,18 +51,16 @@ import {
  */
 const MAX_ACCENTS_PER_STEP = 3;
 
-/** Bass patterns, 16 steps. `-1` is a rest; numbers are scale degrees. */
-const BASS_PATTERNS: number[][] = [
-  // Sparse — root on the offbeat. Barely there, holds the floor.
-  [-1, -1, 0, -1, -1, -1, 0, -1, -1, -1, 0, -1, -1, -1, 0, -1],
-  // Driving — the classic offbeat pump with a walk at the end of the bar.
-  [-1, -1, 0, -1, -1, -1, 0, -1, -1, -1, 0, -1, -1, 2, 0, 3],
-  // Busy — sixteenth stabs. Only earned at high intensity.
-  [0, -1, 0, 3, -1, 0, 0, -1, 2, -1, 0, 3, -1, 0, 5, 3],
-];
+/**
+ * Your fullest gauge used to transpose the key. That was a mistake: it modulated
+ * the track mid-phrase with no cadence, which is indistinguishable from the
+ * chords being random. The hue is still a readout, but of *timbre* — how bright
+ * the filter sits — which colours the track without moving it.
+ */
+const HUE_COLOUR: Record<Hue, number> = { thermal: 1, voltaic: 1.45, void: 0.7 };
 
-/** Which scale degree each hue roots the track on. */
-const HUE_ROOT: Record<Hue, number> = { thermal: 0, voltaic: 2, void: 3 };
+/** §18 — techno moves in 16-bar phrases. Everything automated rides this. */
+const PHRASE_BARS = 16;
 
 export interface AudioState {
   /** 0..1 — how busy the engine is, from EPS. Drives the arrangement. */
@@ -83,6 +85,8 @@ export class Audio {
   private engineBus!: GainNode;
   private shaper!: WaveShaperNode;
   private lowShelf!: BiquadFilterNode;
+  /** Automated across each 16-bar phrase - the genre's build and release. */
+  private musicFilter!: BiquadFilterNode;
 
   private state: AudioState = {
     intensity: 0,
@@ -97,6 +101,12 @@ export class Audio {
   private occasions: AudioCue[] = [];
   private muted = false;
   private volume = 0.7;
+  private track: Track = TRACKS[0]!;
+  /** Bars elapsed, for walking the progression. */
+  private bar = 0;
+  private silenced = false;
+  /** The chord currently sounding. Accents snap to it. */
+  private tones: number[] = [0, 3, 7];
   /** Smoothed, so the arrangement never flickers between layers frame to frame. */
   private smoothed = 0;
 
@@ -138,9 +148,15 @@ export class Audio {
     this.punchBus.gain.value = 0.95;
     this.punchBus.connect(this.lowShelf);
 
+    this.musicFilter = ctx.createBiquadFilter();
+    this.musicFilter.type = 'lowpass';
+    this.musicFilter.frequency.value = 2200;
+    this.musicFilter.Q.value = 1.1;
+    this.musicFilter.connect(this.lowShelf);
+
     this.musicBus = ctx.createGain();
     this.musicBus.gain.value = 0.9;
-    this.musicBus.connect(this.lowShelf);
+    this.musicBus.connect(this.musicFilter);
 
     this.engineBus = ctx.createGain();
     this.engineBus.gain.value = 0.5;
@@ -162,10 +178,96 @@ export class Audio {
     if (this.ctx && !this.muted) this.master.gain.value = this.volume;
   }
 
+  get trackId(): string {
+    return this.track.id;
+  }
+
+  /** True while the arrangement is running — the Music pane shows a ▶ for it. */
+  get playing(): boolean {
+    return this.clock !== null && !this.silenced;
+  }
+
+  /**
+   * Stop the arrangement without tearing down the context.
+   *
+   * Closing an AudioContext is one-way in some browsers and re-creating one
+   * needs another user gesture, so "stop" mutes the busses and parks the clock
+   * instead. The run can start the music again with no gesture at all.
+   */
+  silence(): void {
+    if (!this.ctx) return;
+    this.silenced = true;
+    this.clock?.stop();
+    for (const bus of [this.punchBus, this.musicBus, this.engineBus]) {
+      bus.gain.cancelScheduledValues(this.ctx.currentTime);
+      bus.gain.value = 0;
+    }
+  }
+
+  private resumeBusses(): void {
+    if (!this.ctx || !this.silenced) return;
+    this.silenced = false;
+    this.punchBus.gain.value = 0.95;
+    this.musicBus.gain.value = 0.9;
+    this.engineBus.gain.value = 0.5;
+    this.clock?.start();
+  }
+
+  setTrack(track: Track): void {
+    this.track = track;
+  }
+
+  /** The Axiom you started with is the song you hear. */
+  setTrackForAxiom(axiomId: string): void {
+    this.track = trackForAxiom(axiomId);
+  }
+
+  /**
+   * Menu preview: run the arrangement with no game behind it, at a fixed
+   * intensity high enough to hear every layer the track has.
+   */
+  preview(track: Track, intensity = 0.72): void {
+    this.start();
+    this.resumeBusses();
+    this.track = track;
+    this.bar = 0;
+    this.smoothed = intensity;
+    this.state = {
+      intensity,
+      dominant: 'thermal',
+      heat: 0,
+      stalled: false,
+      meltdown: 0,
+    };
+    if (this.clock) this.clock.bpm = 112;
+  }
+
+  /**
+   * The chord under the current bar, as absolute semitones.
+   *
+   * Held for `barsPerChord`, so a two-chord track turns over every eight or
+   * sixteen bars. That slowness is the point — a change nobody waited for is not
+   * a change anybody notices.
+   */
+  private chordTones(): number[] {
+    const prog = this.track.progression;
+    const index = Math.floor(this.bar / this.track.barsPerChord) % prog.length;
+    const c = prog[index]!;
+    const base = this.track.key + c.root;
+    return CHORD_TONES[c.quality].map((t) => base + t);
+  }
+
+  /** 0..1 across a 16-bar phrase. The genre's actual sense of going somewhere. */
+  private get phrase(): number {
+    return (this.bar % PHRASE_BARS) / PHRASE_BARS;
+  }
+
   /** Called each frame with the run's mood and the cues it produced. */
   update(state: AudioState, cues: AudioCue[]): void {
     this.state = state;
     if (!this.ctx || !this.clock) return;
+    // A run always un-silences: STOP PREVIEW is a menu control, not a mute.
+    this.resumeBusses();
 
     // Intensity is smoothed hard. A cascade spikes EPS for half a second, and an
     // arrangement that adds and drops a layer inside half a second sounds broken
@@ -208,39 +310,81 @@ export class Audio {
     if (!this.ctx) return;
     const punch = this.voice(this.punchBus);
     const music = this.voice(this.musicBus);
+    const t = this.track;
     const i = this.smoothed;
-    const root = HUE_ROOT[this.state.dominant];
-    const beat = (60 / (this.clock?.bpm ?? 112)) * 4;
+    const beat = 60 / (this.clock?.bpm ?? 112);
 
-    // Four on the floor, always. A techno track without a kick is not one.
-    if (index % 4 === 0) {
+    if (index === 0) this.bar = Math.floor(count / 16);
+    const tones = this.chordTones();
+    this.tones = tones;
+
+    // §18 — the phrase. Techno does not build with chords, it builds by opening
+    // a filter and adding layers over sixteen bars, then dropping them and doing
+    // it again. This is the number that makes a loop feel like an arrangement.
+    const phrase = this.phrase;
+    const openness = 0.25 + phrase * 0.75;
+    const colour = HUE_COLOUR[this.state.dominant];
+    this.musicFilter.frequency.setTargetAtTime(
+      420 + openness * colour * 5200 * (0.5 + i * 0.5),
+      at,
+      0.08,
+    );
+
+    // Swing: delay the offbeat sixteenths. A little of this is the whole
+    // difference between a machine and a groove.
+    const swung = index % 2 === 1 ? at + beat * 0.25 * t.swing : at;
+
+    if (t.kick[index]) {
       kick(punch, at, 0.95);
       this.duck(at);
     }
+    // Clap on 2 and 4 - with the kick, the thing the body counts. It drops out
+    // for the last bar of a phrase, which is what makes the next downbeat land.
+    if (t.clap[index] && this.bar % PHRASE_BARS !== PHRASE_BARS - 1) {
+      clap(punch, at, 0.75);
+    }
 
-    // Layers arrive with intensity, and each one is a rung: you can hear the
-    // arrangement grow as your engine does.
-    if (i > 0.08 && index % 4 === 2) hat(music, at, 0.8);
-    if (i > 0.45 && index % 2 === 1) hat(music, at, 0.35);
-    if (i > 0.75 && index % 8 === 6) hat(music, at, 0.55, true);
+    const d = i * t.drive;
+    if (d > 0.08 && index % 4 === 2) hat(music, swung, 0.8);
+    if (d > 0.4 && index % 2 === 1) hat(music, swung, 0.35);
+    if ((d > 0.7 || phrase > 0.6) && index % 8 === 6) hat(music, swung, 0.55, true);
 
-    // The bassline. Pattern is chosen by intensity, root by your fullest gauge,
-    // so the track's key is a readout of the fuel you are sitting on.
+    // The bassline walks the chord: pattern values index into its tones, so the
+    // bass is always playing the harmony rather than a line beside it.
     if (i > 0.03) {
-      const pattern = BASS_PATTERNS[i > 0.7 ? 2 : i > 0.3 ? 1 : 0]!;
-      const degree = pattern[index]!;
-      if (degree >= 0) bass(music, at, noteHz(root + degree) / 2, 0.85);
+      const pattern = t.bass[i > 0.7 ? 2 : i > 0.3 ? 1 : 0]!;
+      const tone = pattern[index]!;
+      if (tone >= 0) {
+        bass(music, swung, semiHz(tones[tone % tones.length]! - 12), 0.85, {
+          wave: t.bassWave,
+          q: t.bassQ,
+          brightness: t.bassBrightness * colour,
+        });
+      }
     }
 
-    // Sub on the downbeat of every other bar — the floor under the floor.
-    if (index === 0 && count % 32 === 0) {
-      sub(punch, at, noteHz(root) / 2, 0.7, beat * 2);
+    if (index === 0) sub(punch, at, semiHz(tones[0]! - 24), 0.7, beat * 2);
+
+    // The stab. Enters a quarter of the way into a phrase and is most of what
+    // reads as melody in this genre.
+    if (t.stab[index] && (phrase > 0.24 || i > 0.5)) {
+      stab(music, swung, tones, 0.7 + i * 0.5, t.stabWave);
     }
 
-    // A pad, once the run is genuinely loud. Two bars long, so it reads as
-    // atmosphere rather than a part.
-    if (i > 0.55 && index === 0 && count % 32 === 0) {
-      pad(music, at, root, Math.min(1, (i - 0.55) * 2.5), beat * 2);
+    // The motif: one or two bars, repeated unchanged. The hook is repetition,
+    // not development - so it arrives on a phrase boundary and then never varies.
+    if (phrase > 0.48 || i > 0.65) {
+      const step = t.motif[index]!;
+      if (step >= 0) {
+        const octave = step >= 3 ? 12 : 0;
+        motif(music, swung, semiHz(tones[step % 3]! + 24 + octave), 0.9);
+      }
+    }
+
+    // The pad states the chord, once per chord rather than once per bar, so it
+    // does not restate something that has not changed.
+    if (i > 0.35 && index === 0 && this.bar % t.barsPerChord === 0) {
+      pad(music, at, tones, Math.min(1, (i - 0.35) * 1.8), beat * 4 * t.barsPerChord, t.padWave);
     }
 
     this.flush(at, i);
@@ -277,11 +421,14 @@ export class Audio {
     // Occasions first, and never dropped. A level-up chord that loses its slot
     // to the 300th kill note is the system defeating its own purpose.
     for (const occasion of this.occasions.splice(0, 2)) {
+      const tones = this.chordTones();
       if (occasion.kind === 'overheat') {
-        sub(voice, at, noteHz(0) / 2, 1, 1.1);
-        chord(voice, at, HUE_ROOT[this.state.dominant] - 2, 0.75, 1.6);
+        // Overheat resolves *down* a fourth: the one chord in the game that
+        // sounds like something went wrong rather than right.
+        sub(voice, at, semiHz(tones[0]! - 29), 1, 1.1);
+        chord(voice, at, tones.map((x) => x - 5), 0.75, 1.6, this.track.padWave);
       } else {
-        chord(voice, at, HUE_ROOT[this.state.dominant], 1);
+        chord(voice, at, tones, 1, 2.2, this.track.padWave);
       }
     }
 
@@ -311,15 +458,11 @@ export class Audio {
       heard.add(key);
 
       const gain = (0.3 + cue.weight * 0.6) * duckToArrangement;
-      if (cue.kind === 'convert') {
-        playHue(voice, cue.hue, at, 10, gain);
-      } else if (cue.kind === 'pickup') {
-        playHue(voice, cue.hue, at, 14 + (cue.depth % 3), gain * 0.6);
-      } else {
-        // Depth climbs the scale: a deep cascade rises as it travels.
-        const base = cue.kind === 'kill' ? 7 : 3;
-        playHue(voice, cue.hue, at, base + Math.min(cue.depth, 9), gain);
-      }
+      // Every accent is a *chord tone*. A cascade is therefore the current chord
+      // being hammered, and cannot clash with the track by construction - which
+      // is the only way forty simultaneous notes were ever going to work.
+      const base = cue.kind === 'kill' ? 2 : cue.kind === 'pickup' ? 4 : 0;
+      playHue(voice, cue.hue, at, this.chordNote(base + cue.depth), gain);
       played++;
     }
   }
@@ -328,6 +471,20 @@ export class Audio {
 
   private voice(out: AudioNode): VoiceCtx {
     return { ctx: this.ctx!, out };
+  }
+
+  /**
+   * The n-th chord tone above the chord, climbing octaves as n grows.
+   *
+   * Cascade depth feeds this, so a deep cascade is an arpeggio running up the
+   * chord - the rise the HUD's depth counter cannot convey, and in key by
+   * construction rather than by luck.
+   */
+  private chordNote(n: number): number {
+    const tones = this.tones;
+    const clamped = Math.max(0, Math.min(11, n));
+    const octave = Math.floor(clamped / tones.length);
+    return semiHz(tones[clamped % tones.length]! + 24 + octave * 12);
   }
 
   /** Soft clip. 0 is transparent; 1 is an engine coming apart. */

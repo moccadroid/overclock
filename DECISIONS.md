@@ -1471,6 +1471,65 @@ low end got heavier without eating the headroom.
 
 ---
 
+## D-73 · BUG · The chords sounded random, for two separate reasons
+
+Reported as "just random chords... at some points there's no progression". Both
+causes were mine, and both were the same category of error: making something a
+*readout* at the cost of making it music.
+
+**The key followed your fullest fuel gauge.** `HUE_TINT` transposed the entire
+track by up to four semitones whenever your dominant hue changed — mid-phrase,
+with no cadence, at a moment decided by combat. That is not a modulation, it is
+a glitch with a rationale. The hue is still a readout, but of *timbre* now: it
+moves the filter brightness, which colours the track without moving it.
+
+**The accents ignored the chord.** Engine events played a fixed A-minor
+pentatonic no matter what was underneath. Over a G major that puts a C against a
+B — a minor ninth, the most dissonant interval available — so any cascade during
+that chord sounded like a mistake. Accents now snap to the *current chord's*
+tones, and cascade depth climbs through them. A forty-hit cascade is the chord
+being arpeggiated, and cannot clash by construction.
+
+A test also caught a third, quieter one: Feedback's bass reached for a fourth
+chord tone that its `sus` chord does not have, so on those bars it silently
+wrapped back to the root.
+
+## D-74 · SETTLED · This is techno, so build it like techno
+
+The first version wrote pop songs — four chords, one per bar. That is why it
+sounded like a loop of unrelated chords rather than a track. What the genre
+actually does:
+
+- **Modal, not harmonic.** One tonal centre that stays put. Two chords is a lot.
+  Chords are now held two to eight bars, so a change *lands*.
+- **Movement is the filter and the arrangement, over 16-bar phrases.** The loop
+  opens up and closes down; layers enter and drop at phrase boundaries. That is
+  the "progression" this music has, and it was entirely missing.
+- **Clap on 2 and 4.** With the kick it is the thing the body counts, and there
+  wasn't one. It drops for the last bar of a phrase, which is what makes the
+  next downbeat land.
+- **The stab** — a short chord hit on an offbeat — is Detroit's whole
+  personality and is where most of what people hear as melody lives.
+- **A motif that repeats unchanged.** The hook is repetition, not development,
+  so the wandering arpeggio was replaced by a fixed 16-step phrase per track.
+
+## D-75 · SETTLED · One song per Axiom
+
+The Axiom you start with is now the sound you play in. It makes the Axiom a
+choice about how a run *feels* as well as how it opens, gives the Music menu a
+reason to exist beyond a settings list, and gives the track roster a natural
+place to grow — §8.4 wants six Axioms in v1, which is six tracks.
+
+Ignition is warm and straight, Circuit is acid and relentless, Feedback is dub
+techno with a broken kick and chords that hang. A test asserts every Axiom has a
+track and every track has an Axiom, because a missing one silently falls back to
+the first and makes two Axioms sound identical.
+
+Seed-derived track selection is gone with it — the Axiom is a better answer,
+and it is one the player chose.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

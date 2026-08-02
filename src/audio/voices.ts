@@ -23,6 +23,17 @@ import type { Hue } from '../sim/types';
 const SCALE = [0, 3, 5, 7, 10];
 const ROOT = 55; // A1
 
+/**
+ * Semitones above A1. The musical layers — bass, chords, pad — work in
+ * semitones because a chord progression needs notes the pentatonic does not
+ * contain. The hue accents keep using `noteHz`, and that is safe: the pentatonic
+ * is a subset of every mode these progressions use, so a cascade of forty
+ * accents can sit over any chord without ever clashing.
+ */
+export function semiHz(semitones: number): number {
+  return ROOT * Math.pow(2, semitones / 12);
+}
+
 export function noteHz(degree: number): number {
   const octave = Math.floor(degree / SCALE.length);
   const step = SCALE[((degree % SCALE.length) + SCALE.length) % SCALE.length]!;
@@ -125,11 +136,106 @@ const HUE_VOICE: Record<Hue, (v: VoiceCtx, at: number, hz: number, gain: number)
 };
 
 /**
- * An engine event, as a note. Depth climbs the scale, which is why a deep
- * cascade audibly *rises* — the one thing the depth counter cannot convey.
+ * An engine event, as a note.
+ *
+ * Takes a frequency rather than a scale degree, because the arranger snaps every
+ * accent to the *current chord*. The first version played a fixed A-minor
+ * pentatonic over whatever chord happened to be underneath, which puts a C
+ * against a G major's B — a minor ninth, the most dissonant interval available,
+ * and the reason a cascade could sound like a mistake.
  */
-export function playHue(v: VoiceCtx, hue: Hue, at: number, degree: number, gain: number): void {
-  HUE_VOICE[hue](v, at, noteHz(degree), gain);
+export function playHue(v: VoiceCtx, hue: Hue, at: number, hz: number, gain: number): void {
+  HUE_VOICE[hue](v, at, hz, gain);
+}
+
+/**
+ * Clap on 2 and 4. Three noise bursts a few milliseconds apart, because one
+ * burst is a click and a real clap is many hands not quite together.
+ */
+export function clap(v: VoiceCtx, at: number, gain: number): void {
+  const { ctx } = v;
+  const bus = ctx.createGain();
+  bus.gain.value = gain * 0.3;
+
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'bandpass';
+  filter.frequency.value = 1500;
+  filter.Q.value = 0.9;
+  bus.connect(filter).connect(v.out);
+
+  for (const [offset, level, dur] of [
+    [0, 1, 0.02],
+    [0.009, 0.75, 0.02],
+    [0.019, 0.6, 0.14],
+  ] as const) {
+    const frames = Math.ceil(ctx.sampleRate * (dur + 0.02));
+    const buf = ctx.createBuffer(1, frames, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < frames; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / frames, 3);
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const g = ctx.createGain();
+    g.gain.value = level;
+    src.connect(g).connect(bus);
+    src.start(at + offset);
+    src.stop(at + offset + dur + 0.02);
+  }
+}
+
+/**
+ * The stab: a short, hard chord hit on an offbeat. Detroit's whole personality
+ * in one voice — most of what people hear as "the melody" in techno is this.
+ */
+export function stab(
+  v: VoiceCtx,
+  at: number,
+  semitones: number[],
+  gain: number,
+  wave: OscillatorType = 'sawtooth',
+): void {
+  const { ctx } = v;
+  const dur = 0.14;
+  const g = env(ctx, at, 0.003, dur, gain * 0.13);
+
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.setValueAtTime(5200, at);
+  filter.frequency.exponentialRampToValueAtTime(1100, at + dur);
+  filter.Q.value = 4;
+  filter.connect(g).connect(v.out);
+
+  for (const semi of semitones) {
+    const hz = semiHz(semi + 24);
+    for (const cents of [-6, 6]) {
+      const o = osc(ctx, wave, hz * Math.pow(2, cents / 1200), at, at + dur + 0.05);
+      const vg = ctx.createGain();
+      vg.gain.value = 0.4;
+      o.connect(vg).connect(filter);
+    }
+  }
+}
+
+/** One note of the repeating motif. Plucked, bright, sits above the bass. */
+export function motif(v: VoiceCtx, at: number, hz: number, gain: number): void {
+  const { ctx } = v;
+  const dur = 0.19;
+  const g = env(ctx, at, 0.004, dur, gain * 0.09);
+
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.setValueAtTime(hz * 6, at);
+  filter.frequency.exponentialRampToValueAtTime(hz * 1.5, at + dur);
+  filter.Q.value = 7;
+
+  const o = osc(ctx, 'sawtooth', hz, at, at + dur + 0.05);
+  const o2 = osc(ctx, 'square', hz * 2.002, at, at + dur + 0.05);
+  const og = ctx.createGain();
+  og.gain.value = 0.35;
+  o.connect(filter);
+  o2.connect(og).connect(filter);
+  filter.connect(g).connect(v.out);
 }
 
 // -------------------------------------------------------------- the backing
@@ -169,17 +275,34 @@ export function kick(v: VoiceCtx, at: number, gain: number): void {
  * The bassline. A short plucked saw through a resonant lowpass — the sound the
  * whole genre is built on, and the layer that turns a beat into a track.
  */
-export function bass(v: VoiceCtx, at: number, hz: number, gain: number, dur = 0.16): void {
+export interface BassVoice {
+  wave: OscillatorType;
+  q: number;
+  brightness: number;
+}
+
+export function bass(
+  v: VoiceCtx,
+  at: number,
+  hz: number,
+  gain: number,
+  voice: BassVoice,
+  dur = 0.16,
+): void {
   const { ctx } = v;
   const g = env(ctx, at, 0.006, dur, gain * 0.6);
 
   const filter = ctx.createBiquadFilter();
   filter.type = 'lowpass';
-  filter.frequency.setValueAtTime(Math.min(3200, hz * 14), at);
-  filter.frequency.exponentialRampToValueAtTime(Math.max(80, hz * 2.2), at + dur * 0.8);
-  filter.Q.value = 9;
+  filter.frequency.setValueAtTime(Math.min(4200, hz * 14 * voice.brightness), at);
+  filter.frequency.exponentialRampToValueAtTime(
+    Math.max(70, hz * 2.2 * voice.brightness),
+    at + dur * 0.8,
+  );
+  filter.Q.value = voice.q;
 
-  const o = osc(ctx, 'sawtooth', hz, at, at + dur + 0.06);
+  const o = osc(ctx, voice.wave, hz, at, at + dur + 0.06);
+  // An octave-down square under everything, for weight the filter cannot remove.
   const o2 = osc(ctx, 'square', hz / 2, at, at + dur + 0.06);
   const subGain = ctx.createGain();
   subGain.gain.value = 0.5;
@@ -198,11 +321,15 @@ export function bass(v: VoiceCtx, at: number, hz: number, gain: number, dur = 0.
  * it has to do. Kept rare on purpose. A fanfare you hear every thirty seconds
  * stops marking anything.
  */
-export function chord(v: VoiceCtx, at: number, root: number, gain: number, dur = 2.2): void {
+export function chord(
+  v: VoiceCtx,
+  at: number,
+  semitones: number[],
+  gain: number,
+  dur = 2.2,
+  wave: OscillatorType = 'sawtooth',
+): void {
   const { ctx } = v;
-  // Root, fifth, octave, tenth — open and unambiguous, no third to argue with
-  // whatever the bassline is doing.
-  const degrees = [root, root + 3, root + 5, root + 7];
 
   const bus = ctx.createGain();
   bus.gain.value = 1;
@@ -217,12 +344,12 @@ export function chord(v: VoiceCtx, at: number, root: number, gain: number, dur =
   const g = env(ctx, at, 0.09, dur, gain * 0.24);
   bus.connect(filter).connect(g).connect(v.out);
 
-  for (const d of degrees) {
-    const hz = noteHz(d + 10);
+  for (const semi of semitones) {
+    const hz = semiHz(semi + 24);
     // Three voices per note, detuned. The beating between them is the "ensemble"
     // — one oscillator per note would sound like an organ.
     for (const cents of [-7, 0, 7]) {
-      const o = osc(ctx, 'sawtooth', hz * Math.pow(2, cents / 1200), at, at + dur + 0.3);
+      const o = osc(ctx, wave, hz * Math.pow(2, cents / 1200), at, at + dur + 0.3);
       const vg = ctx.createGain();
       vg.gain.value = 0.33;
       o.connect(vg).connect(bus);
@@ -230,8 +357,14 @@ export function chord(v: VoiceCtx, at: number, root: number, gain: number, dur =
   }
 }
 
-/** A sustained pad under everything, once the run is loud enough to earn it. */
-export function pad(v: VoiceCtx, at: number, root: number, gain: number, dur: number): void {
+export function pad(
+  v: VoiceCtx,
+  at: number,
+  semitones: number[],
+  gain: number,
+  dur: number,
+  wave: OscillatorType = 'sawtooth',
+): void {
   const { ctx } = v;
   const filter = ctx.createBiquadFilter();
   filter.type = 'lowpass';
@@ -241,10 +374,10 @@ export function pad(v: VoiceCtx, at: number, root: number, gain: number, dur: nu
   const g = env(ctx, at, dur * 0.35, dur * 0.65, gain * 0.1);
   filter.connect(g).connect(v.out);
 
-  for (const d of [root, root + 3, root + 7]) {
-    const hz = noteHz(d + 5);
+  for (const semi of semitones) {
+    const hz = semiHz(semi + 12);
     for (const cents of [-11, 11]) {
-      const o = osc(ctx, 'sawtooth', hz * Math.pow(2, cents / 1200), at, at + dur + 0.4);
+      const o = osc(ctx, wave, hz * Math.pow(2, cents / 1200), at, at + dur + 0.4);
       const vg = ctx.createGain();
       vg.gain.value = 0.3;
       o.connect(vg).connect(filter);

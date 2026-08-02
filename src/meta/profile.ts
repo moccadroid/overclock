@@ -81,7 +81,7 @@ export interface LibraryData {
    * either trip it or force the guard to be loosened. Neither is worth it:
    * settings are not progression, so they live somewhere else.
    */
-  settings: { muted: boolean; volume: number };
+  settings: { muted: boolean; volume: number; track: string };
 }
 
 function emptyData(): LibraryData {
@@ -93,7 +93,7 @@ function emptyData(): LibraryData {
     bestScore: 0,
     bestDepth: 0,
     bestTime: 0,
-    settings: { muted: false, volume: 0.7 },
+    settings: { muted: false, volume: 0.7, track: '' },
   };
 }
 
@@ -126,6 +126,9 @@ export class Library {
         settings: {
           muted: parsed.settings?.muted === true,
           volume: number(parsed.settings?.volume) ?? base.settings.volume,
+          // '' means "let the seed choose", which is the default and the one
+          // that keeps a shared seed sounding the same for everyone.
+          track: typeof parsed.settings?.track === 'string' ? parsed.settings.track : '',
         },
       };
     } catch {
@@ -208,7 +211,12 @@ export class Library {
   }
 
   setAudio(muted: boolean, volume: number): void {
-    this.data.settings = { muted, volume };
+    this.data.settings = { ...this.data.settings, muted, volume };
+    this.save();
+  }
+
+  setTrack(track: string): void {
+    this.data.settings = { ...this.data.settings, track };
     this.save();
   }
 

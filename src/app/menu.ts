@@ -18,8 +18,10 @@ import { BRANDING } from '../branding';
 import { shapeSvg } from './gfx/shapes';
 import { inspector } from './overlays';
 import { renderPrimer } from './primer';
+import type { Audio } from '../audio/audio';
+import { TRACKS, TRACK_BY_ID, trackForAxiom } from '../audio/tracks';
 
-type Pane = 'setup' | 'library' | 'codex' | 'primer';
+type Pane = 'setup' | 'library' | 'codex' | 'music' | 'primer';
 
 export interface SetupResult {
   seed: string;
@@ -47,6 +49,7 @@ export class TitleScreen {
   constructor(
     root: HTMLElement,
     private readonly library: Library,
+    private readonly audio: Audio,
   ) {
     this.el = document.createElement('div');
     this.el.id = 'title';
@@ -77,7 +80,7 @@ export class TitleScreen {
       this.start();
     } else if (ev.key === 'Tab') {
       ev.preventDefault();
-      const order: Pane[] = ['setup', 'library', 'codex', 'primer'];
+      const order: Pane[] = ['setup', 'library', 'codex', 'music', 'primer'];
       this.pane = order[(order.indexOf(this.pane) + 1) % order.length]!;
       this.render();
     } else if (ev.key === 'h' || ev.key === 'H' || ev.key === '?') {
@@ -102,7 +105,7 @@ export class TitleScreen {
     const panel = document.createElement('div');
     panel.className = 'panel title-panel';
 
-    const tabs = (['setup', 'library', 'codex', 'primer'] as const)
+    const tabs = (['setup', 'library', 'codex', 'music', 'primer'] as const)
       .map(
         (p) =>
           `<span class="tab${p === this.pane ? ' on' : ''}" data-pane="${p}">` +
@@ -123,7 +126,9 @@ export class TitleScreen {
           ? this.renderLibrary()
           : this.pane === 'codex'
             ? this.renderCodex()
-            : `<div class="primer-pane">${renderPrimer(false)}</div>`) +
+            : this.pane === 'music'
+              ? this.renderMusic()
+              : `<div class="primer-pane">${renderPrimer(false)}</div>`) +
       `<div class="title-foot">TAB switch · H how it works · ENTER start run</div>`;
 
     // Hover reading, in-world, in a fixed place. See `inspector`.
@@ -147,6 +152,27 @@ export class TitleScreen {
       this.render();
     });
     panel.querySelector('.go')?.addEventListener('click', () => this.start());
+
+    for (const row of panel.querySelectorAll<HTMLElement>('[data-track]')) {
+      row.addEventListener('click', () => {
+        const id = row.dataset.track!;
+        // Clicking a row previews it *and* selects it. Two separate controls for
+        // "hear this" and "use this" is one more decision than the screen needs.
+        this.library.setTrack(id);
+        const track = TRACK_BY_ID.get(id);
+        if (track) this.audio.preview(track);
+        this.render();
+      });
+    }
+    panel.querySelector('.track-auto')?.addEventListener('click', () => {
+      this.library.setTrack('');
+      this.audio.preview(trackForAxiom(this.axiomId));
+      this.render();
+    });
+    panel.querySelector('.track-stop')?.addEventListener('click', () => {
+      this.audio.silence();
+      this.render();
+    });
 
     const field = panel.querySelector<HTMLInputElement>('.seed-field');
     field?.addEventListener('input', () => {
@@ -254,6 +280,57 @@ export class TitleScreen {
       `<div class="lib-cols">` +
       `<div class="lib-disc"><div class="k">discoveries</div>${discoveries}</div>` +
       `<div class="lib-pool">${groups}</div>` +
+      `</div>` +
+      `</div>`
+    );
+  }
+
+  /**
+   * §18 — the Music pane.
+   *
+   * Every track is synthesized from a handful of numbers, so previewing one is
+   * literally running the arrangement with no game behind it. That makes this
+   * screen honest in a way a jukebox of recordings would not be: what you hear
+   * here is exactly what the run will play, at an intensity partway up the
+   * arrangement so every layer the track has is audible.
+   */
+  private renderMusic(): string {
+    // Resolve through the registry: a stored id for a track that no longer
+    // exists is not "some other track", it is no choice at all. Without this a
+    // renamed track leaves the menu with nothing selected and no way to tell.
+    const stored = this.library.snapshot.settings.track;
+    const chosen = TRACK_BY_ID.has(stored) ? stored : '';
+    const auto = trackForAxiom(this.axiomId);
+    const playing = this.audio.playing ? this.audio.trackId : null;
+
+    const rows = TRACKS.map((t) => {
+      const on = chosen === t.id;
+      const isAuto = chosen === '' && t.id === auto.id;
+      return (
+        `<div class="track${on ? ' on' : ''}${playing === t.id ? ' playing' : ''}" ` +
+        `data-track="${t.id}">` +
+        `<span class="tr-mark">${playing === t.id ? '▶' : on ? '▣' : '▢'}</span>` +
+        `<span class="tr-name">${t.name}</span>` +
+        `<span class="tr-blurb">${t.blurb}</span>` +
+        `<span class="tr-tag">${isAuto ? 'your axiom' : ''}</span>` +
+        `</div>`
+      );
+    }).join('');
+
+    return (
+      `<div class="music">` +
+      `<div class="k">soundtrack — click one to hear it and use it</div>` +
+      `<div class="mu-lead">One track per Axiom — the Program you start with is ` +
+      `the sound you start in. Nothing here is recorded: each is a pair of chords, ` +
+      `a set of patterns and a synth character, played live. Every note your ` +
+      `engine fires is snapped to the chord underneath it, so a forty-hit cascade ` +
+      `lands as harmony rather than noise. The arrangement opens and closes over ` +
+      `sixteen-bar phrases, which is where the movement comes from.</div>` +
+      rows +
+      `<div class="mu-ops">` +
+      `<button class="track-auto${chosen === '' ? ' on' : ''}">` +
+      `AUTO — follow the axiom</button>` +
+      `<button class="track-stop">STOP PREVIEW</button>` +
       `</div>` +
       `</div>`
     );

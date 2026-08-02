@@ -10,6 +10,7 @@ import { Game } from './app/game';
 import { TitleScreen } from './app/menu';
 import { BRANDING } from './branding';
 import { Library } from './meta/profile';
+import { Audio } from './audio/audio';
 import './app/ui.css';
 
 const params = new URLSearchParams(location.search);
@@ -17,6 +18,10 @@ const params = new URLSearchParams(location.search);
 // read once, here, and passed into the run as config: the sim never touches
 // storage, so a run stays reproducible from its config alone.
 const library = new Library();
+// One instrument for the whole app. The title screen previews tracks with it and
+// hands it to the run, which keeps the AudioContext alive across the handover —
+// browsers only grant one per gesture, and losing it means a silent run.
+const audio = new Audio();
 
 /**
  * Playtest hook: `?meltdown=90` brings the Meltdown line forward so the third
@@ -33,6 +38,12 @@ if (!mount) throw new Error('missing #app mount');
 const menuUi = document.createElement('div');
 menuUi.id = 'menu-ui';
 mount.appendChild(menuUi);
+
+if (import.meta.env.DEV) {
+  // Exposed before the title screen, not after: half the things worth poking at
+  // — the Library, the soundtrack — only exist in the menu.
+  (window as unknown as { __oc: Record<string, unknown> }).__oc = { library, audio };
+}
 
 const linkedSeed = params.get('seed');
 const linkedAxiom = params.get('axiom');
@@ -58,7 +69,7 @@ const autoStart =
 async function boot(): Promise<void> {
   const setup = autoStart
     ? { seed: linkedSeed!, axiomId: linkedAxiom! }
-    : await new TitleScreen(menuUi, library).present({
+    : await new TitleScreen(menuUi, library, audio).present({
         ...(linkedSeed ? { seed: linkedSeed } : {}),
         ...(linkedAxiom ? { axiomId: linkedAxiom } : {}),
       });
@@ -82,13 +93,17 @@ async function boot(): Promise<void> {
       ...(meltdownAt === undefined ? {} : { meltdownAt }),
     },
     library,
+    audio,
   );
   await game.start(mount!);
 
   if (import.meta.env.DEV) {
     // Dev console handle: __oc.game.debugStep(30) advances 30s and returns a
     // state snapshot; __oc.library.reset() wipes the Library for a fresh account.
-    (window as unknown as { __oc: unknown }).__oc = { game, library, ...setup };
+    Object.assign((window as unknown as { __oc: Record<string, unknown> }).__oc, {
+      game,
+      ...setup,
+    });
   }
 
   console.info(
