@@ -290,7 +290,7 @@ export class Game {
       time: this.world.time,
     });
 
-    this.message.showResults(this.world, this.library);
+    this.message.showResults(this.world, this.library, (cmd) => this.onCommand(cmd));
   }
 
   /**

@@ -145,12 +145,24 @@ export class DraftOverlay extends Overlay {
       cards.appendChild(el);
     });
 
+    // Every affordance drawn as a control has to be one. "REROLL [R]" set as
+    // plain text reads as a button, and a button that ignores clicks makes the
+    // player conclude the game is broken rather than that they used the wrong
+    // input — so the keyboard hint rides on a real button.
     const rail = document.createElement('div');
     rail.className = 'rail';
-    rail.textContent =
-      `REROLL [R] x${world.rerolls}     PURGE x${world.purges}     ` +
-      `PICK [1] [2] [3]     queued: ${world.pendingDrafts}`;
 
+    const reroll = document.createElement('button');
+    reroll.className = 'railbtn';
+    reroll.textContent = `REROLL [R] ×${world.rerolls}`;
+    reroll.disabled = world.rerolls <= 0;
+    reroll.addEventListener('click', () => this.reroll());
+
+    const rest = document.createElement('span');
+    rest.textContent =
+      `PURGE ×${world.purges}     PICK [1] [2] [3]     queued: ${world.pendingDrafts}`;
+
+    rail.append(reroll, rest);
     this.el.append(cards, rail);
   }
 }
@@ -754,12 +766,23 @@ export class MessageOverlay extends Overlay {
     this.setOpen(true);
   }
 
-  /** §14 — the Results screen, with the run-trace chart as its hero element. */
-  showResults(world: World, library: Library): void {
+  /**
+   * §14 — the Results screen, with the run-trace chart as its hero element.
+   *
+   * `onAction` runs the same commands the keyboard sends. Anything that looks
+   * like a control has to *be* one: an affordance drawn as a button and wired to
+   * nothing is worse than no affordance, because the player concludes the game
+   * is broken rather than that they used the wrong input.
+   */
+  showResults(world: World, library: Library, onAction: (cmd: string) => void): void {
     this.el.replaceChildren();
     const panel = document.createElement('div');
     panel.className = 'panel results-panel';
     panel.innerHTML = renderResults(world, library);
+    panel.addEventListener('click', (ev) => {
+      const hit = (ev.target as HTMLElement | null)?.closest<HTMLElement>('[data-action]');
+      if (hit?.dataset.action) onAction(hit.dataset.action);
+    });
     this.el.appendChild(panel);
     this.setOpen(true);
   }

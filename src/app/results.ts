@@ -269,8 +269,8 @@ export function renderResults(world: World, library: Library): string {
     ${wastedLine}${extractLine}
     </div>
     <div class="foot">
-      <span class="again">RUN AGAIN [ENTER]</span>
-      <span class="again">RUN SETUP &amp; LIBRARY [L / ESC]</span>
+      <button class="again" data-action="confirm">RUN AGAIN &nbsp;[ENTER]</button>
+      <button class="again" data-action="library">RUN SETUP &amp; LIBRARY &nbsp;[L / ESC]</button>
       <span class="dim">${BRANDING.title} · reload to replay this exact seed</span>
     </div>`;
 }

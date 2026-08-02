@@ -361,9 +361,28 @@
 
 .rail {
   display: flex;
+  align-items: center;
   gap: 22px;
   color: #56708c;
   font-size: 11px;
+}
+.railbtn {
+  padding: 5px 12px;
+  border: 1px solid var(--structure);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  cursor: pointer;
+}
+.railbtn:hover:enabled {
+  border-color: var(--voltaic);
+  color: var(--voltaic);
+}
+.railbtn:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 /* ---- editor ---- */
@@ -1393,8 +1412,18 @@
   font-size: 11px;
 }
 .results-panel .foot .again {
+  padding: 8px 16px;
+  border: 1px solid var(--structure);
+  background: none;
   color: var(--ink-bright);
+  font: inherit;
+  font-size: 11px;
   letter-spacing: 0.18em;
+  cursor: pointer;
+}
+.results-panel .foot .again:hover {
+  border-color: var(--voltaic);
+  color: var(--voltaic);
 }
 .results-panel .foot .dim {
   margin-left: auto;
