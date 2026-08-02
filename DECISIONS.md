@@ -1405,6 +1405,72 @@ guard to be loosened, and a loosened guard is how a damage multiplier gets in.
 
 ---
 
+## D-70 · SETTLED · Tempo is not the intensity lever
+
+Reported: "the music speeds up too much, it makes you lose the groove." Exactly
+right, and the reason is structural rather than a tuning miss. A groove works
+because your body locks to a pulse; moving the pulse continuously breaks the
+lock, so a tempo that tracks EPS is a tempo that never lets anyone settle.
+
+Real dance music does not build with BPM. It builds with arrangement.
+
+Tempo now sits at 112 and EPS does not appear in the formula at all. Only
+Meltdown moves it, to 124 — a once-per-run, permanent, announced event, which is
+the only kind of tempo change a listener can follow. Verified: 112 at zero
+intensity, 112 at full intensity, 124 only in Meltdown.
+
+## D-71 · SETTLED · Past a density, events stop being notes and become the mix
+
+Reported: "if too much happens, it stops being rhythm and starts becoming
+noise", with the fix attached — "not ALL sounds need to generate the music."
+
+One note per event works while events are rare and collapses when they are not:
+at 600 EPS the first build played ten notes every sixteenth, which is not
+information, it is a wall. So events now do two different jobs depending on how
+many there are:
+
+- **Sparse** — each is an accent, and the game feels wired to your hands.
+- **Dense** — they stop being notes and drive the arrangement instead: which
+  layers are in, how hard the bass pattern drives, whether the pad is there.
+
+The engine layer ducks to a quarter of its quiet-game volume at full tilt, the
+per-step accent budget dropped from ten to three, and cues below a weight
+threshold are skipped entirely once the track is carrying itself.
+
+**When your engine is small you hear yourself; when it is huge you hear the
+machine you built.** The handover is the reward, and it is closer to §18.1's
+"the soundtrack *is* the engine" than a note per event was — Rez arranges at
+least as much as it quantizes.
+
+## D-72 · SETTLED · More track, less sound effect
+
+- **A real bassline.** Three 16-step patterns selected by intensity, rooted on
+  your fullest fuel gauge, so the key of the track is a readout of the fuel you
+  are sitting on.
+- **Sidechain ducking.** The music bus dips on every kick and recovers over the
+  beat. This is most of why a real track breathes, and it is one gain automation
+  per beat.
+- **Chords for occasions.** Detuned saw stack, slow attack, long tail — cheap,
+  but it reads as *orchestral* against a track made of blips and kicks, which is
+  all it has to do. Level, Discovery, Recompile, Overheat. Deliberately rare: a
+  fanfare you hear every thirty seconds stops marking anything. Occasions jump
+  the accent queue and are never dropped, because a level-up chord losing its
+  slot to the 300th kill note is the system defeating its own purpose.
+- **A pad** above 0.55 intensity, two bars long, so it reads as atmosphere
+  rather than a part.
+
+Kick rebuilt in three parts: a click transient so it cuts through a busy mix, a
+fast pitch drop the ear reads as "hit", and a 35Hz body the chest reads as
+"oomph" — the body outlasting the transient by an order of magnitude is the
+whole difference between a kick you hear and one you feel. A low shelf before
+the saturation stage gives the drive something to bite on down where the kick
+and bass live.
+
+Measured after: peak 0.70 (was 0.595), zero clipped samples, median 0.171. The
+low end got heavier without eating the headroom.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

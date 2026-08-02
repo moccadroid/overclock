@@ -263,6 +263,7 @@ export class Game {
             this.mode = 'ceremony';
             if (pending) this.ceremony.begin(pending.rows, pending.percent, pending.kernel);
             this.renderer.addShake(4);
+            this.audio.celebrate();
           });
           break;
         }
@@ -330,6 +331,8 @@ export class Game {
     for (const id of this.world.discoveries.drain()) {
       const unlocked = this.library.earn(id);
       this.stinger.push(id, unlocked);
+      // §18 — a Discovery is exactly the kind of moment a chord is for.
+      this.audio.celebrate();
     }
   }
 

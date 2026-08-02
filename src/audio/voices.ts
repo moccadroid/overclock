@@ -134,17 +134,122 @@ export function playHue(v: VoiceCtx, hue: Hue, at: number, degree: number, gain:
 
 // -------------------------------------------------------------- the backing
 
-/** Four-on-the-floor kick: pitch drop into a short body. */
+/**
+ * Four-on-the-floor kick. Three parts, because one sine is a beep:
+ *
+ *   - a click transient, so it cuts through a busy mix
+ *   - a fast pitch drop, which is what the ear reads as "hit"
+ *   - a long body down at 35Hz, which is what the chest reads as "oomph"
+ *
+ * The body outlasts the transient by an order of magnitude. That ratio is the
+ * whole difference between a kick you hear and a kick you feel.
+ */
 export function kick(v: VoiceCtx, at: number, gain: number): void {
   const { ctx } = v;
-  const g = env(ctx, at, 0.002, 0.28, gain);
+
+  const body = env(ctx, at, 0.003, 0.42, gain * 1.15);
   const o = ctx.createOscillator();
   o.type = 'sine';
-  o.frequency.setValueAtTime(150, at);
-  o.frequency.exponentialRampToValueAtTime(42, at + 0.09);
+  o.frequency.setValueAtTime(190, at);
+  o.frequency.exponentialRampToValueAtTime(35, at + 0.075);
   o.start(at);
-  o.stop(at + 0.34);
-  o.connect(g).connect(v.out);
+  o.stop(at + 0.48);
+  o.connect(body).connect(v.out);
+
+  // The click. Almost inaudible alone, and the kick sounds soft without it.
+  const tick = env(ctx, at, 0.001, 0.012, gain * 0.5);
+  const t = osc(ctx, 'triangle', 900, at, at + 0.03);
+  const hp = ctx.createBiquadFilter();
+  hp.type = 'highpass';
+  hp.frequency.value = 400;
+  t.connect(hp).connect(tick).connect(v.out);
+}
+
+/**
+ * The bassline. A short plucked saw through a resonant lowpass — the sound the
+ * whole genre is built on, and the layer that turns a beat into a track.
+ */
+export function bass(v: VoiceCtx, at: number, hz: number, gain: number, dur = 0.16): void {
+  const { ctx } = v;
+  const g = env(ctx, at, 0.006, dur, gain * 0.6);
+
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.setValueAtTime(Math.min(3200, hz * 14), at);
+  filter.frequency.exponentialRampToValueAtTime(Math.max(80, hz * 2.2), at + dur * 0.8);
+  filter.Q.value = 9;
+
+  const o = osc(ctx, 'sawtooth', hz, at, at + dur + 0.06);
+  const o2 = osc(ctx, 'square', hz / 2, at, at + dur + 0.06);
+  const subGain = ctx.createGain();
+  subGain.gain.value = 0.5;
+
+  o.connect(filter);
+  o2.connect(subGain).connect(filter);
+  filter.connect(g).connect(v.out);
+}
+
+/**
+ * A chord, for the occasions that deserve one — a level, a Discovery, a
+ * Recompile, the moment Meltdown starts.
+ *
+ * Detuned saw stack with a slow attack and a long tail: cheap, but it reads as
+ * *orchestral* against a track made of blips and kicks, which is the only thing
+ * it has to do. Kept rare on purpose. A fanfare you hear every thirty seconds
+ * stops marking anything.
+ */
+export function chord(v: VoiceCtx, at: number, root: number, gain: number, dur = 2.2): void {
+  const { ctx } = v;
+  // Root, fifth, octave, tenth — open and unambiguous, no third to argue with
+  // whatever the bassline is doing.
+  const degrees = [root, root + 3, root + 5, root + 7];
+
+  const bus = ctx.createGain();
+  bus.gain.value = 1;
+
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.setValueAtTime(400, at);
+  filter.frequency.exponentialRampToValueAtTime(4200, at + 0.35);
+  filter.frequency.exponentialRampToValueAtTime(900, at + dur);
+  filter.Q.value = 1.2;
+
+  const g = env(ctx, at, 0.09, dur, gain * 0.24);
+  bus.connect(filter).connect(g).connect(v.out);
+
+  for (const d of degrees) {
+    const hz = noteHz(d + 10);
+    // Three voices per note, detuned. The beating between them is the "ensemble"
+    // — one oscillator per note would sound like an organ.
+    for (const cents of [-7, 0, 7]) {
+      const o = osc(ctx, 'sawtooth', hz * Math.pow(2, cents / 1200), at, at + dur + 0.3);
+      const vg = ctx.createGain();
+      vg.gain.value = 0.33;
+      o.connect(vg).connect(bus);
+    }
+  }
+}
+
+/** A sustained pad under everything, once the run is loud enough to earn it. */
+export function pad(v: VoiceCtx, at: number, root: number, gain: number, dur: number): void {
+  const { ctx } = v;
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.value = 1400;
+  filter.Q.value = 0.8;
+
+  const g = env(ctx, at, dur * 0.35, dur * 0.65, gain * 0.1);
+  filter.connect(g).connect(v.out);
+
+  for (const d of [root, root + 3, root + 7]) {
+    const hz = noteHz(d + 5);
+    for (const cents of [-11, 11]) {
+      const o = osc(ctx, 'sawtooth', hz * Math.pow(2, cents / 1200), at, at + dur + 0.4);
+      const vg = ctx.createGain();
+      vg.gain.value = 0.3;
+      o.connect(vg).connect(filter);
+    }
+  }
 }
 
 /** Filtered noise burst. `open` lengthens it into an open hat. */
