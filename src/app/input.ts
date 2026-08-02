@@ -14,7 +14,8 @@ export type Command =
   | 'confirm'
   | 'help'
   | 'library'
-  | 'quit';
+  | 'quit'
+  | 'mute';
 
 const MOVE_KEYS: Record<string, [number, number]> = {
   KeyW: [0, -1],
@@ -40,6 +41,7 @@ const COMMAND_KEYS: Record<string, Command> = {
   Slash: 'help',
   // Results only: back out to Run Setup rather than straight into another run.
   KeyL: 'library',
+  KeyM: 'mute',
 };
 
 export class Input {

@@ -268,6 +268,24 @@ export interface DamageSource {
   mode?: string;
 }
 
+/**
+ * Something worth hearing. §18 — "the soundtrack *is* the engine", so the audio
+ * layer needs the same events the sim already computes, tagged with the two
+ * things that decide how a note sounds: which hue it belongs to and how deep in
+ * a cascade it fired.
+ *
+ * Presentation-only, like VisualDeath. Nothing in src/sim reads it back, which
+ * is what lets audio drop voices, lag, or be muted without touching the run.
+ */
+export interface AudioCue {
+  kind: 'fire' | 'kill' | 'pickup' | 'hurt' | 'overheat' | 'convert' | 'level';
+  hue: Hue;
+  /** Cascade depth — pitch climbs with it, so a deep cascade audibly rises. */
+  depth: number;
+  /** 0..1 loudness hint. Voice-stealing keeps the loudest when it has to cut. */
+  weight: number;
+}
+
 /** A blow landed on the player. Presentation-only, like VisualDeath. */
 export interface VisualHurt {
   x: number;
@@ -444,6 +462,8 @@ export class World {
    * hard a Lancer hits by dying and reading the post-mortem.
    */
   visualHurts: VisualHurt[] = [];
+  /** §18 — drained by the audio layer each frame. See AudioCue. */
+  audioCues: AudioCue[] = [];
 
   fuel: Record<Hue, number> = { thermal: 0, voltaic: 0, void: 0 };
   /**
@@ -667,6 +687,7 @@ export class World {
 
     if (this.budget.endTick(dt)) {
       this.stats.overheats++;
+      this.cue('overheat', 'thermal', 0, 1);
       this.emit({ type: 'overheat', depth: 0, x: this.player.x, y: this.player.y });
       if (!this.budget.stalled) this.drainEvents();
     }
@@ -790,6 +811,8 @@ export class World {
     program.fireCount++;
     program.tickEvents++;
     this.stats.fires++;
+    const fireDef = program.actionId ? ACTION_BY_ID.get(program.actionId) : null;
+    this.cue('fire', fireDef?.hue ?? 'thermal', depth, Math.min(1, compiled.cycleCost / 8));
 
     // §5.5 Overdrive — "every fire adds Heat directly", budget or no budget.
     // This is the node that lets a player choose instability rather than be
@@ -1879,6 +1902,13 @@ export class World {
     return { x: this.arena.spawnX, y: this.arena.spawnY };
   }
 
+  private cue(kind: AudioCue['kind'], hue: Hue, depth: number, weight: number): void {
+    // A 600-EPS cascade would otherwise queue thousands of cues per frame. The
+    // mixer caps voices anyway; this caps the allocation.
+    if (this.audioCues.length >= 96) return;
+    this.audioCues.push({ kind, hue, depth, weight: Math.max(0, Math.min(1, weight)) });
+  }
+
   private pushFx(
     kind: Fx['kind'],
     hue: Hue,
@@ -2031,6 +2061,7 @@ export class World {
     enemy.alive = false;
     this.stats.kills++;
     this.stats.killsByEnemy.set(enemy.defId, (this.stats.killsByEnemy.get(enemy.defId) ?? 0) + 1);
+    this.cue('kill', hue, depth, Math.min(1, enemy.maxHp / 60));
     if (this.suppressedNow) this.stats.suppressedKills++;
 
     const def = getEnemy(enemy.defId);
@@ -2100,6 +2131,7 @@ export class World {
     if (tallied) tallied.amount += amount;
     else this.damageBySource.set(cause.id, { source: cause, amount });
     this.pushFx('hurt', 'thermal', p.x, p.y, 0, [], 0.14);
+    this.cue('hurt', 'thermal', 0, Math.min(1, amount / Math.max(1, p.maxIntegrity * 0.2)));
     if (this.visualHurts.length < 32) {
       this.visualHurts.push({
         x: p.x,
@@ -2694,6 +2726,7 @@ export class World {
 
   private finishConvert(def: ActionDef, depth: number): void {
     this.stats.converts++;
+    this.cue('convert', def.hue, depth, 0.5);
     this.pushFx('burst', def.hue, this.player.x, this.player.y, 34, [], 0.2);
     this.emit({ type: 'convert', depth: depth + 1, x: this.player.x, y: this.player.y });
   }
@@ -2748,6 +2781,7 @@ export class World {
         } else {
           this.gainXp(item.value);
         }
+        this.cue('pickup', item.hue, 0, item.kind === 'xp' ? 0.3 : 0.2);
         this.emit({ type: 'pickup', depth: 0, x: p.x, y: p.y, hue: item.hue });
       }
     }
@@ -3128,6 +3162,7 @@ export class World {
     while (this.xp >= this.xpToNext) {
       this.xp -= this.xpToNext;
       this.level++;
+      this.cue('level', 'voltaic', 0, 1);
       this.mark('level', `level ${this.level}`);
       // level 2 costs xpBase, and the curve compounds from there. Level 1's cost
       // was set separately in the constructor.

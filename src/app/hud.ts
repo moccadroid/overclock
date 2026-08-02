@@ -49,6 +49,8 @@ export class Hud {
   private readonly br: HTMLElement;
   private readonly xpbar: HTMLElement;
   private readonly engine: HTMLElement;
+  private notice = '';
+  private noticeUntil = 0;
 
   constructor(root: HTMLElement) {
     const make = (id: string): HTMLElement => {
@@ -68,7 +70,8 @@ export class Hud {
     this.bl = make('hud-bl');
     this.bc = make('hud-bc');
     this.br = make('hud-br');
-    this.br.textContent = `${BRANDING.title} · H help · TAB editor · SPACE dash · E channel`;
+    this.br.textContent =
+      `${BRANDING.title} · H help · TAB editor · SPACE dash · E channel · M mute`;
 
     // The Engine strip. §19.4 keeps the HUD minimal and puts the pipeline in the
     // editor, but a build you cannot see is a build you cannot reason about —
@@ -76,6 +79,12 @@ export class Hud {
     this.engine = document.createElement('div');
     this.engine.id = 'hud-engine';
     root.appendChild(this.engine);
+  }
+
+  /** A transient line for things that have no permanent home — mute, mostly. */
+  flash(message: string): void {
+    this.notice = message;
+    this.noticeUntil = performance.now() / 1000 + 1.8;
   }
 
   update(world: World): void {
@@ -174,7 +183,12 @@ export class Hud {
       (world.suppressedNow ? '\n<span class="suppressed">SUPPRESSED — TRIGGERS OFFLINE</span>' : '');
 
     const queued = world.pendingDrafts;
-    this.bc.textContent = queued > 0 ? `${'^'.repeat(queued)}  ${queued} DRAFT PENDING — E` : '';
+    const showNotice = performance.now() / 1000 < this.noticeUntil;
+    this.bc.textContent = showNotice
+      ? this.notice
+      : queued > 0
+        ? `${'^'.repeat(queued)}  ${queued} DRAFT PENDING — E`
+        : '';
 
     this.br.textContent =
       `enemies ${world.enemies.length}  proj ${world.projectiles.length}  ` +

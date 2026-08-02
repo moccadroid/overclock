@@ -74,6 +74,14 @@ export interface LibraryData {
   bestScore: number;
   bestDepth: number;
   bestTime: number;
+  /**
+   * §20 — preferences, kept in their own object rather than beside the
+   * progression fields. §15.1's guard scans this shape for numbers that could
+   * become multipliers, and a volume slider sitting next to `bestScore` would
+   * either trip it or force the guard to be loosened. Neither is worth it:
+   * settings are not progression, so they live somewhere else.
+   */
+  settings: { muted: boolean; volume: number };
 }
 
 function emptyData(): LibraryData {
@@ -85,6 +93,7 @@ function emptyData(): LibraryData {
     bestScore: 0,
     bestDepth: 0,
     bestTime: 0,
+    settings: { muted: false, volume: 0.7 },
   };
 }
 
@@ -114,6 +123,10 @@ export class Library {
         bestScore: number(parsed.bestScore) ?? base.bestScore,
         bestDepth: number(parsed.bestDepth) ?? base.bestDepth,
         bestTime: number(parsed.bestTime) ?? base.bestTime,
+        settings: {
+          muted: parsed.settings?.muted === true,
+          volume: number(parsed.settings?.volume) ?? base.settings.volume,
+        },
       };
     } catch {
       // A corrupt Library costs you unlocks, not the ability to play.
@@ -192,6 +205,11 @@ export class Library {
       changed = true;
     }
     if (changed) this.save();
+  }
+
+  setAudio(muted: boolean, volume: number): void {
+    this.data.settings = { muted, volume };
+    this.save();
   }
 
   recordRun(result: { score: number; depth: number; time: number }): void {

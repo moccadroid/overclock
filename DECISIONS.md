@@ -1342,6 +1342,69 @@ you can actually get.
 
 ---
 
+## D-67 · SETTLED · Audio, and the wall between it and the sim
+
+§18.1 says "the soundtrack *is* the engine", which only works if the audio layer
+sees the same events the simulation computes. That is also the fastest way to
+destroy determinism, so the boundary is enforced rather than intended:
+
+- The sim pushes `AudioCue`s onto a list. Nothing in `src/sim` ever reads them
+  back, exactly like `visualDeaths`.
+- `audio.test.ts` fails the build if `src/sim` imports from `src/audio` or
+  mentions `AudioContext` at all.
+- A second test runs two identical worlds — one draining cues every tick, one
+  letting them pile up — and asserts the hashes match.
+
+So audio may lag, drop voices, be muted, or fail to start, and the run is
+bit-identical. That is not a nicety: audio is the first system in this codebase
+that runs on wall-clock time, and wall-clock time is the thing determinism
+cannot survive touching.
+
+Scheduling is lookahead against `ctx.currentTime`, never `setTimeout` for the
+note itself. JS timers jitter by tens of milliseconds under load — precisely
+when the game is loudest — and jitter is the one thing a beat cannot survive.
+The timer only decides when to *schedule*.
+
+## D-68 · SETTLED · One scale, one grid, one exception
+
+Every pitched sound in the game comes from a single minor pentatonic. This is
+not a musical preference, it is a consequence of the design: a cascade fires
+forty notes on one sixteenth, and forty simultaneous notes can only ever sound
+intentional if they are drawn from a handful of pitches that agree.
+
+Depth climbs that scale, so a deep cascade audibly *rises* — the one thing the
+depth counter on the HUD cannot convey.
+
+The exception is §18.3's, and it is load-bearing: **player-hurt is the only
+non-musical sound in the game**. Unquantized, unpitched, bit-crushed, played the
+instant it lands rather than on the next boundary. Everything else is on the
+grid and in the scale, so a clip that is neither is unmistakable even at forty
+voices. Waiting 34ms for a boundary would make the one sound that must feel like
+an interruption feel like part of the song.
+
+## D-69 · SETTLED · The beat is a readout
+
+The backing is minimal techno, and every part of it reports something:
+
+- **Tempo** is 110 BPM climbing to ~140 with EPS, so the track speeds up because
+  you built something.
+- **Layers** arrive with intensity — kick always, offbeat hats once anything is
+  happening, sixteenths as the engine gets busy, open hats when it is roaring.
+- **The sub's root** follows your fullest fuel gauge, so the key of the track is
+  a readout of the fuel you are sitting on.
+- **Master-bus drive** rises with Heat, and a stall drops the track to a hole.
+
+Intensity maps EPS logarithmically. EPS spans two orders of magnitude across a
+run; a linear map would leave the track on its opening layer for ten minutes and
+then pin it at maximum forever.
+
+Settings live in their own object inside the Library rather than beside the
+progression fields, because §15.1's guard scans that shape for numbers that
+could become multipliers. A volume slider next to `bestScore` would force the
+guard to be loosened, and a loosened guard is how a damage multiplier gets in.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

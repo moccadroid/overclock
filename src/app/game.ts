@@ -21,6 +21,7 @@ import { SIM_DT } from '../sim/tunables';
 import { VISUAL } from './visual';
 import { Library } from '../meta/profile';
 import { Stinger } from './stinger';
+import { Audio } from '../audio/audio';
 
 type Mode =
   | 'running'
@@ -43,6 +44,8 @@ export class Game {
   private ceremony!: CeremonyOverlay;
   private recompileChoice!: RecompileOverlay;
   private stinger!: Stinger;
+  /** §18 — one-way. The sim never learns this exists. */
+  private readonly audio = new Audio();
 
   private mode: Mode = 'running';
   private accumulator = 0;
@@ -57,6 +60,7 @@ export class Game {
   private pausedFromDraft = false;
   /** Quitting a run is two clicks — a misclick throws away twenty minutes. */
   private confirmQuit = false;
+  private muted = false;
 
   /** §15.2 — the Library is the only thing here that outlives the run. */
   constructor(config: RunConfig, private readonly library: Library) {
@@ -80,6 +84,13 @@ export class Game {
 
     this.input.onCommand((cmd) => this.onCommand(cmd));
 
+    // Browsers refuse to start an AudioContext outside a user gesture. Reaching
+    // this line means START RUN was clicked or ENTER was pressed, which counts.
+    this.muted = this.library.snapshot.settings.muted;
+    this.audio.setMuted(this.muted);
+    this.audio.setVolume(this.library.snapshot.settings.volume);
+    this.audio.start();
+
     this.lastFrame = performance.now();
     requestAnimationFrame((t) => this.frame(t));
   }
@@ -100,6 +111,14 @@ export class Game {
       } else if (cmd === 'library' || cmd === 'pause') {
         location.href = location.pathname;
       }
+      return;
+    }
+
+    if (cmd === 'mute') {
+      this.muted = !this.muted;
+      this.audio.setMuted(this.muted);
+      this.library.setAudio(this.muted, 0.7);
+      this.hud.flash(this.muted ? 'AUDIO MUTED  [M]' : 'AUDIO ON  [M]');
       return;
     }
 
@@ -260,6 +279,7 @@ export class Game {
     this.renderer.render(this.world, elapsed, this.mode === 'running');
 
     this.bankDiscoveries();
+    this.pumpAudio();
     this.stinger.update(elapsed);
 
     // The HUD is text-heavy; 20Hz is plenty and keeps DOM work off the frame.
@@ -270,6 +290,35 @@ export class Game {
     }
 
     requestAnimationFrame((t) => this.frame(t));
+  }
+
+  /**
+   * §18 — hand the frame's cues to the audio layer and tell it the mood.
+   *
+   * Intensity is EPS on a log curve rather than linear: EPS spans two orders of
+   * magnitude across a run, and a linear map would leave the track at its
+   * opening layer for the first ten minutes and pinned at maximum after that.
+   */
+  private pumpAudio(): void {
+    const w = this.world;
+    const cues = w.audioCues;
+    if (cues.length > 0 || this.audio.enabled) {
+      let dominant: 'thermal' | 'voltaic' | 'void' = 'thermal';
+      for (const hue of ['voltaic', 'void'] as const) {
+        if (w.fuel[hue] > w.fuel[dominant]) dominant = hue;
+      }
+      this.audio.update(
+        {
+          intensity: Math.min(1, Math.log10(1 + w.eps) / 2.4),
+          dominant,
+          heat: w.budget.heat / 100,
+          stalled: w.budget.stalled,
+          meltdown: w.phase === 'meltdown' ? Math.min(1, w.meltdownTime / 300) : 0,
+        },
+        cues,
+      );
+    }
+    cues.length = 0;
   }
 
   /**

@@ -37,6 +37,11 @@ describe('the Library (GDD §15)', () => {
       ([key, value]) => typeof value === 'number' && !key.startsWith('best') && key !== 'runs',
     );
     expect(powerish).toEqual([]);
+
+    // Preferences live in their own object precisely so this scan stays strict.
+    // If settings ever migrate up to the top level, the guard has to be loosened
+    // — and a loosened guard is how a damage multiplier gets in.
+    expect(typeof data.settings).toBe('object');
   });
 
   it('§15.2 — a fresh account starts with roughly 60% of the node pool', () => {
