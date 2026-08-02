@@ -20,6 +20,8 @@ import { NO_INPUT, World, type RunConfig } from '../sim/world';
 import { SIM_DT } from '../sim/tunables';
 import { BRANDING } from '../branding';
 import { VISUAL } from './visual';
+import { Library } from '../meta/profile';
+import { Stinger } from './stinger';
 
 type Mode =
   | 'running'
@@ -41,6 +43,7 @@ export class Game {
   private message!: MessageOverlay;
   private ceremony!: CeremonyOverlay;
   private recompileChoice!: RecompileOverlay;
+  private stinger!: Stinger;
 
   private mode: Mode = 'running';
   private accumulator = 0;
@@ -52,7 +55,8 @@ export class Game {
   private hitstopWindow = 0;
   private lastKills = 0;
 
-  constructor(config: RunConfig) {
+  /** §15.2 — the Library is the only thing here that outlives the run. */
+  constructor(config: RunConfig, private readonly library: Library) {
     this.world = new World(config);
   }
 
@@ -69,6 +73,7 @@ export class Game {
     this.message = new MessageOverlay(ui, 'results');
     this.ceremony = new CeremonyOverlay(ui);
     this.recompileChoice = new RecompileOverlay(ui);
+    this.stinger = new Stinger(ui);
 
     this.input.onCommand((cmd) => this.onCommand(cmd));
 
@@ -207,6 +212,9 @@ export class Game {
     // should not drift the view out from under the player.
     this.renderer.render(this.world, elapsed, this.mode === 'running');
 
+    this.bankDiscoveries();
+    this.stinger.update(elapsed);
+
     // The HUD is text-heavy; 20Hz is plenty and keeps DOM work off the frame.
     this.uiTimer += elapsed;
     if (this.uiTimer > 0.05) {
@@ -215,6 +223,18 @@ export class Game {
     }
 
     requestAnimationFrame((t) => this.frame(t));
+  }
+
+  /**
+   * §15.3 — the sim decides what was earned; the app decides what that is worth.
+   * Writing to the Library is a side effect on the world outside the run, so it
+   * happens here and never in src/sim.
+   */
+  private bankDiscoveries(): void {
+    for (const id of this.world.discoveries.drain()) {
+      const unlocked = this.library.earn(id);
+      this.stinger.push(id, unlocked);
+    }
   }
 
   /**
@@ -246,7 +266,18 @@ export class Game {
     this.editor.close();
     this.draft.setOpen(false);
     this.ceremony.setOpen(false);
-    this.message.showResults(this.world);
+
+    // Anything earned on the killing tick still counts — bank it before the run
+    // is read, or the Results screen reports a Discovery the Library never got.
+    this.bankDiscoveries();
+    this.library.see(this.world.stats.killsByEnemy.keys());
+    this.library.recordRun({
+      score: this.world.finalScore().total,
+      depth: this.world.stats.maxDepth,
+      time: this.world.time,
+    });
+
+    this.message.showResults(this.world, this.library);
   }
 
   /**

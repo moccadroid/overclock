@@ -132,8 +132,15 @@ function weightFor(world: World, node: NodeDef): number {
 
 /** Roll a fresh set of draft cards. */
 export function rollDraft(world: World): DraftOffer {
+  // §15.2 — the Library narrows the pool. A locked node is not "rare", it is
+  // absent: the draft must never dangle something you cannot have.
+  const available = world.config.availableNodes;
   const pool: NodeDef[] = [...TRIGGERS, ...ACTIONS, ...MODIFIERS].filter(
-    (n) => !world.purged.has(n.id) && placeable(world, n) && affordable(world, n),
+    (n) =>
+      (!available || available.includes(n.id)) &&
+      !world.purged.has(n.id) &&
+      placeable(world, n) &&
+      affordable(world, n),
   );
 
   const cards: DraftCard[] = [];

@@ -1095,6 +1095,72 @@ or the tag means nothing anywhere.
 
 ---
 
+## D-51 · SETTLED · The Feedback axiom can fire (closes D-1)
+
+`On Hit -> Echo -> Bolt` needs a hit to make a hit. It was inert from the first
+commit and the harness had been reporting `0 kills, 0 EPS, 8/8 died` for it all
+along. `AxiomDef` gained an optional `seed` row for exactly this case, and
+Feedback now opens `Clock -> Bolt` above its real row.
+
+It immediately became the axiom the description always claimed it was:
+
+| | survived | score | max depth | peak EPS | heat |
+|---|---|---|---|---|---|
+| Ignition | 246s | 9,585 | 2.4 | 311 | 100% nominal |
+| Circuit | 278s | 11,070 | 5.0 | 191 | 89% nominal |
+| Feedback | 167s | 15,387 | 12.0 | 618 | 55% nom / 32% I / 13% II |
+
+Dies soonest, scores highest, lives in Instability. Hard mode, as advertised.
+
+## D-52 · SETTLED · Meta-progression grants breadth, and the code cannot grant power
+
+§15.1 is the iron rule, and the place it would get broken is the persistence
+layer, so the constraint is structural rather than editorial. `LibraryData`
+holds four id lists and four best-of records. There is no numeric field the sim
+reads as a multiplier, and `profile.test.ts` asserts there is no numeric field
+at all outside `runs` and `best*`. Adding one fails the suite, which means
+adding one is an argument with §15.1 rather than with a reviewer.
+
+Fresh accounts see 25 of 45 nodes. What is held back is not the strong half but
+the half that references a system you have not met: On Overheat before your
+first Overheat, the whole Convert layer before fuel is legible, Ground and
+Overdrive before Cycles are a thing you feel. A test asserts run one still
+reaches every hue, a self-feeding Trigger, and at least eight modifiers —
+"thin enough to learn" must not become "too thin to express a direction".
+
+The unlocked set is passed into `RunConfig`, never read from storage by the sim.
+A run stays reproducible from seed + axiom + pool.
+
+## D-53 · SETTLED · Discoveries are the tutorial
+
+§15.4 says there is no tutorial level and callouts never repeat, which puts the
+entire teaching load on §15.3. Twenty-five of them, each with a `teaches` line
+that is load-bearing: a Discovery that only says "you did a thing" is a trophy,
+and this system exists to replace a tutorial.
+
+Detection is deterministic and lives in `src/sim/discoveries.ts`, so the same
+seed and inputs earn the same Discoveries in the same order. Granting them
+touches storage and therefore happens in the app, never in the sim.
+
+The stinger does not pause. You earn most of these mid-cascade with the screen
+full, and a modal would punish the exact behaviour being rewarded.
+
+Two content-integrity checks are now tests rather than hopes: every Discovery in
+the data has a condition behind it and vice versa, and every node locked at
+start has some Discovery that grants it. The second one immediately caught a
+chicken-and-egg — `Bloodletting` requires spending Integrity, which only
+`Convert: Bleed` can do, and `Convert: Bleed` was locked behind nothing. It now
+comes from `First Cut`, which is the same lesson twice: cut something off
+yourself for a permanent gain.
+
+## D-54 · SETTLED · Results looks forward, not only back
+
+The post-mortem answers "how did I die". The Discovery panel answers "what is
+the nearest thing I have not done", listing the next three unearned hints. A
+Results screen that only looks backwards ends the session.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

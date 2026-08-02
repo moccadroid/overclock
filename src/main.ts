@@ -6,13 +6,19 @@
  * exactly: ?seed=abc&axiom=circuit
  */
 import { Game } from './app/game';
-import { AXIOMS } from './content/index';
+
 import { BRANDING } from './branding';
+import { Library } from './meta/profile';
 
 const params = new URLSearchParams(location.search);
 const seed = params.get('seed') ?? `run-${Math.floor(Math.random() * 1e9).toString(36)}`;
+// §15.2 — the Library decides which Axioms and nodes this account may see. It is
+// read once, here, and passed into the run as config: the sim never touches
+// storage, so a run stays reproducible from its config alone.
+const library = new Library();
+const unlockedAxioms = library.availableAxioms;
 const requested = params.get('axiom');
-const axiomId = AXIOMS.some((a) => a.id === requested) ? requested! : 'ignition';
+const axiomId = unlockedAxioms.includes(requested ?? '') ? requested! : 'ignition';
 
 /**
  * Playtest hook: `?meltdown=90` brings the Meltdown line forward so the third
@@ -28,7 +34,13 @@ document.title = `${BRANDING.title} — ${axiomId} — ${seed}`;
 const mount = document.getElementById('app');
 if (!mount) throw new Error('missing #app mount');
 
-const game = new Game(meltdownAt === undefined ? { seed, axiomId } : { seed, axiomId, meltdownAt });
+const game = new Game({
+  seed,
+  axiomId,
+  availableNodes: library.availableNodes,
+  knownDiscoveries: library.earnedDiscoveries,
+  ...(meltdownAt === undefined ? {} : { meltdownAt }),
+}, library);
 void game.start(mount);
 
 // Reproducing a run means reproducing its seed; keep it visible and shareable.
@@ -42,7 +54,11 @@ if (!params.get('seed')) {
 if (import.meta.env.DEV) {
   // Dev console handle: __oc.game.debugStep(30) advances 30s and returns a state
   // snapshot; __oc.game.debugWorld exposes the live sim for inspection.
-  (window as unknown as { __oc: unknown }).__oc = { game, seed, axiomId };
+  // __oc.library.reset() wipes the Library, for testing a fresh account.
+  (window as unknown as { __oc: unknown }).__oc = { game, seed, axiomId, library };
 }
 
-console.info(`[${BRANDING.title}] seed=${seed} axiom=${axiomId}`);
+console.info(
+  `[${BRANDING.title}] seed=${seed} axiom=${axiomId} ` +
+    `pool=${library.availableNodes.length} axioms=${unlockedAxioms.length}`,
+);

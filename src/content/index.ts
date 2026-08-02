@@ -9,12 +9,14 @@ import enemiesRaw from './data/enemies.json';
 import wavesRaw from './data/waves.json';
 import axiomsRaw from './data/axioms.json';
 import arenasRaw from './data/arenas.json';
+import discoveriesRaw from './data/discoveries.json';
 
 import { validateCollection, type Schema, type RegistrySet } from './validate';
 import type {
   ActionDef,
   ArenaDef,
   AxiomDef,
+  DiscoveryDef,
   EnemyDef,
   ModifierDef,
   NodeDef,
@@ -265,15 +267,41 @@ const axiomSchema: Schema = {
       action: { type: 'string', required: true, ref: 'action' },
     },
   },
+  seed: {
+    type: 'object',
+    fields: {
+      trigger: { type: 'string', required: true, ref: 'trigger' },
+      modifiers: { type: 'array', required: true, items: { type: 'string', ref: 'modifier' } },
+      action: { type: 'string', required: true, ref: 'action' },
+    },
+  },
   poolBias: { type: 'object', required: true },
   capacityDelta: { type: 'number', required: true },
   description: { type: 'string', required: true },
   poolWeight: { type: 'number', min: 0 },
 };
 
+/**
+ * A Discovery unlocks either a node or an Axiom, so its refs are checked against
+ * both. Getting this wrong is the classic content bug: a reward that silently
+ * unlocks nothing, discovered by a player and never by a test.
+ */
+const discoverySchema: Schema = {
+  id: { type: 'string', required: true },
+  name: { type: 'string', required: true },
+  hint: { type: 'string', required: true },
+  teaches: { type: 'string', required: true },
+  score: { type: 'number', required: true, min: 0 },
+  unlocks: { type: 'array', required: true, items: { type: 'string', ref: 'unlockable' } },
+};
+
 const registries: RegistrySet = {
   enemy: enemyIds,
   node: nodeIds,
+  unlockable: new Set([
+    ...nodeIds,
+    ...(axiomsRaw as { id: string }[]).map((a) => a.id),
+  ]),
   trigger: new Set((triggersRaw as { id: string }[]).map((n) => n.id)),
   action: new Set((actionsRaw as { id: string }[]).map((n) => n.id)),
   modifier: new Set((modifiersRaw as { id: string }[]).map((n) => n.id)),
@@ -321,6 +349,12 @@ export const ARENAS = validateCollection<ArenaDef>(
   arenaSchema,
   registries,
 );
+export const DISCOVERIES = validateCollection<DiscoveryDef>(
+  'discoveries.json',
+  discoveriesRaw,
+  discoverySchema,
+  registries,
+);
 
 function index<T extends { id: string }>(items: readonly T[]): ReadonlyMap<string, T> {
   return new Map(items.map((i) => [i.id, i]));
@@ -333,6 +367,7 @@ export const ENEMY_BY_ID = index(ENEMIES);
 export const WAVE_BY_ID = index(WAVES);
 export const AXIOM_BY_ID = index(AXIOMS);
 export const ARENA_BY_ID = index(ARENAS);
+export const DISCOVERY_BY_ID = index(DISCOVERIES);
 
 export const ALL_NODES: readonly NodeDef[] = [...TRIGGERS, ...ACTIONS, ...MODIFIERS];
 export const NODE_BY_ID: ReadonlyMap<string, NodeDef> = index(ALL_NODES);
@@ -366,4 +401,9 @@ export function arena(id: string): ArenaDef {
   const a = ARENA_BY_ID.get(id);
   if (!a) throw new Error(`Unknown arena "${id}"`);
   return a;
+}
+export function discovery(id: string): DiscoveryDef {
+  const d = DISCOVERY_BY_ID.get(id);
+  if (!d) throw new Error(`Unknown discovery "${id}"`);
+  return d;
 }

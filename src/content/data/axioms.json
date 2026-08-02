@@ -18,9 +18,10 @@
   {
     "id": "feedback",
     "name": "Feedback",
+    "seed": { "trigger": "clock", "modifiers": [], "action": "bolt" },
     "starter": { "trigger": "on_hit", "modifiers": ["echo"], "action": "bolt" },
     "poolBias": { "echo": 1.15 },
     "capacityDelta": -20,
-    "description": "On Hit -> Echo -> Bolt. Echo/Resonate +15%; capacity -20. Hard mode."
+    "description": "Clock -> Bolt seeds an On Hit -> Echo -> Bolt cascade. Echo/Resonate +15%; capacity -20. Hard mode."
   }
 ]

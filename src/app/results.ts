@@ -9,7 +9,13 @@
  * Drawn as inline SVG so it stays in the same stroke-and-type vocabulary as the
  * rest of the schematic (§16: no sprites, no textures, ever).
  */
-import { NODE_BY_ID } from '../content/index';
+import {
+  AXIOM_BY_ID,
+  DISCOVERIES,
+  DISCOVERY_BY_ID,
+  NODE_BY_ID,
+} from '../content/index';
+import type { Library } from '../meta/profile';
 import { TUNABLE } from '../sim/tunables';
 import type { DamageSource, TraceMarkerKind, World } from '../sim/world';
 import { BRANDING } from '../branding';
@@ -199,7 +205,50 @@ function renderPostMortem(world: World): string {
   );
 }
 
-export function renderResults(world: World): string {
+/**
+ * §15.3 — what this run added to the Library, and the nearest thing you have not
+ * done yet. The second half is the load-bearing one: a Results screen that only
+ * looks backwards ends the session, and one that names a reachable next thing
+ * starts another run.
+ */
+function renderDiscoveries(world: World, library: Library): string {
+  const earned = [...world.discoveries.earned];
+  const held = library.earnedDiscoveries;
+
+  const rows = earned
+    .map((id) => {
+      const def = DISCOVERY_BY_ID.get(id);
+      if (!def) return '';
+      const names = def.unlocks
+        .map((u) => NODE_BY_ID.get(u)?.name ?? AXIOM_BY_ID.get(u)?.name ?? u)
+        .join(' · ');
+      return (
+        `<div class="disc-row"><span class="disc-name">${svgEscape(def.name)}</span>` +
+        (names ? `<span class="disc-unlock">+ ${svgEscape(names)}</span>` : '') +
+        `</div>`
+      );
+    })
+    .join('');
+
+  // The next three you have not earned, in the order they are written — which is
+  // roughly the order they get hard.
+  const next = DISCOVERIES.filter((d) => !held.has(d.id) && !world.discoveries.earned.has(d.id))
+    .slice(0, 3)
+    .map((d) => `<div class="disc-todo">${svgEscape(d.hint)}</div>`)
+    .join('');
+
+  const total = DISCOVERIES.length;
+  const have = new Set([...held, ...world.discoveries.earned]).size;
+
+  return (
+    `<div class="discoveries">` +
+    (rows ? `<div class="k">discovered this run</div>${rows}` : '') +
+    (next ? `<div class="k">still out there  ${have}/${total}</div>${next}` : '') +
+    `</div>`
+  );
+}
+
+export function renderResults(world: World, library: Library): string {
   const score = world.finalScore();
   const wasted = world.kernels === 0 ? world.wastedKernelPercent : 0;
 
@@ -245,6 +294,7 @@ export function renderResults(world: World): string {
         <div class="k">final engine</div>
         <pre>${svgEscape(renderEngine(world))}</pre>
         ${renderPostMortem(world)}
+        ${renderDiscoveries(world, library)}
         <div class="k">seed</div>
         <pre>  ${svgEscape(world.config.seed)} · ${svgEscape(world.config.axiomId)}</pre>
       </div>

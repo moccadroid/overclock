@@ -315,11 +315,34 @@ export interface WaveTemplateDef {
   description: string;
 }
 
+/**
+ * GDD §15.3 — an achievement-like moment, caught and named in-run. `teaches` is
+ * the load-bearing field: a Discovery that only says "you did a thing" is a
+ * trophy, and this system exists to replace the tutorial, not to award trophies.
+ */
+export interface DiscoveryDef {
+  id: string;
+  name: string;
+  /** What to do, shown in the Library while it is still locked. */
+  hint: string;
+  /** Why it mattered, shown once you have done it. */
+  teaches: string;
+  score: number;
+  /** Node or Axiom ids added to the Library. §15.1: breadth, never power. */
+  unlocks: readonly string[];
+}
+
 export interface AxiomDef {
   id: string;
   name: string;
   /** GDD §8.4 — a complete starter Program. */
   starter: { trigger: string; modifiers: readonly string[]; action: string };
+  /**
+   * A second row, for Axioms whose starter cannot produce its own first event.
+   * `On Hit -> Bolt` needs a hit to make a hit; without something to catch, the
+   * Axiom is inert for the whole run. The seed is the thing it catches.
+   */
+  seed?: { trigger: string; modifiers: readonly string[]; action: string };
   poolBias: Readonly<Record<string, number>>;
   capacityDelta: number;
   description: string;

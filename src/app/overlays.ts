@@ -21,6 +21,7 @@ import type { World } from '../sim/world';
 import { LOADBEARING, TUNABLE } from '../sim/tunables';
 import { inertFields, slotAccepts, type NodeSlot } from '../sim/engine';
 import { renderResults } from './results';
+import type { Library } from '../meta/profile';
 import { renderPrimer } from './primer';
 
 export class Overlay {
@@ -699,11 +700,11 @@ export class MessageOverlay extends Overlay {
   }
 
   /** §14 — the Results screen, with the run-trace chart as its hero element. */
-  showResults(world: World): void {
+  showResults(world: World, library: Library): void {
     this.el.replaceChildren();
     const panel = document.createElement('div');
     panel.className = 'panel results-panel';
-    panel.innerHTML = renderResults(world);
+    panel.innerHTML = renderResults(world, library);
     this.el.appendChild(panel);
     this.setOpen(true);
   }

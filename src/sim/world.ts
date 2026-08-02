@@ -11,12 +11,14 @@ import { Rng } from './rng';
 import { SpatialGrid, type SpatialItem } from './spatial';
 import { FlowField } from './flowfield';
 import { CycleBudget } from './cycles';
+import { DiscoveryTracker } from './discoveries';
 import { Engine, type FireContext, type Program } from './engine';
 import { LOADBEARING, SAFETY, SIM_DT, TUNABLE } from './tunables';
 import {
   HUES,
   type ActionDef,
   type ArenaDef,
+  type AxiomDef,
   type EnemyDef,
   type EventType,
   type GameEvent,
@@ -336,6 +338,15 @@ export interface RunConfig {
   seed: string;
   axiomId: string;
   arenaId?: string;
+  /**
+   * §15.2 — node ids this account has unlocked. Part of the run config rather
+   * than something the sim reads from storage, so a replay is reproducible from
+   * seed + axiom + pool and the sim keeps its promise never to touch the world
+   * outside itself. Omitted means every node.
+   */
+  availableNodes?: readonly string[];
+  /** Discoveries already in the Library, so a repeat does not re-announce. */
+  knownDiscoveries?: ReadonlySet<string>;
   /** Testing hook: bring Meltdown forward. Never set in a scored run. */
   meltdownAt?: number;
 }
@@ -377,6 +388,12 @@ export interface RunStats {
   tierSeconds: [number, number, number, number];
   /** Total Cycles the engine asked for. Compare against capacity x time. */
   cyclesSpent: number;
+  /** Kills per enemy id. Feeds Discoveries and the Results breakdown. */
+  killsByEnemy: Map<string, number>;
+  /** Kills landed while a Suppressor had your Triggers offline (§11.2). */
+  suppressedKills: number;
+  /** Conversions that spent Integrity you could not spare (§7.4). */
+  desperateConverts: number;
   peakHeat: number;
   /** Seconds until the first level-up — §3's "a decision every ~30 seconds". */
   firstLevelTime: number;
@@ -481,6 +498,8 @@ export class World {
   outputAverage = 0;
   /** The best that average ever reached, for the wasted-Kernel readout (§9.2). */
   peakOutputAverage = 0;
+  /** §15.3 — watches for named moments. Drained by the presentation layer. */
+  readonly discoveries: DiscoveryTracker;
   /** §14 — the run's story. */
   trace: TraceSample[] = [];
   markers: TraceMarker[] = [];
@@ -502,6 +521,9 @@ export class World {
     crits: 0,
     tierSeconds: [0, 0, 0, 0],
     cyclesSpent: 0,
+    killsByEnemy: new Map(),
+    suppressedKills: 0,
+    desperateConverts: 0,
     peakHeat: 0,
     firstLevelTime: 0,
     safetyTrips: 0,
@@ -523,6 +545,7 @@ export class World {
 
   constructor(config: RunConfig) {
     this.config = config;
+    this.discoveries = new DiscoveryTracker(config.knownDiscoveries);
     this.rng = new Rng(config.seed);
     this.arena = getArena(config.arenaId ?? 'heap');
     this.grid = new SpatialGrid<Enemy>(this.arena.width, this.arena.height);
@@ -559,12 +582,22 @@ export class World {
   /** §8.4 — the Axiom's starter Program, at run start and after a Recompile. */
   private installAxiomStarter(): void {
     const ax = getAxiom(this.config.axiomId);
-    const p0 = this.engine.programs[0]!;
-    p0.triggerId = ax.starter.trigger;
-    p0.actionId = ax.starter.action;
-    ax.starter.modifiers.forEach((m, i) => {
-      if (i < p0.modifierIds.length) p0.modifierIds[i] = m;
-    });
+    const install = (row: number, def: AxiomDef['starter']): void => {
+      const p = this.engine.programs[row];
+      if (!p) return;
+      p.triggerId = def.trigger;
+      p.actionId = def.action;
+      def.modifiers.forEach((m, i) => {
+        if (i < p.modifierIds.length) p.modifierIds[i] = m;
+      });
+    };
+    // The seed goes first, so it reads top-down as cause then consequence.
+    if (ax.seed) {
+      install(0, ax.seed);
+      install(1, ax.starter);
+    } else {
+      install(0, ax.starter);
+    }
     this.engine.recompile();
   }
 
@@ -638,6 +671,9 @@ export class World {
 
     this.compact();
     this.updateScore(dt);
+    // §15.3 — last, so a Discovery sees the finished tick rather than a
+    // half-updated one. Deterministic: same seed, same inputs, same Discoveries.
+    this.discoveries.update(this, dt);
   }
 
   // ------------------------------------------------------------------- events
@@ -1972,6 +2008,8 @@ export class World {
     if (!enemy.alive) return;
     enemy.alive = false;
     this.stats.kills++;
+    this.stats.killsByEnemy.set(enemy.defId, (this.stats.killsByEnemy.get(enemy.defId) ?? 0) + 1);
+    if (this.suppressedNow) this.stats.suppressedKills++;
 
     const def = getEnemy(enemy.defId);
 
@@ -2583,6 +2621,7 @@ export class World {
     if (spec.costKind === 'integrity') {
       // Never let a Convert kill you outright: it is a trade, not a gamble.
       if (this.player.integrity <= spec.costAmount + 1) return;
+      if (this.player.integrity < 40) this.stats.desperateConverts++;
       this.player.integrity -= spec.costAmount;
     } else {
       payHue = this.fullestHue();
