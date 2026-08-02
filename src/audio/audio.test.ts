@@ -8,6 +8,8 @@ import { SIM_DT } from '../sim/tunables';
 import { noteHz, semiHz } from './voices';
 import { CHORD_TONES, TRACKS, trackForAxiom } from './tracks';
 import { derivePart } from './parts';
+import { DEMOS } from './demos';
+import { ACTION_BY_ID, MODIFIER_BY_ID, TRIGGER_BY_ID } from '../content/index';
 import { AXIOMS } from '../content/index';
 
 function sourcesIn(dir: string): [string, string][] {
@@ -314,5 +316,46 @@ describe('the Engine is the arrangement (GDD §18.1)', () => {
       ),
     );
     expect(voices.size).toBeGreaterThanOrEqual(8);
+  });
+});
+
+describe('the audition list (GDD §19.2)', () => {
+  it('every demo names real nodes', () => {
+    // A typo'd action id does not throw — derivePart falls back to a pluck, so
+    // the demo plays *something* and quietly misrepresents what that Engine
+    // sounds like. Which is the one job this screen has.
+    for (const demo of DEMOS) {
+      expect(demo.rows.length, `${demo.id} has no rows`).toBeGreaterThan(0);
+      for (const r of demo.rows) {
+        expect(TRIGGER_BY_ID.has(r.trigger), `${demo.id}: no trigger "${r.trigger}"`).toBe(true);
+        expect(ACTION_BY_ID.has(r.action), `${demo.id}: no action "${r.action}"`).toBe(true);
+        for (const m of r.modifiers) {
+          expect(MODIFIER_BY_ID.has(m), `${demo.id}: no modifier "${m}"`).toBe(true);
+        }
+      }
+    }
+  });
+
+  it('every demo plays over a real bed, and every Axiom is auditionable', () => {
+    for (const demo of DEMOS) {
+      expect(TRACKS.some((t) => t.id === demo.bed), `${demo.id} bed "${demo.bed}"`).toBe(true);
+    }
+    for (const a of AXIOMS) {
+      expect(DEMOS.some((d) => d.id === `axiom_${a.id}`), `axiom "${a.id}"`).toBe(true);
+    }
+  });
+
+  it('the demos actually sound different from each other', () => {
+    // A list of builds that all used Clock would be one beat with different
+    // timbres on top, which is the failure this list exists to avoid: the
+    // Trigger is what decides a part's rhythm.
+    const triggers = new Set(DEMOS.flatMap((d) => d.rows.map((r) => r.trigger)));
+    expect(triggers.size).toBeGreaterThanOrEqual(6);
+
+    // And no two demos may be the same Engine.
+    const shapes = DEMOS.map((d) =>
+      d.rows.map((r) => `${r.trigger}|${r.modifiers.join(',')}|${r.action}`).join(';'),
+    );
+    expect(new Set(shapes).size).toBe(DEMOS.length);
   });
 });

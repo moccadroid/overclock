@@ -275,10 +275,11 @@ export class Audio {
    * Menu preview: run the arrangement with no game behind it, at a fixed
    * intensity high enough to hear every layer the track has.
    */
-  preview(track: Track, intensity = 0.72): void {
+  preview(track: Track, parts: (Part | null)[] = [], intensity = 0.72): void {
     this.start();
     this.resumeBusses();
     this.track = track;
+    this.setParts(parts);
     this.bar = 0;
     this.smoothed = intensity;
     this.state = {

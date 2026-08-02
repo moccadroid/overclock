@@ -1249,14 +1249,14 @@
   border-style: dotted;
 }
 
-/* Music. */
+/* Music — a list of Engines, not of styles. */
 .mu-lead {
-  max-width: 78ch;
-  margin: -2px 0 14px;
+  max-width: 82ch;
+  margin: -2px 0 16px;
   color: #56708c;
   line-height: 1.65;
 }
-.track {
+.demo {
   display: flex;
   align-items: baseline;
   gap: 12px;
@@ -1265,42 +1265,50 @@
   border-bottom-color: rgba(42, 58, 82, 0.55);
   cursor: pointer;
 }
-.track:hover {
+.demo:hover {
   border-color: var(--structure);
 }
-.track.on {
+.demo.on {
+  background: rgba(0, 229, 255, 0.04);
+}
+.demo.playing {
   border-color: var(--voltaic);
-  background: rgba(0, 229, 255, 0.05);
 }
-.track.playing .tr-mark {
-  color: #4fbf87;
-}
-.tr-mark {
+.dm-mark {
   flex: none;
   color: #2f4258;
 }
-.track.on .tr-mark {
-  color: var(--voltaic);
+.demo.playing .dm-mark {
+  color: #4fbf87;
 }
-.tr-name {
-  flex: 0 0 170px;
+.dm-name {
+  flex: 0 0 110px;
   color: var(--ink-bright);
   letter-spacing: 0.1em;
 }
-.tr-blurb {
-  flex: 1;
+.dm-rows {
+  flex: 1 1 46%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dm-chain {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.6;
+}
+.dm-note {
+  flex: 1 1 34%;
   min-width: 0;
   color: #56708c;
 }
-.tr-tag {
-  flex: 0 0 80px;
-  text-align: right;
-  color: #6a5730;
-}
 .mu-ops {
   display: flex;
+  align-items: center;
   gap: 12px;
-  margin-top: 16px;
+  margin-top: 18px;
 }
 .mu-ops button {
   padding: 7px 14px;
@@ -1311,10 +1319,7 @@
   letter-spacing: 0.14em;
   cursor: pointer;
 }
-.mu-ops button:hover {
-  border-color: var(--voltaic);
-  color: var(--voltaic);
-}
+.mu-ops button:hover,
 .mu-ops button.on {
   border-color: var(--voltaic);
   color: var(--voltaic);

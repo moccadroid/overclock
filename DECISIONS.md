@@ -1664,6 +1664,44 @@ single modifier can saturate.
 
 ---
 
+## D-82 · SETTLED · The Music screen lists Engines, not styles
+
+Once a Program became a part (D-80), "pick a style" stopped being a coherent
+offer: there is no style to choose, because the track is written by whatever
+Engine you build. A screen offering five adjectives was describing a system that
+no longer existed.
+
+It now lists **Engines**, shown as the chains they actually are, and playing one
+plays exactly what that build would sound like in a run. The first three are
+generated from `axioms.json` rather than transcribed, so an edited Axiom cannot
+leave a demo quietly lying about what run one sounds like. The rest are picked
+to lean on *different Triggers*, since the Trigger is what decides a part's
+rhythm — a list of builds that all used Clock would be one beat with different
+timbres over it.
+
+Measured across the list, average energy per band:
+
+| engine | onsets | sub | mid | hi | air |
+|---|---|---|---|---|---|
+| Ignition | 21 | 206 | 104 | 34 | 7.1 |
+| Cascade | 23 | 196 | 126 | 82 | 30 |
+| Drift | 13 | 222 | 83 | 30 | 0.2 |
+| Clockwork | 17 | 164 | 77 | 27 | 3.2 |
+| Economy | 21 | 194 | 119 | 77 | 35 |
+
+None of that difference is authored. It falls out of the Programs.
+
+The one thing the screen can still meaningfully choose is the **bed** — drums,
+key, chord — which comes from your Axiom and can be pinned. Tests assert every
+demo names real nodes (a typo'd action id does not throw, it silently falls back
+to a pluck and misrepresents the build), every Axiom is auditionable, and no two
+demos are the same Engine.
+
+The screen also turned out to be a decent build-inspiration list, which is a
+better use of the space than a column of adjectives.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

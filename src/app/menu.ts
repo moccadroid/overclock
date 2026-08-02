@@ -19,7 +19,10 @@ import { shapeSvg } from './gfx/shapes';
 import { inspector } from './overlays';
 import { renderPrimer } from './primer';
 import type { Audio } from '../audio/audio';
-import { TRACKS, TRACK_BY_ID, trackForAxiom } from '../audio/tracks';
+import { TRACK_BY_ID, trackForAxiom } from '../audio/tracks';
+import { DEMOS, type Demo } from '../audio/demos';
+import { derivePart, type Part } from '../audio/parts';
+import { ACTION_BY_ID } from '../content/index';
 
 type Pane = 'setup' | 'library' | 'codex' | 'music' | 'primer';
 
@@ -44,6 +47,8 @@ export class TitleScreen {
   private seed = randomSeed();
   private axiomId = 'ignition';
   private resolve: ((r: SetupResult) => void) | null = null;
+  /** Which demo is auditioning, for the ▶ marker. */
+  private playing: string | null = null;
   private readonly onKey = (ev: KeyboardEvent): void => this.handleKey(ev);
 
   constructor(
@@ -153,23 +158,27 @@ export class TitleScreen {
     });
     panel.querySelector('.go')?.addEventListener('click', () => this.start());
 
-    for (const row of panel.querySelectorAll<HTMLElement>('[data-track]')) {
+    for (const row of panel.querySelectorAll<HTMLElement>('[data-demo]')) {
       row.addEventListener('click', () => {
-        const id = row.dataset.track!;
-        // Clicking a row previews it *and* selects it. Two separate controls for
-        // "hear this" and "use this" is one more decision than the screen needs.
-        this.library.setTrack(id);
-        const track = TRACK_BY_ID.get(id);
-        if (track) this.audio.preview(track);
+        const demo = DEMOS.find((d) => d.id === row.dataset.demo);
+        if (!demo) return;
+        // Playing a demo also adopts its bed — the drums and key are the only
+        // part of a track this screen can still meaningfully *choose*, since the
+        // rest is written by whatever Engine you go on to build.
+        this.library.setTrack(demo.bed);
+        this.playing = demo.id;
+        this.audio.preview(trackForAxiom(demo.bed), demoParts(demo));
         this.render();
       });
     }
     panel.querySelector('.track-auto')?.addEventListener('click', () => {
       this.library.setTrack('');
-      this.audio.preview(trackForAxiom(this.axiomId));
+      this.playing = null;
+      this.audio.silence();
       this.render();
     });
     panel.querySelector('.track-stop')?.addEventListener('click', () => {
+      this.playing = null;
       this.audio.silence();
       this.render();
     });
@@ -288,49 +297,60 @@ export class TitleScreen {
   /**
    * §18 — the Music pane.
    *
-   * Every track is synthesized from a handful of numbers, so previewing one is
-   * literally running the arrangement with no game behind it. That makes this
-   * screen honest in a way a jukebox of recordings would not be: what you hear
-   * here is exactly what the run will play, at an intensity partway up the
-   * arrangement so every layer the track has is audible.
+   * It used to list styles, which stopped being true the moment a Program
+   * became a part: there is no "style" to choose any more, because the track is
+   * written by whatever Engine you build. So it lists **Engines**, shown as the
+   * chains they actually are, and plays exactly what each one would sound like.
+   *
+   * That makes it a listening room rather than a jukebox — and incidentally a
+   * decent build-inspiration screen, which is a better use of the space than a
+   * column of adjectives was.
    */
   private renderMusic(): string {
-    // Resolve through the registry: a stored id for a track that no longer
-    // exists is not "some other track", it is no choice at all. Without this a
-    // renamed track leaves the menu with nothing selected and no way to tell.
     const stored = this.library.snapshot.settings.track;
-    const chosen = TRACK_BY_ID.has(stored) ? stored : '';
-    const auto = trackForAxiom(this.axiomId);
-    const playing = this.audio.playing ? this.audio.trackId : null;
+    const bed = TRACK_BY_ID.has(stored) ? stored : '';
 
-    const rows = TRACKS.map((t) => {
-      const on = chosen === t.id;
-      const isAuto = chosen === '' && t.id === auto.id;
+    const rows = DEMOS.map((demo) => {
+      const on = this.playing === demo.id;
+      const chains = demo.rows
+        .map(
+          (r) =>
+            `<span class="dm-chain">` +
+            [
+              `<span class="k-trigger">${esc(nodeName(r.trigger))}</span>`,
+              ...r.modifiers.map((m) => `<span class="k-modifier">${esc(nodeName(m))}</span>`),
+              `<span class="k-action">${esc(nodeName(r.action))}</span>`,
+            ].join('<span class="k-sep"> › </span>') +
+            `</span>`,
+        )
+        .join('');
+
       return (
-        `<div class="track${on ? ' on' : ''}${playing === t.id ? ' playing' : ''}" ` +
-        `data-track="${t.id}">` +
-        `<span class="tr-mark">${playing === t.id ? '▶' : on ? '▣' : '▢'}</span>` +
-        `<span class="tr-name">${t.name}</span>` +
-        `<span class="tr-blurb">${t.blurb}</span>` +
-        `<span class="tr-tag">${isAuto ? 'your axiom' : ''}</span>` +
+        `<div class="demo${on ? ' playing' : ''}${bed === demo.bed ? ' on' : ''}" ` +
+        `data-demo="${demo.id}">` +
+        `<span class="dm-mark">${on ? '▶' : '▢'}</span>` +
+        `<span class="dm-name">${esc(demo.name)}</span>` +
+        `<span class="dm-rows">${chains}</span>` +
+        `<span class="dm-note">${esc(demo.note)}</span>` +
         `</div>`
       );
     }).join('');
 
     return (
       `<div class="music">` +
-      `<div class="k">soundtrack — click one to hear it and use it</div>` +
-      `<div class="mu-lead">One track per Axiom — the Program you start with is ` +
-      `the sound you start in. Nothing here is recorded: each is a pair of chords, ` +
-      `a set of patterns and a synth character, played live. Every note your ` +
-      `engine fires is snapped to the chord underneath it, so a forty-hit cascade ` +
-      `lands as harmony rather than noise. The arrangement opens and closes over ` +
-      `sixteen-bar phrases, which is where the movement comes from.</div>` +
+      `<div class="k">engines — click one to hear what it plays</div>` +
+      `<div class="mu-lead">There is no soundtrack to pick. Every Program in your ` +
+      `Engine is a part: the <span class="k-action">action</span> chooses the ` +
+      `instrument, the <span class="k-trigger">trigger</span> chooses its rhythm, ` +
+      `the <span class="k-modifier">modifiers</span> process it. Four live rows ` +
+      `are four interlocking lines. What you *can* choose is the bed underneath — ` +
+      `the drums, the key, the chord — and that comes from your Axiom.</div>` +
       rows +
       `<div class="mu-ops">` +
-      `<button class="track-auto${chosen === '' ? ' on' : ''}">` +
-      `AUTO — follow the axiom</button>` +
-      `<button class="track-stop">STOP PREVIEW</button>` +
+      `<button class="track-auto${bed === '' ? ' on' : ''}">` +
+      `BED: FOLLOW MY AXIOM</button>` +
+      `<button class="track-stop">STOP</button>` +
+      `<span class="poolnote">${bed === '' ? 'using ' + trackForAxiom(this.axiomId).name : 'bed pinned to ' + (TRACK_BY_ID.get(bed)?.name ?? bed)}</span>` +
       `</div>` +
       `</div>`
     );
@@ -387,6 +407,22 @@ function threatOf(e: EnemyDef): string {
   if (e.shieldArc) parts.push('front shield');
   if (e.elite) parts.push('ELITE');
   return parts.join(' · ');
+}
+
+/** Build a demo's arrangement the same way a real run builds its own. */
+function demoParts(demo: Demo): (Part | null)[] {
+  return demo.rows.map((r, i) => {
+    const action = ACTION_BY_ID.get(r.action);
+    return derivePart(
+      { triggerId: r.trigger, modifierIds: r.modifiers, actionId: r.action, live: true },
+      action ? { primitive: action.primitive, hue: action.hue } : null,
+      i,
+    );
+  });
+}
+
+function esc(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 function chainOf(row: { trigger: string; modifiers: readonly string[]; action: string }): string {
