@@ -167,19 +167,13 @@ export const VIEW_EFFECTS: ViewEffect[] = [
     id: 'lighting',
     name: 'Lighting',
     note: 'everything emits. Shots light the grid they fly over; a Nova floods the room.',
-    values: { lit: 0.42, haze: 0.95, glow: 1.25 },
+    values: { lit: 0.22, haze: 0.4, glow: 1.15 },
   },
   {
     id: 'bloom',
     name: 'Bloom',
     note: 'light spills past its edges, and keeps spilling. Three stacked passes.',
-    values: { bloom: 3.1, glow: 1.5 },
-  },
-  {
-    id: 'bleed',
-    name: 'Bleed',
-    note: 'anamorphic streaking. Light smears outward from the centre of the frame.',
-    values: { bleed: 0.95 },
+    values: { bloom: 2.2, glow: 1.3 },
   },
   {
     id: 'chromatic',

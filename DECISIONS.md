@@ -1900,6 +1900,33 @@ default with Bloom.
 
 ---
 
+## D-93 · BUG · Three faults that all read as "cheap"
+
+**The light map was sampled in the wrong space.** A filter's `vTextureCoord` is
+in its own padded input space, not screen space, so the buffer landed at the
+wrong scale and offset — and clamping at its edge painted a slab of white in the
+corner with visible seams where the texture ran out. `uOutputFrame` says where
+the filter's input sits on screen, so the fix is one conversion before sampling.
+
+**The buffer was clipping, which is why detonations went opaque.** It is 8-bit
+and additive by design — forty overlapping explosions *should* accumulate. But
+once a region sums past 1.0 there is no variation left in it, so a screen of
+detonations collapsed into one flat yellow disc with a banded edge. It looked
+cheap because it had become cheap: a solid shape, not light. Every contributor
+is now a fraction of what it was, so forty of them overlap and stay forty
+distinct sources. Detonation lights also fall off as `t²` rather than `t`, so one
+is gone before the next lands instead of holding the arena at maximum.
+
+**Bleed was the after-image.** A radial zoom smear is a cheap effect wearing an
+expensive name: it drags a copy of everything outward from screen centre, which
+reads as motion blur pointing the wrong way. Removed rather than tuned — it was
+never going to be good, and the toggle list is better one shorter.
+
+Lighting and Bloom both came down by roughly half. The direction was right and
+the amount was not.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

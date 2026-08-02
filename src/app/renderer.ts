@@ -223,7 +223,13 @@ export class Renderer {
     // further than they asked, which is how Heat and Meltdown stay legible as
     // *damage to the picture* rather than as a separate effect.
     this.emitLights(world, heat, melt);
-    this.post.update(VIEW, Math.max(heat * 0.6, melt), frameDt);
+    this.post.update(
+      VIEW,
+      Math.max(heat * 0.6, melt),
+      frameDt,
+      this.app.screen.width,
+      this.app.screen.height,
+    );
     const off = PostPass.isOff(VIEW) && heat < 0.02 && melt < 0.02;
     this.app.stage.filters = off ? [] : [this.post.filter];
 
@@ -247,58 +253,70 @@ export class Renderer {
     const lights = this.lights;
     lights.begin();
 
-    // The player: the one thing always lit, and the brightest.
-    lights.add(world.player.x, world.player.y, 260, PALETTE.player, 0.85 + heat * 0.3);
+    // Every light here is deliberately faint.
+    //
+    // The buffer is 8-bit and additive: once a region sums past 1.0 it clips,
+    // and a clipped region has no variation left in it at all — which is exactly
+    // what turned a screen of detonations into one flat opaque disc with a
+    // banded edge. It looked cheap because it *was* cheap: a solid shape, not
+    // light. Keeping every contributor low means forty of them can overlap and
+    // still be forty distinct sources rather than one blown-out blob.
+    //
+    // The player is wide and dim: it is on screen every frame in the same place,
+    // so a hot core would be a permanent hole in the middle of the picture.
+    lights.add(world.player.x, world.player.y, 340, PALETTE.player, 0.2 + heat * 0.12);
 
     // Detonations and impacts. Short-lived and huge — a Nova should visibly
     // flood the room it went off in, which is most of what "excitement" means.
     for (const fx of world.fx) {
       if (!fx.alive) continue;
       const t = Math.max(0, fx.life / fx.maxLife);
-      const radius = Math.max(90, fx.radius * 2.4);
-      lights.add(fx.x, fx.y, radius * (1.4 - t * 0.4), HUE_COLOR[fx.hue], t * 0.9);
+      // Big and brief. A detonation's light should be gone before the next one
+      // lands, or a fast engine simply holds the whole arena at maximum.
+      const radius = Math.max(70, fx.radius * 1.7);
+      lights.add(fx.x, fx.y, radius * (1.3 - t * 0.3), HUE_COLOR[fx.hue], t * t * 0.4);
     }
 
     // Every shot is a lamp.
     for (const proj of world.projectiles) {
       if (!proj.alive || !this.camera.isVisible(proj.x, proj.y, 160)) continue;
-      lights.add(proj.x, proj.y, 110, HUE_COLOR[proj.hue], 0.4);
+      lights.add(proj.x, proj.y, 95, HUE_COLOR[proj.hue], 0.16);
     }
 
     for (const zone of world.zones) {
       if (!zone.alive) continue;
       const t = Math.max(0, zone.life / zone.maxLife);
-      lights.add(zone.x, zone.y, zone.radius * 1.5, HUE_COLOR[zone.hue], 0.45 * t);
+      lights.add(zone.x, zone.y, zone.radius * 1.4, HUE_COLOR[zone.hue], 0.2 * t);
     }
 
     for (const m of world.mines) {
       if (!m.alive || !this.camera.isVisible(m.x, m.y, 140)) continue;
-      lights.add(m.x, m.y, 90, HUE_COLOR[m.hue], m.arm <= 0 ? 0.35 : 0.15);
+      lights.add(m.x, m.y, 80, HUE_COLOR[m.hue], m.arm <= 0 ? 0.16 : 0.07);
     }
 
     for (const o of world.orbitals) {
       const ox = world.player.x + Math.cos(o.angle) * o.orbitRadius;
       const oy = world.player.y + Math.sin(o.angle) * o.orbitRadius;
-      lights.add(ox, oy, 95, HUE_COLOR[o.hue], 0.4);
+      lights.add(ox, oy, 85, HUE_COLOR[o.hue], 0.16);
     }
 
     // Enemies carry their own dim glow, so a horde lights the ground it walks
     // over. This is the one that makes a crowd feel like a crowd.
     for (const e of world.enemies) {
       if (!e.alive || !this.camera.isVisible(e.x, e.y, 120)) continue;
-      lights.add(e.x, e.y, e.radius * 4.5, HUE_COLOR[e.hue], e.flash > 0 ? 0.9 : 0.2);
+      lights.add(e.x, e.y, e.radius * 4, HUE_COLOR[e.hue], e.flash > 0 ? 0.35 : 0.09);
     }
 
     for (const item of world.pickups) {
       if (!item.alive || !this.camera.isVisible(item.x, item.y, 90)) continue;
       const colour = item.kind === 'xp' ? PALETTE.xp : HUE_COLOR[item.hue];
-      lights.add(item.x, item.y, 52, colour, 0.22);
+      lights.add(item.x, item.y, 48, colour, 0.1);
     }
 
     // §13.2 — Meltdown lights the whole arena from nowhere, which is the world
     // overexposing rather than any object getting brighter.
     if (melt > 0) {
-      lights.add(world.player.x, world.player.y, 2200, 0xffb000, melt * 0.35);
+      lights.add(world.player.x, world.player.y, 2200, 0xffb000, melt * 0.18);
     }
 
     const scale = this.scale;

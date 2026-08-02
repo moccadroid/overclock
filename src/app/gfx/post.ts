@@ -49,6 +49,8 @@ out vec4 finalColor;
 uniform sampler2D uTexture;
 uniform sampler2D uLight;
 uniform vec4 uInputSize;
+uniform vec4 uOutputFrame;
+uniform vec2 uScreen;
 
 uniform float uBarrel;
 uniform float uAberration;
@@ -95,16 +97,35 @@ void main(void) {
   // already had; this is light that exists *in the air* and falls on surfaces
   // that never emitted anything. A bolt flying over the grid lights the grid.
   if (uLit > 0.0 || uHaze > 0.0) {
-    vec3 light = texture(uLight, uv).rgb;
+    // The light buffer is in screen space; vTextureCoord is in the filter's
+    // own input space, which Pixi pads and offsets. Sampling one with the other
+    // put the whole light map at the wrong scale and position, clamped at its
+    // edge into a slab of white with visible seams where the texture ran out.
+    //
+    // uOutputFrame is where this filter's input sits on screen, so this converts
+    // back before sampling.
+    vec2 screenUv = (uv * uInputSize.xy + uOutputFrame.xy) / uScreen;
+    vec3 light = texture(uLight, screenUv).rgb;
+
+    // Tone-map the light before using it.
+    //
+    // The buffer is additive and unbounded on purpose — forty overlapping
+    // detonations *should* accumulate. But used raw, that accumulation clips
+    // into a flat featureless disc: forty orange lights become one yellow
+    // circle with a hard edge, which is less impressive than one light, not
+    // more. Reinhard keeps the bright core bright and its colour intact while
+    // letting the total roll off, so a screen full of light stays a screen full
+    // of *lights*.
+    light = light / (0.55 + light * 0.8);
 
     // Surfaces catch it, scaled by their own brightness. A dim grid line near a
     // detonation lifts a little; a bright stroke near one blows out. Multiplying
     // by the existing colour is what makes this read as *illumination* rather
     // than as a coloured overlay — unlit geometry stays unlit.
-    colour.rgb += colour.rgb * light * uLit * 6.0;
+    colour.rgb += colour.rgb * light * uLit * 5.0;
 
     // And the light is visible in the air itself, which is what sells neon.
-    colour.rgb += light * uHaze;
+    colour.rgb += light * light * uHaze;
   }
 
   // Radial bleed: light streaking outward from the centre.
@@ -194,6 +215,7 @@ export class PostPass {
           uLit: { value: 0, type: 'f32' },
           uHaze: { value: 0, type: 'f32' },
           uTime: { value: 0, type: 'f32' },
+          uScreen: { value: new Float32Array([1, 1]), type: 'vec2<f32>' },
         },
         uLight: Texture.WHITE.source,
       },
@@ -225,9 +247,20 @@ export class PostPass {
    * run gets worse. A preset with everything at zero still stays at zero — the
    * ladder scales what is there rather than introducing it, so "off" means off.
    */
-  update(settings: PostSettings, boost: number, dt: number): void {
+  update(
+    settings: PostSettings,
+    boost: number,
+    dt: number,
+    screenWidth: number,
+    screenHeight: number,
+  ): void {
     this.time = (this.time + dt) % 1000;
-    const u = this.filter.resources.postUniforms.uniforms as Record<string, number>;
+    const uniforms = this.filter.resources.postUniforms.uniforms as Record<string, unknown>;
+    const screen = uniforms.uScreen as Float32Array;
+    screen[0] = screenWidth;
+    screen[1] = screenHeight;
+
+    const u = uniforms as Record<string, number>;
     const k = 1 + boost;
     u.uBarrel = settings.barrel;
     u.uAberration = settings.aberration * k;
