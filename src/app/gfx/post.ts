@@ -13,7 +13,7 @@
  * a correction to it. A preset that turns everything off must be indistinguishable
  * from not having the pass at all.
  */
-import { Filter, GlProgram } from 'pixi.js';
+import { Filter, GlProgram, Texture } from 'pixi.js';
 
 const vertex = `
 in vec2 aPosition;
@@ -47,6 +47,7 @@ in vec2 vTextureCoord;
 out vec4 finalColor;
 
 uniform sampler2D uTexture;
+uniform sampler2D uLight;
 uniform vec4 uInputSize;
 
 uniform float uBarrel;
@@ -55,6 +56,8 @@ uniform float uScan;
 uniform float uGrain;
 uniform float uVignette;
 uniform float uBleed;
+uniform float uLit;
+uniform float uHaze;
 uniform float uTime;
 
 float hash(vec2 p) {
@@ -84,6 +87,24 @@ void main(void) {
     colour.a = texture(uTexture, uv).a;
   } else {
     colour = texture(uTexture, uv);
+  }
+
+  // ---- lighting -------------------------------------------------------
+  //
+  // The light buffer is the thing bloom cannot be. Bloom spreads what a pixel
+  // already had; this is light that exists *in the air* and falls on surfaces
+  // that never emitted anything. A bolt flying over the grid lights the grid.
+  if (uLit > 0.0 || uHaze > 0.0) {
+    vec3 light = texture(uLight, uv).rgb;
+
+    // Surfaces catch it, scaled by their own brightness. A dim grid line near a
+    // detonation lifts a little; a bright stroke near one blows out. Multiplying
+    // by the existing colour is what makes this read as *illumination* rather
+    // than as a coloured overlay — unlit geometry stays unlit.
+    colour.rgb += colour.rgb * light * uLit * 6.0;
+
+    // And the light is visible in the air itself, which is what sells neon.
+    colour.rgb += light * uHaze;
   }
 
   // Radial bleed: light streaking outward from the centre.
@@ -138,6 +159,10 @@ export interface PostSettings {
   grain: number;
   vignette: number;
   bleed: number;
+  /** How much light surfaces catch. The illumination half. */
+  lit: number;
+  /** How much light is visible in the air. The neon half. */
+  haze: number;
 }
 
 export const POST_OFF: PostSettings = {
@@ -147,6 +172,8 @@ export const POST_OFF: PostSettings = {
   grain: 0,
   vignette: 0,
   bleed: 0,
+  lit: 0,
+  haze: 0,
 };
 
 export class PostPass {
@@ -164,10 +191,18 @@ export class PostPass {
           uGrain: { value: 0, type: 'f32' },
           uVignette: { value: 0, type: 'f32' },
           uBleed: { value: 0, type: 'f32' },
+          uLit: { value: 0, type: 'f32' },
+          uHaze: { value: 0, type: 'f32' },
           uTime: { value: 0, type: 'f32' },
         },
+        uLight: Texture.WHITE.source,
       },
     });
+  }
+
+  /** Point the shader at this frame's light buffer. */
+  setLightTexture(texture: Texture): void {
+    this.filter.resources.uLight = texture.source;
   }
 
   /** True when every effect is off — the pass can then be skipped entirely. */
@@ -178,7 +213,9 @@ export class PostPass {
       s.scan === 0 &&
       s.grain === 0 &&
       s.vignette === 0 &&
-      s.bleed === 0
+      s.bleed === 0 &&
+      s.lit === 0 &&
+      s.haze === 0
     );
   }
 
@@ -198,6 +235,11 @@ export class PostPass {
     u.uGrain = settings.grain * k;
     u.uVignette = settings.vignette;
     u.uBleed = settings.bleed * k;
+    // Heat and Meltdown push light *up*, not down: §16.7's ladder is the world
+    // overexposing, and an engine coming apart should be the brightest thing
+    // that ever happens in a run.
+    u.uLit = settings.lit * k;
+    u.uHaze = settings.haze * k;
     u.uTime = this.time;
   }
 }

@@ -150,6 +150,7 @@ export class Audio {
   private lastBassHz = 0;
   private lastLeadHz = 0;
   private lastHover = 0;
+  private masterDrive = 0;
   /**
    * §18.1 — one part per live Program. This is the arrangement, and it is
    * literally the player's Engine. See parts.ts.
@@ -244,12 +245,31 @@ export class Audio {
 
   setMuted(muted: boolean): void {
     this.muted = muted;
-    if (this.ctx) this.master.gain.value = muted ? 0 : this.volume;
+    this.applyMaster();
   }
 
   setVolume(v: number): void {
     this.volume = Math.max(0, Math.min(1, v));
-    if (this.ctx && !this.muted) this.master.gain.value = this.volume;
+    this.applyMaster();
+  }
+
+  /**
+   * The volume never goes up. Ever.
+   *
+   * Saturation raises RMS even though it leaves the peak alone, so driving the
+   * master bus during Overheat made the game *louder* exactly when it was
+   * already at its most stressful — the one moment where louder is unbearable
+   * rather than exciting. Every drive stage now pays for itself with makeup
+   * gain in the opposite direction, so the mix gets dirtier and stays level.
+   */
+  private applyMaster(): void {
+    if (!this.ctx) return;
+    const compensation = 1 - this.masterDrive * 0.42;
+    this.master.gain.setTargetAtTime(
+      this.muted ? 0 : this.volume * compensation,
+      this.ctx.currentTime,
+      0.05,
+    );
   }
 
   get trackId(): string {
@@ -371,8 +391,15 @@ export class Audio {
 
     // Busier means dirtier, not louder. Drive climbs with intensity while the
     // trim comes down to pay for the layers that intensity added.
-    shape(this.musicDrive, this.smoothed * 0.55 + state.meltdown * 0.35);
-    this.musicTrim.gain.setTargetAtTime(1 - this.smoothed * 0.3, this.ctx.currentTime, 0.4);
+    const drive = this.smoothed * 0.55 + state.meltdown * 0.35;
+    shape(this.musicDrive, drive);
+    // Same rule as the master: the trim pays for both the saturation and the
+    // extra layers a busy arrangement brings in.
+    this.musicTrim.gain.setTargetAtTime(
+      (1 - this.smoothed * 0.3) * (1 - drive * 0.35),
+      this.ctx.currentTime,
+      0.4,
+    );
     this.setDrive(Math.max(state.heat * 0.6, state.meltdown * 0.45));
     this.musicBus.gain.value = state.stalled ? 0.12 : 0.9;
 
@@ -598,9 +625,11 @@ export class Audio {
       const beat = 60 / (this.clock?.bpm ?? 112);
       if (occasion.kind === 'overheat') {
         // Overheat resolves *down* a fourth: the one chord in the game that
-        // sounds like something went wrong rather than right.
-        sub(voice, at, semiHz(tones[0]! - 29), 1, 1.1);
-        this.hitChord(voice, at, tones.map((x) => x - 5), 0.8, beat);
+        // sounds like something went wrong rather than right. Quieter than a
+        // level-up, not louder — it is already the most stressful moment in the
+        // run and does not need volume to say so.
+        sub(voice, at, semiHz(tones[0]! - 29), 0.55, 1.1);
+        this.hitChord(voice, at, tones.map((x) => x - 5), 0.45, beat);
       } else {
         // Three hits on the beat rather than one long swell — an occasion should
         // land *in* the track, not float above it.
@@ -673,6 +702,9 @@ export class Audio {
 
   /** Soft clip. 0 is transparent; 1 is an engine coming apart. */
   private setDrive(amount: number): void {
+    if (amount === this.masterDrive) return;
+    this.masterDrive = amount;
     shape(this.shaper, amount);
+    this.applyMaster();
   }
 }

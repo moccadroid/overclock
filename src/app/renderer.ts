@@ -21,6 +21,7 @@ import { enemy as getEnemy } from '../content/index';
 import { Camera } from './camera';
 import { BAND, PALETTE, VIEW, VISUAL } from './visual';
 import { PostPass } from './gfx/post';
+import { LightField } from './gfx/lights';
 import { BloomPipeline } from './gfx/bloom';
 import { ParticleField } from './gfx/particles';
 import { shapeCoreRadius, shapeOutline } from './gfx/shapes';
@@ -54,6 +55,7 @@ export class Renderer {
 
   private bloom!: BloomPipeline;
   private readonly post = new PostPass();
+  private lights!: LightField;
   private readonly particles = new ParticleField();
 
   /** Non-blooming schematic: the arena's structure. */
@@ -104,6 +106,8 @@ export class Renderer {
     mount.appendChild(this.app.canvas);
 
     this.bloom = new BloomPipeline(this.app);
+    this.lights = new LightField(this.app);
+    this.post.setLightTexture(this.lights.source);
 
     this.structureLayer.addChild(this.gGrid, this.gRuins);
     this.worldLayer.addChild(
@@ -138,6 +142,8 @@ export class Renderer {
     this.viewWidth = Math.min(VIEW_WIDTH_MAX, Math.max(VIEW_WIDTH_MIN, VIEW_HEIGHT * aspect));
     this.camera.setViewSize(this.viewWidth, VIEW_HEIGHT);
     this.bloom.resize();
+    this.lights?.resize();
+    if (this.lights) this.post.setLightTexture(this.lights.source);
   }
 
   private get scale(): number {
@@ -216,11 +222,91 @@ export class Renderer {
     // §16.7 — the degradation ladder pushes whatever preset the player chose
     // further than they asked, which is how Heat and Meltdown stay legible as
     // *damage to the picture* rather than as a separate effect.
+    this.emitLights(world, heat, melt);
     this.post.update(VIEW, Math.max(heat * 0.6, melt), frameDt);
     const off = PostPass.isOff(VIEW) && heat < 0.02 && melt < 0.02;
     this.app.stage.filters = off ? [] : [this.post.filter];
 
     this.bloom.compose();
+  }
+
+  /**
+   * §16.1 — everything that emits, emitting.
+   *
+   * The rule for what gets a light and how big: it is the *thing itself*, at
+   * roughly the size it occupies, with brightness standing in for how much it
+   * matters. A detonation is enormous and brief; a fuel mote is tiny and
+   * constant; the player is the only steady source in the arena, which is the
+   * §16.2 brightness hierarchy expressed as illumination rather than as alpha.
+   *
+   * Skipped entirely when the preset asks for no lighting — a Schematic run
+   * should not pay for a buffer nobody samples.
+   */
+  private emitLights(world: World, heat: number, melt: number): void {
+    if (VIEW.lit <= 0 && VIEW.haze <= 0) return;
+    const lights = this.lights;
+    lights.begin();
+
+    // The player: the one thing always lit, and the brightest.
+    lights.add(world.player.x, world.player.y, 260, PALETTE.player, 0.85 + heat * 0.3);
+
+    // Detonations and impacts. Short-lived and huge — a Nova should visibly
+    // flood the room it went off in, which is most of what "excitement" means.
+    for (const fx of world.fx) {
+      if (!fx.alive) continue;
+      const t = Math.max(0, fx.life / fx.maxLife);
+      const radius = Math.max(90, fx.radius * 2.4);
+      lights.add(fx.x, fx.y, radius * (1.4 - t * 0.4), HUE_COLOR[fx.hue], t * 0.9);
+    }
+
+    // Every shot is a lamp.
+    for (const proj of world.projectiles) {
+      if (!proj.alive || !this.camera.isVisible(proj.x, proj.y, 160)) continue;
+      lights.add(proj.x, proj.y, 110, HUE_COLOR[proj.hue], 0.4);
+    }
+
+    for (const zone of world.zones) {
+      if (!zone.alive) continue;
+      const t = Math.max(0, zone.life / zone.maxLife);
+      lights.add(zone.x, zone.y, zone.radius * 1.5, HUE_COLOR[zone.hue], 0.45 * t);
+    }
+
+    for (const m of world.mines) {
+      if (!m.alive || !this.camera.isVisible(m.x, m.y, 140)) continue;
+      lights.add(m.x, m.y, 90, HUE_COLOR[m.hue], m.arm <= 0 ? 0.35 : 0.15);
+    }
+
+    for (const o of world.orbitals) {
+      const ox = world.player.x + Math.cos(o.angle) * o.orbitRadius;
+      const oy = world.player.y + Math.sin(o.angle) * o.orbitRadius;
+      lights.add(ox, oy, 95, HUE_COLOR[o.hue], 0.4);
+    }
+
+    // Enemies carry their own dim glow, so a horde lights the ground it walks
+    // over. This is the one that makes a crowd feel like a crowd.
+    for (const e of world.enemies) {
+      if (!e.alive || !this.camera.isVisible(e.x, e.y, 120)) continue;
+      lights.add(e.x, e.y, e.radius * 4.5, HUE_COLOR[e.hue], e.flash > 0 ? 0.9 : 0.2);
+    }
+
+    for (const item of world.pickups) {
+      if (!item.alive || !this.camera.isVisible(item.x, item.y, 90)) continue;
+      const colour = item.kind === 'xp' ? PALETTE.xp : HUE_COLOR[item.hue];
+      lights.add(item.x, item.y, 52, colour, 0.22);
+    }
+
+    // §13.2 — Meltdown lights the whole arena from nowhere, which is the world
+    // overexposing rather than any object getting brighter.
+    if (melt > 0) {
+      lights.add(world.player.x, world.player.y, 2200, 0xffb000, melt * 0.35);
+    }
+
+    const scale = this.scale;
+    const offsetX = (this.app.screen.width - this.viewWidth * scale) / 2 + this.shakeX;
+    const offsetY = (this.app.screen.height - VIEW_HEIGHT * scale) / 2 + this.shakeY;
+    const worldX = this.viewWidth / 2 - this.camera.x;
+    const worldY = VIEW_HEIGHT / 2 - this.camera.y;
+    lights.render(scale, offsetX + worldX * scale, offsetY + worldY * scale);
   }
 
   /** Turn the sim's death list into decomposing line segments (§17.1). */

@@ -1814,6 +1814,58 @@ make.
 
 ---
 
+## D-90 · BUG · The volume went up during Overheat
+
+Reported, emphatically: the volume should **never** increase.
+
+Saturation was the culprit and it was mine twice over. A waveshaper leaves the
+peak alone — `((1+k)x)/(1+k|x|)` still maps 1 to 1 — but it lifts RMS
+substantially, which the ear reads as louder. So driving the master bus during
+Overheat made the game louder at the single most stressful moment in a run,
+which is the one place louder is unbearable rather than exciting.
+
+Every drive stage now pays for itself with makeup gain in the opposite
+direction: master and music both trim as they saturate. And the Overheat chord
+is quieter than a level-up rather than louder — it is already the worst thing
+that can happen and does not need volume to say so.
+
+## D-91 · SETTLED · Lighting, not a lens
+
+The presets were a CRT filter: aberration, scanlines, grain, vignette. Fairly
+assessed as "can be done with pure CSS", and the assessment is right — none of
+it touches what the image *is*, only what is smeared over it.
+
+The thing that was actually being asked for is **illumination**. Bloom spreads
+what a pixel already had; it cannot make a bolt light up the grid it flies over,
+because the grid never had that light to spread. Illumination needs light to
+exist as its own quantity, separate from whatever emitted it.
+
+So there is a light buffer now. Every emissive entity — the player, every shot,
+every detonation, every zone, mine, orbital, enemy and fuel mote — writes a
+radial falloff into it at quarter resolution, and the post shader does two
+different things with the result:
+
+- `colour += colour * light` — **surfaces catch it**, scaled by their own
+  brightness, so a grid line near a detonation lifts and one far from it stays
+  dark. This is the half that makes the world feel lit rather than decorated.
+- `colour += light` — **the light is visible in the air**, which is what sells
+  neon.
+
+One draw call for the whole field: every light is the same baked radial texture,
+tinted and scaled. Six hundred of them is six hundred quads.
+
+The falloff is `(1 - r)^2.2` rather than linear, because a linear ramp looks
+like a sprite of a circle — which is what it is. The hot core and long tail are
+what read as a point source in air.
+
+§16.7's Heat and Meltdown ladder now pushes the lighting *up*: an engine coming
+apart should be the brightest thing that ever happens in a run.
+
+Schematic still emits nothing and skips the buffer entirely, so the floor stays
+exactly where it was.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

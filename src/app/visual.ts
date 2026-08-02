@@ -128,6 +128,14 @@ export interface ViewPreset {
   glow: number;
   /** §17.2 screenshake, which some people cannot tolerate at all. */
   shake: number;
+  /**
+   * Real lighting, from the light buffer. `lit` is how much light surfaces
+   * catch — a bolt flying over the grid lighting the grid. `haze` is how much
+   * of it is visible in the air. These are the two that actually change what
+   * the game *is*; everything below them is lens dressing.
+   */
+  lit: number;
+  haze: number;
   /** Post-pass, all zero at the floor. See gfx/post.ts. */
   barrel: number;
   aberration: number;
@@ -145,6 +153,8 @@ export const VIEW_PRESETS: ViewPreset[] = [
     bloom: 1,
     glow: 1,
     shake: 1,
+    lit: 0,
+    haze: 0,
     barrel: 0,
     aberration: 0,
     scan: 0,
@@ -155,11 +165,13 @@ export const VIEW_PRESETS: ViewPreset[] = [
   {
     id: 'phosphor',
     name: 'Phosphor',
-    note: 'a CRT in a dark room. Scanlines, a curved tube, light that lingers.',
-    bloom: 2,
-    glow: 1.35,
+    note: 'everything emits. Shots light the grid they fly over, on a curved tube.',
+    bloom: 1.9,
+    glow: 1.25,
     shake: 1,
-    barrel: 0.07,
+    lit: 0.16,
+    haze: 0.35,
+    barrel: 0.06,
     aberration: 0.3,
     scan: 0.26,
     grain: 0.07,
@@ -169,11 +181,13 @@ export const VIEW_PRESETS: ViewPreset[] = [
   {
     id: 'overdrive',
     name: 'Overdrive',
-    note: 'too much light and no apology for it. Everything bleeds outward.',
-    bloom: 3.2,
-    glow: 1.8,
+    note: 'neon. Every bolt is a lamp, every detonation floods the room.',
+    bloom: 2.8,
+    glow: 1.6,
     shake: 1.15,
-    barrel: 0.05,
+    lit: 0.34,
+    haze: 0.75,
+    barrel: 0.04,
     aberration: 0.45,
     scan: 0.1,
     grain: 0.09,
@@ -183,11 +197,13 @@ export const VIEW_PRESETS: ViewPreset[] = [
   {
     id: 'divergence',
     name: 'Divergence',
-    note: 'the Meltdown look, all the time. Barely legible, and that is the point.',
-    bloom: 4.2,
-    glow: 2.2,
+    note: 'blown out. The arena is lit by your own engine and it is too much.',
+    bloom: 3.6,
+    glow: 2,
     shake: 1.35,
-    barrel: 0.14,
+    lit: 0.6,
+    haze: 1.25,
+    barrel: 0.12,
     aberration: 0.85,
     scan: 0.3,
     grain: 0.16,
