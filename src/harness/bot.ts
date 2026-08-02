@@ -150,6 +150,11 @@ export function botDraftChoice(world: World, cards: readonly DraftCard[]): numbe
       // §8.2 calls the stat pool deliberately boring; this pilot treats it as
       // the floor it is meant to be.
       score = rebuilding ? 0.5 : 2.5;
+    } else if (card.kind === 'tool') {
+      // The pilot never rerolls and never purges — it has no read on the pool to
+      // narrow toward. Scoring these near zero keeps the harness measuring the
+      // game rather than a strategy it cannot execute.
+      score = 0.2;
     } else {
       const node = NODE_BY_ID.get(card.nodeId);
       if (!node) score = 0;

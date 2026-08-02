@@ -10,6 +10,14 @@
     ]
   },
   {
+    "id": "sculptor",
+    "name": "Sculptor",
+    "hint": "Purge 4 cards from the pool in one run.",
+    "teaches": "Purging is not throwing a card away — it is deleting it from every draft that follows, so the ones you want come round sooner.",
+    "score": 500,
+    "unlocks": []
+  },
+  {
     "id": "chain_reaction",
     "name": "Chain Reaction",
     "hint": "Reach cascade depth 4.",

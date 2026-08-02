@@ -15,11 +15,15 @@ import { axiom as getAxiom } from '../content/index';
 /** §8.2 — the deliberately boring floor that keeps a draft from being dead. */
 export type StatKind = 'crit' | 'magnet' | 'speed' | 'integrity' | 'power';
 
+/** §8.3 — the draft economy, drafted. */
+export type ToolKind = 'reroll' | 'purge';
+
 export type DraftCard =
   | { kind: 'node'; nodeId: string }
   | { kind: 'capacity'; amount: number }
   | { kind: 'program_slot' }
-  | { kind: 'stat'; stat: StatKind };
+  | { kind: 'stat'; stat: StatKind }
+  | { kind: 'tool'; tool: ToolKind };
 
 export const STAT_CARDS: Record<StatKind, { title: string; body: string; apply: (w: World) => void }> =
   {
@@ -163,9 +167,14 @@ export function rollDraft(world: World): DraftOffer {
 
     if (rollFiller) {
       const roll = world.rng.next();
-      if (slotAvailable && roll < 0.18) {
+      if (slotAvailable && roll < 0.16) {
         cards.push({ kind: 'program_slot' });
-      } else if (roll < 0.72) {
+      } else if (roll < 0.28) {
+        // §8.3 — the draft economy is itself draftable. Purge is the tailoring
+        // tool, so it is the scarce one: a Reroll buys another look at the pool,
+        // a Purge permanently narrows it, and only one of those compounds.
+        cards.push({ kind: 'tool', tool: world.rng.chance(0.32) ? 'purge' : 'reroll' });
+      } else if (roll < 0.74) {
         // §8.2 — a small, deliberately boring stat pool.
         // Weighted by hand rather than uniformly: Gain is the scaling curve, so
         // it shows up roughly twice as often as the utility stats.
@@ -214,6 +223,19 @@ export function describeCard(card: DraftCard): { title: string; body: string; ta
     const stat = STAT_CARDS[card.stat];
     return { title: stat.title, body: stat.body, tag: 'STAT' };
   }
+  if (card.kind === 'tool') {
+    return card.tool === 'reroll'
+      ? {
+          title: 'Reroll',
+          body: `+${TUNABLE.rerollCardAmount} rerolls. Another look at the pool, whenever you don't like what it offered.`,
+          tag: 'UPGRADE',
+        }
+      : {
+          title: 'Purge',
+          body: `+${TUNABLE.purgeCardAmount} purges. Purging deletes a card from this run's pool for good — the way you narrow the draft toward the engine you are actually building.`,
+          tag: 'UPGRADE',
+        };
+  }
   const node = NODE_BY_ID.get(card.nodeId);
   if (!node) return { title: card.nodeId, body: '', tag: '?' };
   const cost =
@@ -241,6 +263,9 @@ export function applyDraft(world: World, card: DraftCard): number | null {
     world.engine.addProgramSlot();
   } else if (card.kind === 'stat') {
     STAT_CARDS[card.stat].apply(world);
+  } else if (card.kind === 'tool') {
+    if (card.tool === 'reroll') world.rerolls += TUNABLE.rerollCardAmount;
+    else world.purges += TUNABLE.purgeCardAmount;
   } else {
     landed = world.engine.autoSlot(card.nodeId);
   }

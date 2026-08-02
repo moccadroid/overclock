@@ -209,6 +209,11 @@ function previewSlot(world: World, card: DraftCard): string {
     return `Programs ${world.engine.programs.length} -> ${world.engine.programs.length + 1}`;
   }
   if (card.kind === 'stat') return 'Applies immediately';
+  if (card.kind === 'tool') {
+    return card.tool === 'reroll'
+      ? `Rerolls ${world.rerolls} -> ${world.rerolls + TUNABLE.rerollCardAmount}`
+      : `Purges ${world.purges} -> ${world.purges + TUNABLE.purgeCardAmount}`;
+  }
   const node = NODE_BY_ID.get(card.nodeId);
   if (!node) return '';
   const programs = world.engine.programs;

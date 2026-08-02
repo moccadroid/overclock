@@ -5,7 +5,7 @@ import { LOADBEARING, SAFETY, SIM_DT, TUNABLE } from './tunables';
 import { CycleBudget } from './cycles';
 import { Rng } from './rng';
 import { botInput } from '../harness/bot';
-import { applyDraft, rollDraft } from './draft';
+import { applyDraft, purgeCard, rollDraft } from './draft';
 import { inertFields } from './engine';
 
 /** Run with the harness pilot, which actually collects fuel and XP. */
@@ -300,6 +300,48 @@ describe('Recompile (GDD §9)', () => {
 
     applyDraft(w, offer.cards[0]!);
     expect(w.surgeDrafts).toBe(TUNABLE.rebuildSurgeDrafts - 1);
+  });
+
+  it('§8.3 — the draft economy is itself draftable, and Purge narrows the pool', () => {
+    const w = new World({ seed: 'tools', axiomId: 'ignition' });
+    const rerolls = w.rerolls;
+    const purges = w.purges;
+
+    applyDraft(w, { kind: 'tool', tool: 'reroll' });
+    applyDraft(w, { kind: 'tool', tool: 'purge' });
+    expect(w.rerolls).toBe(rerolls + TUNABLE.rerollCardAmount);
+    expect(w.purges).toBe(purges + TUNABLE.purgeCardAmount);
+
+    // The point of a Purge is not that one card goes away, it is that it goes
+    // away from every draft after this one.
+    let spent = 0;
+    while (w.purges > 0 && spent < 60) {
+      const node = rollDraft(w).cards.find((c) => c.kind === 'node');
+      if (node) purgeCard(w, node);
+      spent++;
+    }
+    expect(w.purged.size).toBeGreaterThan(0);
+
+    for (let i = 0; i < 40; i++) {
+      for (const card of rollDraft(w).cards) {
+        if (card.kind === 'node') expect(w.purged.has(card.nodeId)).toBe(false);
+      }
+    }
+  });
+
+  it('§8.3 — tool cards actually reach the player', () => {
+    // A card kind that exists in the type but never rolls is the same as one
+    // that does not exist. Sample enough drafts to prove both tools appear.
+    const seen = new Set<string>();
+    for (let seed = 0; seed < 40 && seen.size < 2; seed++) {
+      const w = new World({ seed: `tool-${seed}`, axiomId: 'ignition' });
+      for (let n = 0; n < 40; n++) {
+        for (const card of rollDraft(w).cards) {
+          if (card.kind === 'tool') seen.add(card.tool);
+        }
+      }
+    }
+    expect([...seen].sort()).toEqual(['purge', 'reroll']);
   });
 });
 

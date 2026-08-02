@@ -188,6 +188,14 @@ export const TUNABLE = {
   draftCards: 3,
   rerollsPerRun: 2,
   purgesPerRun: 1,
+  /**
+   * §8.3 — "+1 from certain drafts". The two tools differ in kind, so they are
+   * priced differently: a Reroll is another look at the pool you have, a Purge
+   * permanently narrows that pool. Purge is the tailoring tool and therefore the
+   * scarce one — it comes two at a time and appears about a third as often.
+   */
+  rerollCardAmount: 2,
+  purgeCardAmount: 2,
   maxQueuedDrafts: 3,
   capacityUpgradeAmount: 15,
 

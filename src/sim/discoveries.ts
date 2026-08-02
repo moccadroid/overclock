@@ -37,6 +37,7 @@ function isSelfDriving(triggerId: string | null): boolean {
 
 export const DISCOVERY_CHECKS: Record<string, DiscoveryCheck> = {
   first_cut: (w) => w.engine.scrapStacks > 0,
+  sculptor: (w) => w.purged.size >= 4,
   chain_reaction: (w) => w.stats.maxDepth >= 4,
   depth_six: (w) => w.stats.maxDepth >= 6,
   deep_six: (w) => w.stats.maxDepth >= 10,
