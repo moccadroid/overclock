@@ -17,13 +17,13 @@ export const BAND = {
   /** 1 — the player. Nothing else. */
   player: 1.0,
   /** 2 — active threats mid-telegraph. */
-  telegraph: 0.85,
+  telegraph: 0.95,
   /** 3 — enemies, elites, player effects at the moment they fire. */
-  entity: 0.7,
+  entity: 0.88,
   /** 4 — projectiles and effects in flight, fuel and XP pickups. */
-  inFlight: 0.5,
+  inFlight: 0.74,
   /** 5 — arena structure, grid, annotations, spent trails. */
-  structure: 0.22,
+  structure: 0.26,
 } as const;
 
 export const PALETTE = {
@@ -41,9 +41,14 @@ export const PALETTE = {
 
 export const VISUAL = {
   // ---- §16.1 bloom ----
-  /** Becomes the "Bloom intensity 0-100% (default 70)" setting in §20.1. */
-  bloomIntensity: 0.7,
-  bloomStrength: 14,
+  /**
+   * §20.1 exposes this as "Bloom intensity 0-100% (default 70)". The first pass
+   * sat at the documented default and read dull — the bands beneath it were too
+   * conservative, so the glow had nothing bright to work with. Emissives now sit
+   * higher and bloom harder, which also leaves Meltdown somewhere to escalate to.
+   */
+  bloomIntensity: 1.05,
+  bloomStrength: 20,
   /** Bloom runs at reduced resolution; it is a glow, not a detail pass. */
   bloomResolution: 0.4,
 

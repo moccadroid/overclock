@@ -507,28 +507,52 @@ export class Renderer {
     }
   }
 
-  /** §16.4 — pickups are 1px dashed micro-shapes with a gentle sine bob. */
+  /**
+   * §16.4 — pickups bob gently. Batched by kind and drawn as solid glowing
+   * marks: at 1px dashed micro-shapes a hundred of them read as static rather
+   * than as loot, which is the opposite of what a pickup should communicate.
+   */
   private drawPickups(world: World): void {
     const g = this.gPickups;
     g.clear();
+
+    // XP shards: white diamonds, one fill for the lot.
+    let anyXp = false;
     for (const item of world.pickups) {
+      if (item.kind !== 'xp') continue;
       if (!this.camera.isVisible(item.x, item.y, 20)) continue;
-      const bob = Math.sin(item.age * 3.4 + item.id) * 1.6;
-      const y = item.y + bob;
-      if (item.kind === 'xp') {
-        // White dashed shard: reads as "small player-stuff" (§16.3).
-        g.moveTo(item.x - 3, y).lineTo(item.x, y - 3);
-        g.moveTo(item.x + 1, y - 1).lineTo(item.x + 3, y + 1);
-        g.moveTo(item.x, y + 3).lineTo(item.x - 2, y + 1);
-        g.stroke({ width: 1, color: PALETTE.xp, alpha: BAND.inFlight });
-      } else {
-        const color = HUE_COLOR[item.hue];
-        for (let i = 0; i < 3; i++) {
-          const a = (i / 3) * Math.PI * 2 + item.age * 1.1;
-          arcSegment(g, item.x, y, 3.6, a, a + 1.1);
-        }
-        g.stroke({ width: 1.4, color, alpha: BAND.inFlight });
+      const y = item.y + Math.sin(item.age * 3.4 + item.id) * 1.8;
+      g.moveTo(item.x, y - 4)
+        .lineTo(item.x + 3, y)
+        .lineTo(item.x, y + 4)
+        .lineTo(item.x - 3, y)
+        .lineTo(item.x, y - 4);
+      anyXp = true;
+    }
+    if (anyXp) g.fill({ color: PALETTE.xp, alpha: BAND.inFlight });
+
+    // Fuel motes: a bright core with a hue halo, batched per hue.
+    for (const hue of HUE_ORDER) {
+      const color = HUE_COLOR[hue];
+      let any = false;
+      for (const item of world.pickups) {
+        if (item.kind === 'xp' || item.hue !== hue) continue;
+        if (!this.camera.isVisible(item.x, item.y, 20)) continue;
+        const y = item.y + Math.sin(item.age * 3.4 + item.id) * 1.8;
+        g.circle(item.x, y, 5.5);
+        any = true;
       }
+      if (any) g.stroke({ width: 1.5, color, alpha: BAND.inFlight * 0.75 });
+
+      any = false;
+      for (const item of world.pickups) {
+        if (item.kind === 'xp' || item.hue !== hue) continue;
+        if (!this.camera.isVisible(item.x, item.y, 20)) continue;
+        const y = item.y + Math.sin(item.age * 3.4 + item.id) * 1.8;
+        g.circle(item.x, y, 2.6);
+        any = true;
+      }
+      if (any) g.fill({ color, alpha: BAND.entity });
     }
   }
 

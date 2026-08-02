@@ -88,6 +88,19 @@ function simulateRun(seed: string, axiomId: string, minutes: number): RunResult 
   for (let tick = 0; tick < totalTicks; tick++) {
     if (!world.player.alive) break;
 
+    // Partial Recompile (DECISIONS D-28): the reference pilot sacrifices its
+    // biggest producer and keeps the rest running, which is the whole point of
+    // making the cost a dial rather than a cliff.
+    if (world.pendingRecompileChoice) {
+      world.pendingRecompileChoice = false;
+      const live = world.engine.programs
+        .map((_, i) => ({ i, share: world.outputShareOf([i]) }))
+        .filter((r) => r.share > 0)
+        .sort((a, b) => b.share - a.share);
+      if (live.length > 0) world.recompile([live[0]!.i]);
+      world.pendingCeremony = null;
+    }
+
     while (world.pendingDrafts > 0) {
       const offer = rollDraft(world);
       const choice = botDraftChoice(world, offer.cards);

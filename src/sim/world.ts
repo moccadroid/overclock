@@ -861,7 +861,8 @@ export class World {
       return;
     }
     if (t.kind === 'recompile') {
-      this.recompile();
+      // Does not fire immediately: the player chooses how much to sacrifice.
+      this.pendingRecompileChoice = true;
       return;
     }
     // §12.4 — banked at ×1.0. No Meltdown multiplier ever applies.
@@ -878,44 +879,83 @@ export class World {
    * against the best sustained output the Engine actually reached, not its state
    * at the moment you press the button.
    */
-  recompile(): number {
-    const measured = this.outputAverage;
-    const percent = Math.min(
+  /**
+   * The share of the Engine's current output produced by the given rows.
+   * Falls back to a headcount when nothing has fired recently, so a freshly
+   * rebuilt Engine still yields a sensible number.
+   */
+  outputShareOf(indices: readonly number[]): number {
+    const live = this.engine.programs.filter((_, i) => this.engine.compiled[i]?.live);
+    if (live.length === 0) return 0;
+    const total = live.reduce((s, p) => s + p.recentEvents, 0);
+    const chosen = indices.filter((i) => this.engine.compiled[i]?.live);
+    if (chosen.length === 0) return 0;
+    if (total <= 0.01) return chosen.length / live.length;
+    return chosen.reduce((s, i) => s + this.engine.programs[i]!.recentEvents, 0) / total;
+  }
+
+  /** What Kernel a given sacrifice would forge, for the selection UI. */
+  kernelPreview(indices: readonly number[]): number {
+    const share = this.outputShareOf(indices);
+    if (share <= 0) return 0;
+    return Math.min(
       TUNABLE.kernelMaxPercent,
-      TUNABLE.kernelBasePercent + TUNABLE.kernelPercentPerEps * measured,
+      TUNABLE.kernelBasePercent * share + TUNABLE.kernelPercentPerEps * this.outputAverage * share,
     );
+  }
+
+  /**
+   * Sacrifice the given Program rows (default: all of them).
+   *
+   * Partial by design — see DECISIONS D-28. Sacrificing everything was measured
+   * to be strictly worse than never recompiling, because in this game output and
+   * survival are the same axis: you cannot buy a multiplier with all of your
+   * production and live to use it. Burning a chosen subset makes the cost
+   * something the player can size to what they can afford.
+   */
+  recompile(indices?: readonly number[]): number {
+    const targets = (indices ?? this.engine.programs.map((_, i) => i)).filter(
+      (i) => this.engine.compiled[i]?.live,
+    );
+    if (targets.length === 0) return 0;
+
+    const share = this.outputShareOf(targets);
+    const percent = this.kernelPreview(targets);
 
     // Capture the schematic before it burns, for the §19.7 ceremony.
-    const rows = this.engine.programs
-      .map((p, i) => {
-        if (!this.engine.compiled[i]?.live) return null;
-        const mods = p.modifierIds.filter(Boolean);
-        return [p.triggerId, ...mods, p.actionId].join(' › ');
-      })
-      .filter((r): r is string => r !== null);
+    const rows = targets.map((i) => {
+      const p = this.engine.programs[i]!;
+      const mods = p.modifierIds.filter(Boolean);
+      return [p.triggerId, ...mods, p.actionId].join(' › ');
+    });
 
-    for (const p of this.engine.programs) {
+    for (const i of targets) {
+      const p = this.engine.programs[i]!;
       p.triggerId = null;
       p.actionId = null;
       p.modifierIds.fill(null);
       p.recentEvents = 0;
       p.tickEvents = 0;
     }
-    // Reboot to the Axiom rather than to nothing — see DECISIONS D-28. Every
-    // drafted node is gone; the starter Program comes back.
-    this.installAxiomStarter();
+    this.engine.recompile();
+
+    // If the whole Engine went, reboot to the Axiom rather than to nothing: an
+    // Engine with no live Program earns no XP, so it can never rebuild itself.
+    if (!this.engine.compiled.some((c) => c.live)) this.installAxiomStarter();
+
     this.engine.kernel *= 1 + percent / 100;
     this.engine.recompile();
 
     this.kernels++;
-    this.budget.capacity += TUNABLE.recompileCapacityGain;
+    this.budget.capacity += Math.round(TUNABLE.recompileCapacityGain * share);
     this.syncBudget();
 
     // Rebuild surge (§9.1): double XP for 120s, and the next few drafts widen.
-    this.surgeTime = TUNABLE.rebuildSurgeTime;
-    this.surgeDrafts = TUNABLE.rebuildSurgeDrafts;
-    // The new Engine has produced nothing yet.
-    this.outputAverage = 0;
+    // The surge scales with what was given up: burning one row does not deserve
+    // the same recovery as burning the whole Engine.
+    this.surgeTime = TUNABLE.rebuildSurgeTime * share;
+    this.surgeDrafts = Math.max(1, Math.round(TUNABLE.rebuildSurgeDrafts * share));
+    this.outputAverage *= 1 - share;
     this.lastKernelPercent = percent;
     this.lastRecompileTime = this.time;
     this.mark('recompile', `kernel +${percent.toFixed(0)}%`);
@@ -926,6 +966,8 @@ export class World {
 
   lastKernelPercent = 0;
   lastRecompileTime = -Infinity;
+  /** A channelled Recompile terminal is waiting for the player's selection. */
+  pendingRecompileChoice = false;
   pendingCeremony: { rows: string[]; percent: number; kernel: number } | null = null;
 
   /**

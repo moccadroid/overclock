@@ -8,14 +8,20 @@
 import './ui.css';
 import { Renderer } from './renderer';
 import { Hud } from './hud';
-import { CeremonyOverlay, DraftOverlay, EditorOverlay, MessageOverlay } from './overlays';
+import {
+  CeremonyOverlay,
+  DraftOverlay,
+  EditorOverlay,
+  MessageOverlay,
+  RecompileOverlay,
+} from './overlays';
 import { Input } from './input';
 import { NO_INPUT, World, type RunConfig } from '../sim/world';
 import { SIM_DT } from '../sim/tunables';
 import { BRANDING } from '../branding';
 import { VISUAL } from './visual';
 
-type Mode = 'running' | 'draft' | 'editor' | 'paused' | 'dead' | 'ceremony';
+type Mode = 'running' | 'draft' | 'editor' | 'paused' | 'dead' | 'ceremony' | 'recompile';
 
 export class Game {
   private world: World;
@@ -26,6 +32,7 @@ export class Game {
   private editor!: EditorOverlay;
   private message!: MessageOverlay;
   private ceremony!: CeremonyOverlay;
+  private recompileChoice!: RecompileOverlay;
 
   private mode: Mode = 'running';
   private accumulator = 0;
@@ -53,6 +60,7 @@ export class Game {
     this.editor = new EditorOverlay(ui);
     this.message = new MessageOverlay(ui, 'results');
     this.ceremony = new CeremonyOverlay(ui);
+    this.recompileChoice = new RecompileOverlay(ui);
 
     this.input.onCommand((cmd) => this.onCommand(cmd));
 
@@ -144,12 +152,21 @@ export class Game {
           this.onDeath();
           break;
         }
-        const pending = this.world.pendingCeremony;
-        if (pending) {
-          this.world.pendingCeremony = null;
-          this.mode = 'ceremony';
-          this.ceremony.begin(pending.rows, pending.percent, pending.kernel);
-          this.renderer.addShake(4);
+        if (this.world.pendingRecompileChoice) {
+          this.world.pendingRecompileChoice = false;
+          this.mode = 'recompile';
+          this.recompileChoice.present(this.world, (indices) => {
+            if (indices.length === 0) {
+              this.mode = 'running';
+              return;
+            }
+            this.world.recompile(indices);
+            const pending = this.world.pendingCeremony;
+            this.world.pendingCeremony = null;
+            this.mode = 'ceremony';
+            if (pending) this.ceremony.begin(pending.rows, pending.percent, pending.kernel);
+            this.renderer.addShake(4);
+          });
           break;
         }
         if (this.world.pendingDrafts > 0) {

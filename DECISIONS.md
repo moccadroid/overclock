@@ -523,14 +523,52 @@ It is simply not worth taking. Options, none of which I want to choose alone:
    and the Kernel is pure profit. Keeps the ritual, removes the vulnerability
    window.
 
-My preference is (2): it makes the sacrifice a decision with a size, which is
-more interesting than a binary, and it is the only option where the cost scales
-with what the player can afford.
+**Resolved: option (2), partial sacrifice.** Channelling a Recompile terminal now
+opens a selection: each live Program shows its share of your output, and you
+choose which to burn. The Kernel, the capacity gain and the rebuild surge all
+scale with the share sacrificed. Burning everything is still available and still
+pays the most; it is simply no longer the only option.
+
+This is a deliberate departure from §9.1's "delete the entire Engine — all
+Programs, all nodes", taken because that version was measured to be strictly
+worse than not using the mechanic at all, across four attempts to rescue it.
 
 Note the deliberate deviation already made: Recompile restores the Axiom starter
 rather than leaving the Engine empty. Even if the mechanic is cut or reshaped,
 that change stands — an Engine that cannot generate the XP needed to rebuild
 itself is a dead end regardless of the surrounding economy.
+
+---
+
+## D-29 · SETTLED · The phosphor pass was too dim, and the pickups too small
+
+Reported from play: "everything got smaller, the loot reads as noise, the
+phosphor mostly made everything more dull." Correct on all three.
+
+The §16.2 brightness bands were set conservatively — emissives at 0.5–0.7 — so
+the bloom had nothing bright to work with and the whole field sat grey. Bands
+now run 0.74–0.95 with bloom at 1.05, which also leaves Meltdown somewhere to
+escalate *to*, since the ladder multiplies on top of the base.
+
+Pickups were 1px dashed micro-shapes per §16.4. At the density this game
+produces, a hundred of them read as static rather than as loot. They are now
+solid glowing marks — a bright core with a hue halo, and white diamonds for XP —
+batched per hue so the change costs nothing.
+
+The brightness *hierarchy* is unchanged and still enforced: the player remains
+the only object at 1.0, which is the part of §16.2 that is load-bearing.
+
+---
+
+## D-30 · SETTLED · Editor density
+
+Reported as "overloaded and really hard to read", and bad on small screens. The
+four-line stat block per row was the bulk of it. Now one line, led by a share bar
+— the comparison between rows is what you actually scan for, and the exact
+numbers are detail that belongs in a tooltip. The ‹ › reorder arrows fade in on
+row hover instead of occupying the row permanently (drag is the primary
+interaction anyway), and a media query stacks the stats under the chain below
+900px wide or 620px tall.
 
 ---
 

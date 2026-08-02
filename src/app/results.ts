@@ -64,15 +64,24 @@ function renderTrace(world: World): string {
   const markers = world.markers
     .filter((m) => m.kind !== 'level' || world.markers.length < 40)
     .map((m) => {
-      const px = x(m.t).toFixed(1);
+      const at = x(m.t);
+      const px = at.toFixed(1);
       const color = MARKER_COLOR[m.kind];
       const big = m.kind !== 'level' && m.kind !== 'beacon';
+      let label = '';
+      if (big) {
+        // Anchor labels inward near the edges, or they overflow the viewBox and
+        // get clipped — which is how "CONTAINED" became "CONTAI".
+        const anchor = at < 60 ? 'start' : at > CHART_W - 60 ? 'end' : 'middle';
+        const tx = anchor === 'start' ? 2 : anchor === 'end' ? CHART_W - 2 : at;
+        label =
+          `<text x="${tx.toFixed(1)}" y="-6" fill="${color}" font-size="10" ` +
+          `text-anchor="${anchor}">${svgEscape(m.label)}</text>`;
+      }
       return (
         `<line x1="${px}" y1="${big ? 0 : CHART_H - 18}" x2="${px}" y2="${CHART_H}" ` +
         `stroke="${color}" stroke-width="${big ? 1.5 : 1}" opacity="${big ? 0.9 : 0.45}"/>` +
-        (big
-          ? `<text x="${px}" y="-6" fill="${color}" font-size="10" text-anchor="middle">${svgEscape(m.label)}</text>`
-          : '')
+        label
       );
     })
     .join('');

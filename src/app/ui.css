@@ -399,16 +399,68 @@
   cursor: default;
 }
 .row .stats {
-  width: 190px;
+  width: 230px;
   flex: 0 0 auto;
   text-align: right;
   color: #93aac2;
   font-size: 11px;
-  line-height: 1.6;
+  white-space: nowrap;
 }
-.row .stats .k {
+.row .stats .share {
+  letter-spacing: -1px;
+}
+.row .stats .share .on {
+  color: var(--voltaic);
+}
+.row .stats .share .off {
+  color: #22303f;
+}
+.row .stats .pct {
+  display: inline-block;
+  width: 34px;
+  text-align: right;
+  color: #b9ccdf;
+}
+.row .stats .detail {
+  margin-left: 10px;
   color: #4e657e;
-  margin-right: 6px;
+}
+.row .stats .needs {
+  color: #7a5a2a;
+}
+
+/* Reorder arrows are a fallback for drag — present, but not shouting. */
+.slot-move {
+  opacity: 0;
+}
+.row:hover .slot-move,
+.slot-move:focus {
+  opacity: 1;
+}
+.row:hover .slot-move:disabled {
+  opacity: 0.18;
+}
+
+@media (max-width: 900px), (max-height: 620px) {
+  #editor .panel {
+    padding: 12px;
+  }
+  .row {
+    flex-wrap: wrap;
+  }
+  .row .stats {
+    width: auto;
+    flex: 1 1 100%;
+    text-align: left;
+    padding-left: 32px;
+    margin-top: 4px;
+  }
+  .chip {
+    padding: 3px 5px;
+  }
+  .hint {
+    display: none;
+  }
 }
 
 .notice {
@@ -505,6 +557,87 @@
   font-size: 11px;
   letter-spacing: 0.28em;
   color: var(--ink);
+}
+
+/* Recompile: choose how much to sacrifice. */
+.recompile-panel {
+  width: min(760px, 94vw) !important;
+  white-space: normal !important;
+  line-height: 1.6 !important;
+}
+.recompile-panel .sub {
+  color: var(--ink);
+  margin-bottom: 16px;
+  max-width: 60ch;
+}
+.sacrifice {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--structure);
+  background: none;
+  color: var(--ink-bright);
+  font: inherit;
+  padding: 10px 12px;
+  margin-bottom: 6px;
+  cursor: pointer;
+}
+.sacrifice:hover {
+  border-color: var(--ink);
+}
+.sacrifice.on {
+  border-color: var(--void);
+  background: rgba(180, 76, 255, 0.09);
+}
+.sacrifice .mark {
+  color: var(--void);
+}
+.sacrifice .chain {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sacrifice .rowshare {
+  color: #4e657e;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.recompile-panel .preview {
+  margin: 14px 0 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--structure);
+  color: var(--ink-bright);
+}
+.recompile-panel .preview .gain {
+  color: var(--void);
+}
+.recompile-panel .preview .dim {
+  color: #46586e;
+}
+.recompile-panel .rail button {
+  pointer-events: auto;
+  border: 1px solid var(--structure);
+  background: none;
+  color: #9db4cc;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  padding: 7px 16px;
+  margin-top: 12px;
+  cursor: pointer;
+}
+.recompile-panel .rail button.danger {
+  border-color: var(--void);
+  color: var(--void);
+}
+.recompile-panel .rail button:disabled {
+  opacity: 0.3;
+  cursor: default;
 }
 
 /* §14 — Results. The run-trace chart is the hero, everything else annotates it. */
