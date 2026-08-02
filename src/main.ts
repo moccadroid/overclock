@@ -36,11 +36,27 @@ mount.appendChild(menuUi);
 
 const linkedSeed = params.get('seed');
 const linkedAxiom = params.get('axiom');
-const deepLinked =
-  linkedSeed !== null && linkedAxiom !== null && library.availableAxioms.includes(linkedAxiom);
+
+/**
+ * Loading the page lands on Run Setup. Always.
+ *
+ * `?seed=&axiom=` *pre-fills* the menu rather than skipping it — writing the
+ * seed into the URL when a run starts is what makes it shareable, and if those
+ * params also auto-started, every ordinary reload would drop you straight back
+ * into a run you were trying to leave. One keystroke is a fine price for a
+ * front door that is always where you left it.
+ *
+ * `&start=1` skips the menu, for RUN AGAIN and for reproducing a reported run
+ * without clicking through a screen.
+ */
+const autoStart =
+  params.get('start') === '1' &&
+  linkedSeed !== null &&
+  linkedAxiom !== null &&
+  library.availableAxioms.includes(linkedAxiom);
 
 async function boot(): Promise<void> {
-  const setup = deepLinked
+  const setup = autoStart
     ? { seed: linkedSeed!, axiomId: linkedAxiom! }
     : await new TitleScreen(menuUi, library).present({
         ...(linkedSeed ? { seed: linkedSeed } : {}),
@@ -49,10 +65,12 @@ async function boot(): Promise<void> {
 
   document.title = `${BRANDING.title} — ${setup.axiomId} — ${setup.seed}`;
 
-  // Reproducing a run means reproducing its seed; keep it visible and shareable.
+  // Keep the seed visible and shareable, but never `start` — a copied URL should
+  // open the menu with the run set up, not launch it under the recipient.
   const url = new URL(location.href);
   url.searchParams.set('seed', setup.seed);
   url.searchParams.set('axiom', setup.axiomId);
+  url.searchParams.delete('start');
   history.replaceState(null, '', url);
 
   const game = new Game(

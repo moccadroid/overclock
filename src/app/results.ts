@@ -271,6 +271,6 @@ export function renderResults(world: World, library: Library): string {
     <div class="foot">
       <button class="again" data-action="confirm">RUN AGAIN &nbsp;[ENTER]</button>
       <button class="again" data-action="library">RUN SETUP &amp; LIBRARY &nbsp;[L / ESC]</button>
-      <span class="dim">${BRANDING.title} · reload to replay this exact seed</span>
+      <span class="dim">${BRANDING.title} · this seed is in the URL — reload to set it up again</span>
     </div>`;
 }
