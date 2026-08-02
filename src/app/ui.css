@@ -131,6 +131,13 @@
 .hot {
   color: var(--signal);
 }
+.resist {
+  color: #8b6a3a;
+}
+.suppressed {
+  color: #93a3b3;
+  letter-spacing: 0.18em;
+}
 .thermal {
   color: var(--thermal);
 }

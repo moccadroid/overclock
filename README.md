@@ -75,7 +75,14 @@ fixed so far.
 - **Draft** — three cards, auto-slot, reroll, purge, deferral and queueing.
 - **Pipeline editor** — live per-row Cycle cost, output multiplier, instance and
   execution counts, events/sec and share of total EPS; reorder and Scrap.
-- **Enemies** — Mote, Drifter, Charger (telegraphed), Splitter (feeds On Kill).
+- **Enemies** — Mote, Drifter, Charger, Splitter, plus the pressure roster:
+  Bulwark (shield arc), Interceptor (eats your projectiles and grows), Suppressor
+  (switches your triggers off), Leech (drains fuel), Lancer (telegraphed beam),
+  Warden (mini-elite with affixes).
+- **Pressure that attacks the build** — adaptive resistance taxes whichever hue
+  you overuse; Interceptor spawn weight rises with your live projectile count.
+- **The run's three acts** — Recompile, Meltdown at 20:00, the three Containment
+  antagonists, Extraction, and a Results screen built around the EPS run-trace.
 - **Determinism** — same seed and inputs reproduce a run bit-for-bit.
 
 Nodes so far: 4 Triggers (Clock, On Hit, On Kill, On Pickup), 4 Actions (Bolt,

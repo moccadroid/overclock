@@ -94,10 +94,24 @@ export class Hud {
       `CYCLES ${Math.round(world.budget.available)}/${Math.round(world.budget.headroom)}` +
       `  (static ${world.engine.staticLoad.toFixed(1)}/${world.budget.capacity})`;
 
+    // §19.4 — the three fuel gauges, each carrying its adaptive-resistance
+    // percentage (§11.1). Resistance is always visible: it is a tax the player
+    // is choosing to pay, so it can never be a surprise.
+    const gauge = (hue: 'thermal' | 'voltaic' | 'void', label: string): string => {
+      const resist = world.resistance[hue];
+      const tax = resist > 0.01 ? ` <span class="resist">−${Math.round(resist * 100)}%</span>` : '';
+      return (
+        `<span class="${hue}">${label} ${bar(world.fuel[hue], 100, 14)} ` +
+        `${String(Math.floor(world.fuel[hue])).padStart(3)}</span>${tax}`
+      );
+    };
     this.bl.innerHTML =
-      `<span class="thermal">THERMAL ${bar(world.fuel.thermal, 100, 14)} ${Math.floor(world.fuel.thermal)}</span>\n` +
-      `<span class="voltaic">VOLTAIC ${bar(world.fuel.voltaic, 100, 14)} ${Math.floor(world.fuel.voltaic)}</span>\n` +
-      `<span class="void">VOID    ${bar(world.fuel.void, 100, 14)} ${Math.floor(world.fuel.void)}</span>`;
+      gauge('thermal', 'THERMAL') +
+      '\n' +
+      gauge('voltaic', 'VOLTAIC') +
+      '\n' +
+      gauge('void', 'VOID   ') +
+      (world.suppressedNow ? '\n<span class="suppressed">SUPPRESSED — TRIGGERS OFFLINE</span>' : '');
 
     const queued = world.pendingDrafts;
     this.bc.textContent = queued > 0 ? `${'^'.repeat(queued)}  ${queued} DRAFT PENDING — E` : '';

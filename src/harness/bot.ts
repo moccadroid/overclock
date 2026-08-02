@@ -146,8 +146,13 @@ export function botDraftChoice(world: World, cards: readonly DraftCard[]): numbe
       if (!node) score = 0;
       // While rebuilding, completing a firing Program beats everything.
       else if (node.kind === 'trigger') score = rebuilding ? 20 : needsTrigger ? 8 : 4;
-      else if (node.kind === 'action') score = rebuilding ? 20 : needsAction ? 8 : 4;
-      else score = rebuilding ? 1 : headroomTight ? 3 : 6;
+      else if (node.kind === 'action') {
+        score = rebuilding ? 20 : needsAction ? 8 : 4;
+        // §11.1 — a pilot that never diversifies gets taxed to 60% resistance on
+        // its only hue, which measures the tax rather than the game. Prefer hues
+        // the engine is currently light on.
+        score += (1 - hueShare(world, node.hue)) * 5;
+      } else score = rebuilding ? 1 : headroomTight ? 3 : 6;
     }
     if (score > bestScore) {
       bestScore = score;
@@ -155,6 +160,20 @@ export function botDraftChoice(world: World, cards: readonly DraftCard[]): numbe
     }
   });
   return bestIndex;
+}
+
+/** Fraction of the Engine's live Actions that already use this hue. */
+function hueShare(world: World, hue: string): number {
+  let total = 0;
+  let matching = 0;
+  for (const p of world.engine.programs) {
+    if (!p.actionId) continue;
+    const node = NODE_BY_ID.get(p.actionId);
+    if (!node || node.kind !== 'action') continue;
+    total++;
+    if (node.hue === hue) matching++;
+  }
+  return total === 0 ? 0 : matching / total;
 }
 
 export const BOT_TUNING_NOTE = `dash below 90u; magnet radius ${TUNABLE.collectRadius}u`;

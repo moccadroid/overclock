@@ -116,10 +116,26 @@ export interface ModifierDef {
 
 export type NodeDef = TriggerDef | ActionDef | ModifierDef;
 
+/** §10.1 — shape is behaviour. A silhouette must predict what a thing does. */
+export type EnemyShape =
+  | 'dot'
+  | 'circle'
+  | 'triangle'
+  | 'square'
+  | 'hexagon'
+  | 'diamond'
+  | 'ring'
+  | 'crescent'
+  | 'line'
+  | 'pentagon';
+
+export type EnemyBehavior = 'seek' | 'charge' | 'intercept' | 'suppress' | 'lance';
+
 export interface EnemyDef {
   id: string;
   name: string;
-  shape: 'dot' | 'circle' | 'triangle' | 'square' | 'hexagon';
+  shape: EnemyShape;
+  behavior: EnemyBehavior;
   hp: number;
   speed: number;
   radius: number;
@@ -128,10 +144,23 @@ export interface EnemyDef {
   fuel: number;
   /** GDD §10.2 Splitter — children spawned on death. */
   splitsInto?: { enemy: string; count: number };
-  /** Charger telegraph windup, seconds. */
+  /** Charger and Lancer telegraph windup, seconds. */
   windup?: number;
   dashSpeed?: number;
   dashDuration?: number;
+  /** Bulwark — half-angle of the front shield arc that blocks projectiles. */
+  shieldArc?: number;
+  /** Interceptor — fractional size/HP gain per projectile eaten. */
+  growthPerMeal?: number;
+  /** Suppressor — radius of the zone in which the player's Triggers do not fire. */
+  zoneRadius?: number;
+  /** Leech — fuel drained from the fullest gauge on contact. */
+  fuelSteal?: number;
+  /** Lancer — preferred distance, and the damage of its beam. */
+  standoff?: number;
+  beamDamage?: number;
+  /** Warden — rolls elite affixes (§10.3). */
+  elite?: boolean;
   description: string;
 }
 
@@ -146,6 +175,12 @@ export interface WaveTemplateDef {
    * keep constant pressure. Stream templates should be small (1-2 enemies).
    */
   stream?: boolean;
+  /**
+   * §12.2 — the director's reactive inputs. `projectiles` raises this template's
+   * weight with the player's live projectile count, which is what turns pure
+   * spam into Interceptors rather than into a nerf.
+   */
+  reactive?: 'projectiles';
   entries: readonly { enemy: string; count: number; spread: number }[];
   description: string;
 }

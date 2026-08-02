@@ -575,11 +575,24 @@ export class Renderer {
       const def = getEnemy(e.defId);
       const born = Math.min(1, e.spawnAge / VISUAL.drawInTime);
       const flashing = e.flash > 0;
-      const color = flashing ? PALETTE.player : HUE_COLOR[e.hue];
+      // §11.1 — desaturated in proportion to how resistant it is to your hue.
+      const resist = Math.max(world.resistance[e.hue], e.adaptive[e.hue]);
+      const color = flashing ? PALETTE.player : desaturate(HUE_COLOR[e.hue], resist);
       const r = e.radius;
       const health = e.hp / e.maxHp;
+      // §10.3 Phasing — untargetable, and it has to look it.
+      if (e.phased && !flashing) {
+        g.circle(e.x, e.y, r + 3).stroke({ width: 1, color, alpha: BAND.structure * born });
+        continue;
+      }
 
-      const verts = shapeOutline(def.shape, e.x, e.y, r, Math.atan2(e.aimY, e.aimX));
+      const facing =
+        def.behavior === 'lance' || def.shieldArc
+          ? e.beamActive > 0 || def.shieldArc
+            ? Math.atan2(world.player.y - e.y, world.player.x - e.x)
+            : e.facing
+          : Math.atan2(e.aimY, e.aimX);
+      const verts = shapeOutline(def.shape, e.x, e.y, r, facing);
       // Draw-in: only trace `born` of the perimeter, so it writes itself on.
       tracePolyline(g, verts, born);
       g.stroke({
@@ -599,6 +612,54 @@ export class Renderer {
           width: 1,
           color: PALETTE.beacon,
           alpha: BAND.structure * born,
+        });
+      }
+
+      // §10.2 Bulwark — the shield arc has to be visible, or "flank it" is not
+      // advice, it is a guess.
+      if (def.shieldArc) {
+        arcSegment(g, e.x, e.y, r + 7, facing - def.shieldArc / 2, facing + def.shieldArc / 2);
+        g.stroke({ width: 4, color, alpha: BAND.telegraph * born });
+      }
+
+      // §10.2 Suppressor / §10.3 Anchored — the zone where your triggers die.
+      const zone = e.affixes.includes('anchored')
+        ? TUNABLE.affixAnchoredZone
+        : (def.zoneRadius ?? 0);
+      if (zone > 0) {
+        const segments = 40;
+        for (let i = 0; i < segments; i += 2) {
+          const a0 = (i / segments) * Math.PI * 2 - e.spawnAge * 0.4;
+          const a1 = ((i + 1) / segments) * Math.PI * 2 - e.spawnAge * 0.4;
+          arcSegment(g, e.x, e.y, zone, a0, a1);
+        }
+        g.stroke({ width: 2, color: 0x6d7b8c, alpha: BAND.inFlight * born });
+        g.circle(e.x, e.y, zone).fill({ color: 0x2a3138, alpha: 0.22 * born });
+      }
+
+      // §10.3 — elites wear their affixes.
+      if (e.affixes.length > 0) {
+        for (let i = 0; i < e.affixes.length; i++) {
+          g.circle(e.x, e.y, r + 10 + i * 4).stroke({
+            width: 1,
+            color: PALETTE.signal,
+            alpha: BAND.structure * 1.6 * born,
+          });
+        }
+      }
+
+      // §10.2 Lancer — the beam draws as a 1px guide, then flashes to full width.
+      if (e.beamActive > 0) {
+        const windup = def.windup ?? 0.9;
+        const charge = 1 - e.beamActive / windup;
+        g.moveTo(e.x, e.y).lineTo(
+          e.x + Math.cos(e.facing) * 2400,
+          e.y + Math.sin(e.facing) * 2400,
+        );
+        g.stroke({
+          width: 1 + charge * charge * 7,
+          color: PALETTE.signal,
+          alpha: BAND.telegraph * (0.35 + charge * 0.65),
         });
       }
 
@@ -777,6 +838,20 @@ export class Renderer {
       });
     }
 
+    // §11.2 — inside a Suppressor's zone the Ring greys out and spurs, so the
+    // player can see their engine is offline without reading the HUD.
+    if (world.suppressedNow) {
+      g.circle(p.x, p.y, ringR + 7).stroke({ width: 2, color: 0x8b98a6, alpha: BAND.inFlight });
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2 + world.time * 0.8;
+        g.moveTo(p.x + Math.cos(a) * (ringR + 4), p.y + Math.sin(a) * (ringR + 4)).lineTo(
+          p.x + Math.cos(a) * (ringR + 11),
+          p.y + Math.sin(a) * (ringR + 11),
+        );
+      }
+      g.stroke({ width: 1, color: 0x8b98a6, alpha: BAND.inFlight });
+    }
+
     // Compass-needle avatar: triangle in a circle, pure white, band 1.
     const angle = Math.atan2(p.dirY, p.dirX);
     polygonPath(g, shapeOutline('triangle', p.x, p.y, TUNABLE.playerRadius, angle));
@@ -861,7 +936,11 @@ const CORNERS = [
   [1, 1],
 ] as const;
 
-/** §10.1 — shape is behaviour, so the outline is the identity of an enemy. */
+/**
+ * §10.1 — shape is behaviour. A player who has never seen an enemy must predict
+ * what it does from silhouette alone, so every behaviour gets its own outline
+ * and none of them share one.
+ */
 function shapeOutline(
   shape: string,
   cx: number,
@@ -869,15 +948,67 @@ function shapeOutline(
   r: number,
   rotation: number,
 ): [number, number][] {
-  const sides =
-    shape === 'triangle' ? 3 : shape === 'square' ? 4 : shape === 'hexagon' ? 6 : shape === 'dot' ? 6 : 14;
-  const rot = shape === 'square' ? Math.PI / 4 : shape === 'triangle' ? rotation : 0;
   const points: [number, number][] = [];
+
+  if (shape === 'crescent') {
+    // Open arc: reads as "takes a bite out of something".
+    for (let i = 0; i <= 12; i++) {
+      const a = rotation + 0.9 + (i / 12) * (Math.PI * 1.5);
+      points.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]);
+    }
+    return points;
+  }
+  if (shape === 'line') {
+    // A bar aligned to its aim: it points where the beam will go.
+    const ux = Math.cos(rotation);
+    const uy = Math.sin(rotation);
+    return [
+      [cx - ux * r * 1.5, cy - uy * r * 1.5],
+      [cx + ux * r * 1.5, cy + uy * r * 1.5],
+    ];
+  }
+
+  const sides =
+    shape === 'triangle'
+      ? 3
+      : shape === 'diamond' || shape === 'square'
+        ? 4
+        : shape === 'pentagon'
+          ? 5
+          : shape === 'hexagon'
+            ? 6
+            : shape === 'dot'
+              ? 6
+              : 16;
+  const rot =
+    shape === 'square'
+      ? Math.PI / 4
+      : shape === 'diamond'
+        ? 0
+        : shape === 'triangle'
+          ? rotation
+          : shape === 'pentagon'
+            ? -Math.PI / 2
+            : 0;
   for (let i = 0; i < sides; i++) {
     const a = rot + (i / sides) * Math.PI * 2;
-    points.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]);
+    const radius = shape === 'diamond' && i % 2 === 1 ? r * 0.62 : r;
+    points.push([cx + Math.cos(a) * radius, cy + Math.sin(a) * radius]);
   }
   return points;
+}
+
+/**
+ * §11.1 — enemies visibly desaturate toward the hue you have been over-using, so
+ * adaptive resistance is legible in the world rather than only in the HUD.
+ */
+function desaturate(color: number, amount: number): number {
+  const r = (color >> 16) & 0xff;
+  const g = (color >> 8) & 0xff;
+  const b = color & 0xff;
+  const grey = Math.round(0.3 * r + 0.59 * g + 0.11 * b);
+  const mixTo = (c: number): number => Math.round(c + (grey - c) * amount);
+  return (mixTo(r) << 16) | (mixTo(g) << 8) | mixTo(b);
 }
 
 function polygonPath(g: Graphics, points: readonly [number, number][]): void {

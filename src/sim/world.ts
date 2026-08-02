@@ -13,7 +13,15 @@ import { FlowField } from './flowfield';
 import { CycleBudget } from './cycles';
 import { Engine, type Program } from './engine';
 import { LOADBEARING, SAFETY, SIM_DT, TUNABLE } from './tunables';
-import { HUES, type ArenaDef, type EventType, type GameEvent, type Hue } from './types';
+import {
+  HUES,
+  type ArenaDef,
+  type EnemyDef,
+  type EventType,
+  type GameEvent,
+  type Hue,
+  type WaveTemplateDef,
+} from './types';
 import {
   ACTION_BY_ID,
   ENEMY_BY_ID,
@@ -54,7 +62,23 @@ export interface Enemy extends SpatialItem {
   spawnAge: number;
   /** §12.3 — spawned by a channelled Beacon, so it drops more. */
   enriched: boolean;
+  /** §10.3 — elite affixes rolled at spawn. */
+  affixes: EliteAffix[];
+  /** Adaptive affix: personal, per-hue resistance that climbs as it is hit. */
+  adaptive: Record<Hue, number>;
+  /** Phasing affix: currently untargetable. */
+  phased: boolean;
+  /** Facing, for the Bulwark's shield arc and the Lancer's beam. */
+  facing: number;
+  /** Interceptor: how many projectiles it has eaten. */
+  meals: number;
+  /** Lancer: beam state timer. */
+  beamTimer: number;
+  beamActive: number;
 }
+
+/** §10.3 — Wardens and Meltdown-tier enemies roll one or two of these. */
+export type EliteAffix = 'adaptive' | 'volatile' | 'phasing' | 'anchored';
 
 export interface Projectile extends SpatialItem {
   id: number;
@@ -288,6 +312,10 @@ export class World {
   visualDeaths: VisualDeath[] = [];
 
   fuel: Record<Hue, number> = { thermal: 0, voltaic: 0, void: 0 };
+  /** §11.1 — smoothed damage dealt per hue, the basis of adaptive resistance. */
+  private damageByHue: Record<Hue, number> = { thermal: 0, voltaic: 0, void: 0 };
+  /** Current resistance per hue, 0..cap. Always visible in the HUD (§19.4). */
+  resistance: Record<Hue, number> = { thermal: 0, voltaic: 0, void: 0 };
   xp = 0;
   xpToNext: number;
   level = 1;
@@ -303,6 +331,7 @@ export class World {
   ambientTimer = 1;
   beaconTimer = 20;
   recompileTimer = 0;
+  wardenTimer: number = TUNABLE.wardenInterval;
   containmentTimer: number = TUNABLE.containmentFirstDelay;
   score = 0;
   eps = 0;
@@ -430,8 +459,12 @@ export class World {
     this.updateDirector(dt);
     if (this.surgeTime > 0) this.surgeTime = Math.max(0, this.surgeTime - dt);
 
+    // §11.2 — inside a Suppressor's zone the player's Triggers do not fire.
+    // Actions already in flight resolve; nothing new starts.
+    this.suppressedNow = this.suppressed;
+
     if (!this.budget.stalled) {
-      this.advanceClocks(dt);
+      if (!this.suppressedNow) this.advanceClocks(dt);
       this.runScheduled();
       this.drainEvents();
     }
@@ -442,6 +475,7 @@ export class World {
       if (!this.budget.stalled) this.drainEvents();
     }
 
+    this.updateResistance(dt);
     this.stats.tierSeconds[this.budget.tier] += dt;
     this.stats.cyclesSpent += this.budget.spentThisTick;
     if (this.budget.heat > this.stats.peakHeat) this.stats.peakHeat = this.budget.heat;
@@ -481,8 +515,12 @@ export class World {
     this.eventQueue.length = 0;
   }
 
+  /** Cached once per tick: recomputing it per event would be O(events x enemies). */
+  suppressedNow = false;
+
   /** Fire every live Program whose Trigger listens for this event type. */
   private dispatch(ev: GameEvent): void {
+    if (this.suppressedNow) return;
     for (let i = 0; i < this.engine.programs.length; i++) {
       const compiled = this.engine.compiled[i]!;
       if (!compiled.live) continue;
@@ -1234,6 +1272,51 @@ export class World {
     });
   }
 
+  /**
+   * §11.1 — the population builds resistance to each hue in proportion to that
+   * hue's share of your recent damage, capped at 60%.
+   *
+   * Its job is to make mono-hue a *choice with a price*, not a mistake: an
+   * engine strong enough to pay the tax may still push straight through. The
+   * counters are diversifying, Attune, Rectify conversions — or brute force.
+   *
+   * A floor keeps the early game clean: nothing resists you until one hue
+   * genuinely dominates, so a player is never taxed for owning one Action.
+   */
+  private updateResistance(dt: number): void {
+    const decay = Math.pow(0.5, dt / TUNABLE.resistanceHalfLife);
+    let total = 0;
+    for (const hue of HUES) {
+      this.damageByHue[hue] *= decay;
+      total += this.damageByHue[hue];
+    }
+    if (total <= 0.0001) {
+      for (const hue of HUES) this.resistance[hue] = 0;
+      return;
+    }
+    for (const hue of HUES) {
+      const share = this.damageByHue[hue] / total;
+      const over = (share - TUNABLE.resistanceFloor) / (1 - TUNABLE.resistanceFloor);
+      this.resistance[hue] = Math.max(0, Math.min(1, over)) * TUNABLE.resistanceCap;
+    }
+  }
+
+  /** §11.2 — is the player inside a Suppressor's zone? Triggers do not fire there. */
+  get suppressed(): boolean {
+    for (const e of this.enemies) {
+      if (!e.alive) continue;
+      const def = getEnemy(e.defId);
+      const radius = e.affixes.includes('anchored')
+        ? TUNABLE.affixAnchoredZone
+        : (def.zoneRadius ?? 0);
+      if (radius <= 0) continue;
+      const dx = this.player.x - e.x;
+      const dy = this.player.y - e.y;
+      if (dx * dx + dy * dy < radius * radius) return true;
+    }
+    return false;
+  }
+
   // ------------------------------------------------------------------- damage
 
   private damageEnemy(
@@ -1244,7 +1327,18 @@ export class World {
     hue: Hue,
   ): void {
     if (!enemy.alive || damage <= 0) return;
-    enemy.hp -= damage;
+    // §10.3 Phasing — periodically untargetable, which breaks lock-on cadence.
+    if (enemy.phased) return;
+
+    // §11.1 — global adaptive resistance, plus the elite's personal version.
+    let resisted = damage * (1 - this.resistance[hue]);
+    if (enemy.affixes.includes('adaptive')) {
+      resisted *= 1 - Math.min(TUNABLE.resistanceCap, enemy.adaptive[hue]);
+      enemy.adaptive[hue] = Math.min(1, enemy.adaptive[hue] + TUNABLE.affixAdaptiveRate);
+    }
+
+    this.damageByHue[hue] += damage;
+    enemy.hp -= resisted;
     enemy.flash = 0.04;
 
     const program = this.engine.programs[programIndex];
@@ -1289,6 +1383,15 @@ export class World {
     const fuelDrops = Math.round(def.fuel * bonus);
     for (let i = 0; i < fuelDrops; i++) this.dropPickup('fuel', enemy.x, enemy.y, enemy.hue, 1);
     this.dropPickup('xp', enemy.x, enemy.y, enemy.hue, def.xp * bonus);
+
+    // §10.3 Volatile — a telegraphed death explosion.
+    if (enemy.affixes.includes('volatile')) {
+      this.pushFx('burst', enemy.hue, enemy.x, enemy.y, TUNABLE.affixVolatileRadius, [], 0.3);
+      const dx = this.player.x - enemy.x;
+      const dy = this.player.y - enemy.y;
+      const reach = TUNABLE.affixVolatileRadius + TUNABLE.playerRadius;
+      if (dx * dx + dy * dy < reach * reach) this.hurtPlayer(TUNABLE.affixVolatileDamage);
+    }
 
     if (def.splitsInto) {
       for (let i = 0; i < def.splitsInto.count; i++) {
@@ -1424,6 +1527,26 @@ export class World {
       e.flash = Math.max(0, e.flash - dt);
       const def = getEnemy(e.defId);
 
+      // §10.3 Phasing — untargetable for a beat, on a steady cycle.
+      if (e.affixes.includes('phasing')) {
+        const cycle = TUNABLE.affixPhaseInterval + TUNABLE.affixPhaseDuration;
+        e.phased = e.spawnAge % cycle > TUNABLE.affixPhaseInterval;
+      }
+
+      // §10.2 — the behaviours that are not "walk at the player".
+      if (def.behavior === 'intercept') {
+        this.updateInterceptor(e, def, dt);
+        continue;
+      }
+      if (def.behavior === 'suppress') {
+        this.updateSuppressor(e, def, dt);
+        continue;
+      }
+      if (def.behavior === 'lance') {
+        this.updateLancer(e, def, dt);
+        continue;
+      }
+
       if (def.windup !== undefined) {
         // Charger: seek -> telegraphed windup -> dash (§10.2, §17.1).
         e.timer -= dt;
@@ -1485,17 +1608,152 @@ export class World {
         }
       }
 
-      // Contact damage.
+      // Contact.
       const dx = p.x - e.x;
       const dy = p.y - e.y;
       const d2 = dx * dx + dy * dy;
       const r = e.radius + TUNABLE.playerRadius;
-      if (d2 < r * r) this.hurtPlayer(def.contactDamage);
+      if (d2 < r * r) this.touchPlayer(e, def);
 
       // Outrun stragglers stop existing — see TUNABLE.despawnRadius.
       if (d2 > TUNABLE.despawnRadius * TUNABLE.despawnRadius && e.spawnAge > 4) {
         e.alive = false;
       }
+    }
+  }
+
+  /**
+   * §10.2 Leech — "contact steals 5 fuel of your fullest gauge (no damage)".
+   * Pressure aimed at the economy rather than the health bar (§11).
+   */
+  private touchPlayer(e: Enemy, def: EnemyDef): void {
+    if (def.fuelSteal) {
+      if (e.beamTimer > 0) return; // per-enemy steal cooldown
+      e.beamTimer = 1.2;
+      let fullest: Hue = 'thermal';
+      for (const hue of HUES) if (this.fuel[hue] > this.fuel[fullest]) fullest = hue;
+      this.fuel[fullest] = Math.max(0, this.fuel[fullest] - def.fuelSteal);
+      this.pushFx('hurt', fullest, this.player.x, this.player.y, 0, [], 0.16);
+      return;
+    }
+    if (def.contactDamage > 0) this.hurtPlayer(def.contactDamage);
+  }
+
+  /**
+   * §10.2 Interceptor — "targets your *projectiles*, eats them, grows +10% per
+   * meal". The intended counter to pure projectile spam: the answer is beams,
+   * fields and novas, i.e. build diversity through threat rather than nerfs.
+   */
+  private updateInterceptor(e: Enemy, def: EnemyDef, dt: number): void {
+    let target: Projectile | null = null;
+    let bestD2 = 700 * 700;
+    for (const proj of this.projectiles) {
+      if (!proj.alive) continue;
+      const dx = proj.x - e.x;
+      const dy = proj.y - e.y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < bestD2) {
+        bestD2 = d2;
+        target = proj;
+      }
+    }
+
+    const goalX = target ? target.x : this.player.x;
+    const goalY = target ? target.y : this.player.y;
+    const dx = goalX - e.x;
+    const dy = goalY - e.y;
+    const len = Math.hypot(dx, dy) || 1;
+    e.facing = Math.atan2(dy, dx);
+    e.vx = (dx / len) * def.speed;
+    e.vy = (dy / len) * def.speed;
+    e.x += e.vx * dt;
+    e.y += e.vy * dt;
+    this.resolveRuins(e, e.radius);
+
+    // Eat anything it reaches.
+    if (target && bestD2 < (e.radius + 10) ** 2) {
+      target.alive = false;
+      e.meals++;
+      const growth = 1 + (def.growthPerMeal ?? 0.1);
+      e.radius *= growth;
+      e.maxHp *= growth;
+      e.hp *= growth;
+      this.pushFx('burst', e.hue, e.x, e.y, e.radius + 8, [], 0.12);
+    }
+
+    const pd = Math.hypot(this.player.x - e.x, this.player.y - e.y);
+    if (pd < e.radius + TUNABLE.playerRadius) this.touchPlayer(e, def);
+  }
+
+  /**
+   * §10.2 Suppressor — "never attacks; projects a zone where your Triggers don't
+   * fire". Fragile on purpose: the answer is to kill it or leave.
+   */
+  private updateSuppressor(e: Enemy, def: EnemyDef, dt: number): void {
+    // Drifts to a standoff just inside its own zone, so the zone covers the
+    // player without the Suppressor walking into contact range.
+    const dx = this.player.x - e.x;
+    const dy = this.player.y - e.y;
+    const d = Math.hypot(dx, dy) || 1;
+    const want = (def.zoneRadius ?? 200) * 0.6;
+    const push = d > want ? 1 : -0.6;
+    e.vx = (dx / d) * def.speed * push;
+    e.vy = (dy / d) * def.speed * push;
+    e.x += e.vx * dt;
+    e.y += e.vy * dt;
+    this.resolveRuins(e, e.radius);
+  }
+
+  /**
+   * §10.2 Lancer — keeps distance and fires a telegraphed beam across the arena.
+   * §17.1: the beam draws as a guide line first, then flashes to full width.
+   */
+  private updateLancer(e: Enemy, def: EnemyDef, dt: number): void {
+    const dx = this.player.x - e.x;
+    const dy = this.player.y - e.y;
+    const d = Math.hypot(dx, dy) || 1;
+    const standoff = def.standoff ?? 500;
+
+    if (e.beamActive > 0) {
+      e.beamActive -= dt;
+      e.vx = 0;
+      e.vy = 0;
+    } else {
+      const push = d > standoff * 1.15 ? 1 : d < standoff * 0.85 ? -1 : 0;
+      e.vx = (dx / d) * def.speed * push;
+      e.vy = (dy / d) * def.speed * push;
+      e.x += e.vx * dt;
+      e.y += e.vy * dt;
+      this.resolveRuins(e, e.radius);
+
+      e.beamTimer -= dt;
+      if (e.beamTimer <= 0) {
+        e.beamTimer = (def.windup ?? 0.9) + 2.4;
+        e.beamActive = def.windup ?? 0.9;
+        e.facing = Math.atan2(dy, dx);
+      }
+    }
+
+    // Fires at the end of the telegraph, along the aim drawn at the start.
+    if (e.beamActive > 0 && e.beamActive - dt <= 0) {
+      const ux = Math.cos(e.facing);
+      const uy = Math.sin(e.facing);
+      const px = this.player.x - e.x;
+      const py = this.player.y - e.y;
+      const along = px * ux + py * uy;
+      const across = Math.abs(px * -uy + py * ux);
+      if (along > 0 && across < 16 + TUNABLE.playerRadius) {
+        this.hurtPlayer(def.beamDamage ?? 16);
+      }
+      this.pushFx(
+        'chain',
+        e.hue,
+        e.x,
+        e.y,
+        0,
+        [e.x, e.y, e.x + ux * 2400, e.y + uy * 2400],
+        0.18,
+      );
     }
   }
 
@@ -1537,6 +1795,18 @@ export class World {
         const dy = enemy.y - proj.y;
         const r = enemy.radius + proj.radius;
         if (dx * dx + dy * dy > r * r) return;
+        // §10.2 Bulwark — a front shield arc that blocks projectiles. The
+        // counter is to flank it, or to use something that is not a projectile.
+        const shield = getEnemy(enemy.defId).shieldArc;
+        if (shield) {
+          const incoming = Math.atan2(proj.y - enemy.y, proj.x - enemy.x);
+          const facing = Math.atan2(this.player.y - enemy.y, this.player.x - enemy.x);
+          if (Math.abs(angleDelta(incoming, facing)) < shield / 2) {
+            proj.alive = false;
+            this.pushFx('burst', enemy.hue, proj.x, proj.y, 14, [], 0.1);
+            return;
+          }
+        }
         proj.hits.push(enemy.id);
         this.damageEnemy(enemy, proj.damage, proj.depth, proj.programIndex, proj.hue);
         if (proj.hits.length > proj.pierce) proj.alive = false;
@@ -1607,6 +1877,16 @@ export class World {
       if (this.enemies.length < maxAlive) this.spawnAmbient();
     }
 
+    // §10.2 — Wardens punctuate waves once Threat is high enough.
+    if (this.threat >= TUNABLE.wardenFromThreat) {
+      this.wardenTimer -= dt;
+      if (this.wardenTimer <= 0) {
+        this.wardenTimer = TUNABLE.wardenInterval;
+        const origin = this.pickSpawnOrigin();
+        this.queueSpawn('warden', origin.x, origin.y, 40, 0, false);
+      }
+    }
+
     this.waveTimer -= dt;
     if (this.waveTimer > 0) return;
     this.waveTimer = Math.max(
@@ -1616,6 +1896,24 @@ export class World {
     if (this.enemies.length >= maxAlive) return;
 
     this.spawnWave(false);
+  }
+
+  /**
+   * §12.2 — the director's reactive weighting. Interceptor templates get heavier
+   * the more projectiles the player has in the air, so spam summons its own
+   * counter. This is the design's answer to "don't nerf, apply pressure" (§23.1).
+   */
+  waveWeightFor(w: WaveTemplateDef): number {
+    return this.waveWeight(w);
+  }
+
+  private waveWeight(w: WaveTemplateDef): number {
+    if (w.reactive !== 'projectiles') return w.weight;
+    const scale = Math.min(
+      TUNABLE.interceptorMaxWeight,
+      1 + this.projectiles.length * TUNABLE.interceptorPerProjectile,
+    );
+    return w.weight * scale;
   }
 
   /** Arrive any queued spawns whose time has come. */
@@ -1679,10 +1977,7 @@ export class World {
       (w) => !w.stream && this.threat >= w.minThreat && this.threat <= w.maxThreat,
     );
     if (eligible.length === 0) return;
-    const template = this.rng.pickWeighted(
-      eligible,
-      eligible.map((w) => w.weight),
-    );
+    const template = this.rng.pickWeighted(eligible, eligible.map((w) => this.waveWeight(w)));
 
     // Several compass slots, not one — a template that all lands in one place is
     // one Nova away from nothing happening.
@@ -1783,8 +2078,29 @@ export class World {
       flash: 0,
       spawnAge: 0,
       enriched: false,
+      affixes: [],
+      adaptive: { thermal: 0, voltaic: 0, void: 0 },
+      phased: false,
+      facing: 0,
+      meals: 0,
+      beamTimer: def.windup ?? 0,
+      beamActive: 0,
       alive: true,
     };
+
+    // §10.3 — Wardens always roll affixes; in Meltdown they are standard on
+    // everything substantial (§13.2).
+    const eliteRoll =
+      def.elite === true || (this.phase === 'meltdown' && def.hp >= 20 && this.rng.chance(0.25));
+    if (eliteRoll) {
+      const pool: EliteAffix[] = ['adaptive', 'volatile', 'phasing', 'anchored'];
+      const count = def.elite === true ? 1 + this.rng.int(2) : 1;
+      for (let i = 0; i < count; i++) {
+        const pick = pool[this.rng.int(pool.length)]!;
+        if (!e.affixes.includes(pick)) e.affixes.push(pick);
+      }
+    }
+
     this.enemies.push(e);
     return e;
   }

@@ -27,6 +27,15 @@
     "description": "Ambient trickle that punishes standing still."
   },
   {
+    "id": "stream_leech",
+    "minThreat": 4,
+    "maxThreat": 99,
+    "weight": 4,
+    "stream": true,
+    "entries": [{ "enemy": "leech", "count": 1, "spread": 70 }],
+    "description": "Ambient economic pressure."
+  },
+  {
     "id": "opening_drift",
     "minThreat": 0,
     "maxThreat": 2,
@@ -70,12 +79,65 @@
     "description": "Mixed screen."
   },
   {
+    "id": "leech_pack",
+    "minThreat": 3.5,
+    "maxThreat": 99,
+    "weight": 7,
+    "entries": [
+      { "enemy": "leech", "count": 4, "spread": 140 },
+      { "enemy": "mote", "count": 6, "spread": 120 }
+    ],
+    "description": "Drains the gauges you were saving."
+  },
+  {
     "id": "splitter_cluster",
     "minThreat": 4.5,
     "maxThreat": 99,
     "weight": 7,
     "entries": [{ "enemy": "splitter", "count": 3, "spread": 100 }],
     "description": "Splitter cluster. Feeds On Kill builds deliberately."
+  },
+  {
+    "id": "interceptor_wing",
+    "minThreat": 4,
+    "maxThreat": 99,
+    "weight": 6,
+    "reactive": "projectiles",
+    "entries": [{ "enemy": "interceptor", "count": 3, "spread": 130 }],
+    "description": "Weight rises with your live projectile count (§11.3)."
+  },
+  {
+    "id": "suppressor_pair",
+    "minThreat": 5,
+    "maxThreat": 99,
+    "weight": 7,
+    "entries": [
+      { "enemy": "suppressor", "count": 2, "spread": 150 },
+      { "enemy": "mote", "count": 10, "spread": 150 }
+    ],
+    "description": "Suppressor pair plus swarm flood. Your triggers go quiet."
+  },
+  {
+    "id": "bulwark_line",
+    "minThreat": 6,
+    "maxThreat": 99,
+    "weight": 7,
+    "entries": [
+      { "enemy": "bulwark", "count": 2, "spread": 130 },
+      { "enemy": "drifter", "count": 5, "spread": 150 }
+    ],
+    "description": "Shields facing you. Flank them or use something that is not a projectile."
+  },
+  {
+    "id": "lancer_post",
+    "minThreat": 7,
+    "maxThreat": 99,
+    "weight": 7,
+    "entries": [
+      { "enemy": "lancer", "count": 2, "spread": 200 },
+      { "enemy": "charger", "count": 2, "spread": 140 }
+    ],
+    "description": "Ranged beams plus melee pressure. Standing still is not an option."
   },
   {
     "id": "flood",
@@ -99,6 +161,18 @@
       { "enemy": "mote", "count": 16, "spread": 180 }
     ],
     "description": "Late build-phase composition."
+  },
+  {
+    "id": "denial",
+    "minThreat": 12,
+    "maxThreat": 99,
+    "weight": 8,
+    "entries": [
+      { "enemy": "suppressor", "count": 2, "spread": 190 },
+      { "enemy": "bulwark", "count": 2, "spread": 170 },
+      { "enemy": "lancer", "count": 2, "spread": 220 }
+    ],
+    "description": "Attacks the build from three directions at once."
   },
   {
     "id": "splitter_wall",

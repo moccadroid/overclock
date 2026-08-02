@@ -366,6 +366,188 @@ describe('scoring and the run trace (GDD §13.3, §14)', () => {
   });
 });
 
+describe('pressure attacks the build, not the health bar (GDD §11)', () => {
+  function quietWorld(seed: string): World {
+    const w = new World({ seed, axiomId: 'ignition' });
+    w.enemies.length = 0;
+    return w;
+  }
+
+  it('§11.1 — mono-hue output builds resistance to that hue, capped', () => {
+    const w = quietWorld('resist');
+    const p = w.engine.programs[0]!;
+    p.triggerId = 'clock';
+    p.actionId = 'bolt'; // thermal only
+    w.engine.recompile();
+    w.syncBudget();
+
+    runPiloted(w, 120);
+
+    expect(w.resistance.thermal).toBeGreaterThan(0.2);
+    expect(w.resistance.thermal).toBeLessThanOrEqual(TUNABLE.resistanceCap + 1e-9);
+    // Hues you have not used are not taxed.
+    expect(w.resistance.voltaic).toBe(0);
+  });
+
+  it('§11.1 — splitting damage between hues is taxed far less than mono-hue', () => {
+    // Resistance follows the share of *damage*, not the number of Actions owned:
+    // an Action that ticks an area will dominate the split however many other
+    // Actions sit beside it. Two comparable single-hit Actions are the honest
+    // test of the mapping.
+    const mono = quietWorld('mono');
+    const m = mono.engine.programs[0]!;
+    m.triggerId = 'clock';
+    m.actionId = 'bolt';
+    mono.engine.recompile();
+    mono.syncBudget();
+    runPiloted(mono, 120);
+
+    const split = quietWorld('mono');
+    const a = split.engine.programs[0]!;
+    a.triggerId = 'clock';
+    a.actionId = 'bolt'; // thermal
+    const b = split.engine.programs[1]!;
+    b.triggerId = 'clock';
+    b.actionId = 'arc'; // voltaic
+    split.engine.recompile();
+    split.syncBudget();
+    runPiloted(split, 120);
+
+    const worstMono = Math.max(mono.resistance.thermal, mono.resistance.voltaic);
+    const worstSplit = Math.max(split.resistance.thermal, split.resistance.voltaic);
+
+    expect(worstSplit).toBeLessThan(worstMono);
+    expect(worstSplit).toBeLessThan(0.35);
+  });
+
+  it('§11.2 — a Suppressor silences triggers, and killing it restores them', () => {
+    const w = quietWorld('suppress');
+    const p = w.engine.programs[0]!;
+    p.triggerId = 'clock';
+    p.actionId = 'bolt';
+    w.engine.recompile();
+    w.syncBudget();
+
+    // Firing normally first.
+    for (let i = 0; i < 120; i++) w.advance(NO_INPUT);
+    const baseline = w.stats.fires;
+    expect(baseline).toBeGreaterThan(0);
+
+    const suppressor = w.spawnEnemy('suppressor', w.player.x + 40, w.player.y, 'void')!;
+    for (let i = 0; i < 180; i++) w.advance(NO_INPUT);
+    expect(w.suppressedNow).toBe(true);
+    const whileSuppressed = w.stats.fires - baseline;
+    expect(whileSuppressed).toBe(0);
+
+    // It is fragile on purpose: remove it and the engine comes straight back.
+    suppressor.alive = false;
+    for (let i = 0; i < 180; i++) w.advance(NO_INPUT);
+    expect(w.suppressedNow).toBe(false);
+    expect(w.stats.fires).toBeGreaterThan(baseline);
+  });
+
+  it('§10.2 — a Bulwark blocks projectiles from the front but not the flank', () => {
+    const w = quietWorld('bulwark');
+    w.engine.programs.forEach((p) => {
+      p.triggerId = null;
+      p.actionId = null;
+    });
+    w.engine.recompile();
+
+    const shootAt = (ox: number, oy: number): number => {
+      const e = w.spawnEnemy('bulwark', w.player.x + 200, w.player.y, 'thermal')!;
+      const before = e.hp;
+      w.projectiles.push({
+        id: 9001,
+        x: e.x + ox,
+        y: e.y + oy,
+        vx: -ox * 6,
+        vy: -oy * 6,
+        life: 2,
+        damage: 30,
+        pierce: 0,
+        hue: 'thermal',
+        depth: 0,
+        programIndex: 0,
+        radius: 4,
+        corrupted: false,
+        hits: [],
+        age: 0,
+        alive: true,
+      });
+      for (let i = 0; i < 30; i++) w.advance(NO_INPUT);
+      const dealt = before - e.hp;
+      e.alive = false;
+      return dealt;
+    };
+
+    // The Bulwark faces the player, who is to its west; hit it from the west.
+    const fromFront = shootAt(-60, 0);
+    const fromBehind = shootAt(60, 0);
+    expect(fromFront).toBe(0);
+    expect(fromBehind).toBeGreaterThan(0);
+  });
+
+  it('§10.2 — an Interceptor eats projectiles and grows', () => {
+    const w = quietWorld('intercept');
+    w.engine.programs.forEach((p) => {
+      p.triggerId = null;
+      p.actionId = null;
+    });
+    w.engine.recompile();
+
+    const e = w.spawnEnemy('interceptor', w.player.x + 260, w.player.y, 'voltaic')!;
+    const radiusBefore = e.radius;
+    for (let n = 0; n < 4; n++) {
+      w.projectiles.push({
+        id: 9100 + n,
+        x: w.player.x + 200,
+        y: w.player.y,
+        vx: 0,
+        vy: 0,
+        life: 5,
+        damage: 1,
+        pierce: 0,
+        hue: 'thermal',
+        depth: 0,
+        programIndex: 0,
+        radius: 4,
+        corrupted: false,
+        hits: [],
+        age: 0,
+        alive: true,
+      });
+      for (let i = 0; i < 90; i++) w.advance(NO_INPUT);
+    }
+    expect(e.meals).toBeGreaterThan(0);
+    expect(e.radius).toBeGreaterThan(radiusBefore);
+  });
+
+  it('§10.2 — a Leech drains fuel instead of dealing damage', () => {
+    const w = quietWorld('leech');
+    w.fuel.thermal = 40;
+    const integrityBefore = w.player.integrity;
+    w.spawnEnemy('leech', w.player.x + 25, w.player.y, 'thermal');
+    for (let i = 0; i < 120; i++) w.advance(NO_INPUT);
+    expect(w.fuel.thermal).toBeLessThan(40);
+    expect(w.player.integrity).toBe(integrityBefore);
+  });
+
+  it('§11.3 — projectile spam raises the Interceptor template weight', () => {
+    const w = quietWorld('reactive');
+    const template = { id: 'x', minThreat: 0, maxThreat: 99, weight: 10, reactive: 'projectiles' as const, entries: [], description: '' };
+    const idle = w.waveWeightFor(template);
+    for (let i = 0; i < 120; i++) {
+      w.projectiles.push({
+        id: 9200 + i, x: 0, y: 0, vx: 0, vy: 0, life: 9, damage: 0, pierce: 0,
+        hue: 'thermal', depth: 0, programIndex: 0, radius: 4, corrupted: false,
+        hits: [], age: 0, alive: true,
+      });
+    }
+    expect(w.waveWeightFor(template)).toBeGreaterThan(idle);
+  });
+});
+
 describe('cascade physics (GDD §5.2)', () => {
   it('respects the hard depth cap and terminates a self-feeding loop', () => {
     const w = new World({ seed: 'cascade', axiomId: 'ignition' });

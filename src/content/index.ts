@@ -120,7 +120,23 @@ const enemySchema: Schema = {
   shape: {
     type: 'string',
     required: true,
-    oneOf: ['dot', 'circle', 'triangle', 'square', 'hexagon'],
+    oneOf: [
+      'dot',
+      'circle',
+      'triangle',
+      'square',
+      'hexagon',
+      'diamond',
+      'ring',
+      'crescent',
+      'line',
+      'pentagon',
+    ],
+  },
+  behavior: {
+    type: 'string',
+    required: true,
+    oneOf: ['seek', 'charge', 'intercept', 'suppress', 'lance'],
   },
   hp: { type: 'number', required: true, min: 1 },
   speed: { type: 'number', required: true, min: 0 },
@@ -131,6 +147,13 @@ const enemySchema: Schema = {
   windup: { type: 'number', min: 0 },
   dashSpeed: { type: 'number', min: 0 },
   dashDuration: { type: 'number', min: 0 },
+  shieldArc: { type: 'number', min: 0 },
+  growthPerMeal: { type: 'number', min: 0 },
+  zoneRadius: { type: 'number', min: 0 },
+  fuelSteal: { type: 'number', min: 0 },
+  standoff: { type: 'number', min: 0 },
+  beamDamage: { type: 'number', min: 0 },
+  elite: { type: 'boolean' },
   splitsInto: {
     type: 'object',
     fields: {
@@ -147,6 +170,7 @@ const waveSchema: Schema = {
   maxThreat: { type: 'number', required: true, min: 0 },
   weight: { type: 'number', required: true, min: 0 },
   stream: { type: 'boolean' },
+  reactive: { type: 'string', oneOf: ['projectiles'] },
   entries: {
     type: 'array',
     required: true,

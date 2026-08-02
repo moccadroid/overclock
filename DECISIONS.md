@@ -565,12 +565,31 @@ had been left in from the earlier "is rebuild speed the constraint?" experiment,
 so sacrificing a near-dead row bought 34 seconds of sextupled XP for no
 meaningful loss. Reverted to §9.1's documented 2×/120s.
 
-**The standing conclusion.** Across every variant tried, burning the *whole*
-Engine lands at roughly −68% versus hoarding, and no reward curve has moved it,
-because the cost is not output — it is the loss of survival that follows losing
-output. Partial Recompile works as a low-stakes dial. Total commitment, which is
-the feeling §9.2 is actually chasing, does not, and probably cannot while the
-player's only defence is the Engine they just deleted.
+**The clean numbers.** Re-measured with the surge back at its documented 2×/120s
+and the `share^1.9` Kernel curve in place, 12 seeds per arm at 28 minutes:
+
+| what the pilot burns | score | vs hoarding | reached Meltdown |
+|---|---|---|---|
+| nothing | 32,040 | — | 8/12 |
+| weakest row | 24,835 | −22% | 3/12 |
+| everything | 7,909 | −75% | 0/12 |
+
+So Recompile is a net loss at **every** level of commitment. The earlier results
+showing nibbling ahead by 3–12% were entirely the inflated 6×/180s surge; with
+that removed, no version of this mechanic pays.
+
+**The standing conclusion.** Across every variant tried — larger Kernel, Axiom
+reboot, faster rebuild, partial sacrifice, super-linear scaling — Recompile costs
+more than it returns, and the shortfall grows with how much you commit. The cost
+is not output; it is the loss of survival that follows losing output, and a
+multiplier cannot repay that because it multiplies an Engine no longer large
+enough to keep you alive.
+
+Left in place as a partial dial by explicit decision, with this understood: it is
+currently a trap for the player at any setting, and its economics are unresolved
+rather than fixed. The remaining lever is protective rather than economic — a
+Recompile that clears the arena and grants brief invulnerability, so the rebuild
+window is survivable. That is a mechanic change and wants a decision.
 
 If we want commitment to be viable, the remaining lever is not economic but
 protective: a Recompile that clears the arena and grants a few seconds of
@@ -613,6 +632,52 @@ numbers are detail that belongs in a tooltip. The ‹ › reorder arrows fade in
 row hover instead of occupying the row permanently (drag is the primary
 interaction anyway), and a media query stacks the stats under the chain below
 900px wide or 620px tall.
+
+---
+
+## D-31 · SETTLED · M4, pressure that attacks the build
+
+Reported from play: waves "never really feel threatening — still mostly blobs
+that chase". Correct, and structural: every enemy built until now walked at the
+player. §11 forbids HP inflation as a difficulty lever, so the answer is enemies
+that pose different *kinds* of problem.
+
+Built: **Bulwark** (front shield arc blocks projectiles — flank it, or use
+something that is not a projectile), **Interceptor** (hunts your projectiles,
+eats them, grows 10% per meal), **Suppressor** (never attacks; projects a zone
+where your Triggers do not fire), **Leech** (steals fuel on contact, deals no
+damage), **Lancer** (keeps standoff, fires a telegraphed beam across the arena),
+**Warden** (mini-elite) with all four §10.3 affixes — Adaptive, Volatile,
+Phasing, Anchored.
+
+Plus the two systemic pressures:
+
+- **§11.1 adaptive resistance.** The population resists each hue in proportion to
+  that hue's share of your recent damage, capped at 60%, with a floor so nothing
+  is taxed until one hue genuinely dominates. Always visible on the fuel gauges;
+  enemies desaturate as they harden.
+- **§11.3 reactive spawning.** Interceptor wave weight scales with the player's
+  live projectile count, so spam summons its own counter — §23.1's "respond by
+  pressure, never by deleting the interaction".
+
+**Measured.** Against the pre-M4 baseline (hoard pilot, same seeds): mean survival
+fell from 1033s to 457s, and Meltdown reach from 8/12 to 0/10. Then, teaching the
+reference pilot to *diversify its hues* — the intended counter to resistance —
+lifted score from 7,846 to 13,115 and kills from 1,671 to 2,599 with no balance
+change at all. The counters demonstrably pay, which is the property that matters.
+
+After softening the newest sources (Warden interval 55→90s and 320→220 HP, Lancer
+beam 18→12, Bulwark contact 14→10), a 24-minute sweep lands at 3/10 reaching
+Meltdown with mean draft cadence 36.2s. Meaningfully harder than before, not
+brutal.
+
+Worth knowing: a Suppressor parked on a stationary player shuts the Engine off
+completely. That is §11.2 as written and the counter is real (22 HP, or walk out
+of the ring), but it is the sharpest edge in this milestone and the first thing to
+watch in play.
+
+Not yet built from §10: **The Mirror** (§10.4), the elite that runs a snapshot of
+the player's own Programs against them.
 
 ---
 

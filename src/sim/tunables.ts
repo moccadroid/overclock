@@ -49,6 +49,36 @@ export const TUNABLE = {
   instability2Misfire: 0.15,
   instability2Corruption: 0.1,
 
+  // ---- §11.1 adaptive resistance ----
+  /**
+   * The population builds resistance to each hue in proportion to that hue's
+   * share of your recent damage. Mono-hue is a choice with a price, not a
+   * mistake — a strong enough engine can pay the tax and push through.
+   */
+  resistanceCap: 0.6,
+  resistanceHalfLife: 60,
+  /** Resistance only starts biting once a hue dominates this much of your output. */
+  resistanceFloor: 0.34,
+
+  // ---- §11.2 suppression ----
+  /** Seconds an Action already in flight keeps resolving after a zone lands. */
+  suppressionGrace: 0,
+
+  // ---- §11.3 interceptors ----
+  /** Interceptor spawn weight scales with the player's live projectile count. */
+  interceptorPerProjectile: 0.02,
+  interceptorMaxWeight: 5,
+
+  // ---- §10.3 elite affixes ----
+  wardenFromThreat: 7,
+  wardenInterval: 90,
+  affixAdaptiveRate: 0.05,
+  affixVolatileDamage: 22,
+  affixVolatileRadius: 150,
+  affixPhaseInterval: 3.5,
+  affixPhaseDuration: 1,
+  affixAnchoredZone: 190,
+
   // ---- §7 fuel ----
   fuelGaugeCap: 100,
   fuelPerKill: 1,
