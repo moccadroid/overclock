@@ -92,6 +92,16 @@ export const TUNABLE = {
   overdriveHeatPerFire: 1.5,
   /** Volatile detonation radius. */
   volatileRadius: 90,
+  /** Orbitals stack, so they need a ceiling and a per-enemy hit cadence. */
+  maxOrbitals: 14,
+  orbitalHitCooldown: 0.45,
+  /**
+   * §23.1 — displacement budget per enemy per second for Shove. "Permanent
+   * knockback walls" is a named tension break: if stacked Shoves can hold the
+   * horde off forever the game stops asking the player to move, and that is a
+   * bug to fix rather than a power break to protect.
+   */
+  shoveBudgetPerSecond: 320,
   /** §18.2 — the beat grid. Quantize snaps to it; audio will lock to it later. */
   beatsPerMinute: 110,
   quantizeBonus: 0.25,

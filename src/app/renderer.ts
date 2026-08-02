@@ -52,6 +52,7 @@ export class Renderer {
   private readonly gContainment = new Graphics();
   private readonly gZones = new Graphics();
   private readonly gPickups = new Graphics();
+  private readonly gPlaced = new Graphics();
   private readonly gDebris = new Graphics();
   private readonly gEnemies = new Graphics();
   private readonly gProjectiles = new Graphics();
@@ -90,6 +91,7 @@ export class Renderer {
       this.gContainment,
       this.gZones,
       this.gPickups,
+      this.gPlaced,
       this.gDebris,
       this.gFx,
       this.gEnemies,
@@ -161,6 +163,7 @@ export class Renderer {
     this.drawContainment(world);
     this.drawZones(world);
     this.drawPickups(world);
+    this.drawPlaced(world);
     this.drawDebris();
     this.drawEnemies(world);
     this.drawProjectiles(world, tier);
@@ -587,6 +590,44 @@ export class Renderer {
     }
   }
 
+  /** §5.4 Mine and Orbital — persistent bodies the player placed. */
+  private drawPlaced(world: World): void {
+    const g = this.gPlaced;
+    g.clear();
+
+    for (const m of world.mines) {
+      if (!this.camera.isVisible(m.x, m.y, m.radius)) continue;
+      const color = HUE_COLOR[m.hue];
+      const armed = m.arm <= 0;
+      // Unarmed reads as dashed and dim; armed as a solid mark with a live
+      // trigger ring, so "this will go off if something touches it" is visible.
+      const r = 9;
+      polygonPath(g, shapeOutline('diamond', m.x, m.y, r, 0));
+      g.stroke({ width: 2, color, alpha: armed ? BAND.entity : BAND.structure * 2 });
+
+      if (armed) {
+        const pulse = 0.5 + 0.5 * Math.sin(m.life * 6);
+        g.circle(m.x, m.y, m.triggerRadius).stroke({
+          width: 1,
+          color,
+          alpha: BAND.structure * (0.8 + pulse * 0.7),
+        });
+        g.circle(m.x, m.y, r * 0.4).fill({ color, alpha: BAND.entity * pulse });
+      }
+    }
+
+    for (const o of world.orbitals) {
+      if (!this.camera.isVisible(o.x, o.y, o.radius + 20)) continue;
+      const color = HUE_COLOR[o.hue];
+      const fade = Math.min(1, o.life / 1.5);
+      // A short arc of its own orbit trails behind it, so the path reads.
+      arcSegment(g, world.player.x, world.player.y, o.orbitRadius, o.angle - 0.5, o.angle);
+      g.stroke({ width: 1, color, alpha: BAND.structure * 1.4 * fade });
+      g.circle(o.x, o.y, o.radius).stroke({ width: 2.5, color, alpha: BAND.entity * fade });
+      g.circle(o.x, o.y, o.radius * 0.4).fill({ color, alpha: BAND.entity * fade });
+    }
+  }
+
   private drawDebris(): void {
     const g = this.gDebris;
     g.clear();
@@ -821,6 +862,24 @@ export class Renderer {
           }
           g.stroke({ width, color, alpha: BAND.entity * t * alpha });
         }
+      } else if (f.kind === 'rupture') {
+        // §17.1 — a Rupture is a drawn mark that closes on itself before it
+        // detonates, so the hit is telegraphed rather than arbitrary.
+        const closing = 1 - t;
+        g.circle(f.x, f.y, f.radius * (0.35 + closing * 0.65)).stroke({
+          width: 1.5,
+          color,
+          alpha: BAND.inFlight,
+        });
+        for (let i = 0; i < 4; i++) {
+          const a = (i / 4) * Math.PI * 2 + closing * 2;
+          const rr = f.radius * (0.35 + closing * 0.65);
+          g.moveTo(f.x + Math.cos(a) * rr * 0.7, f.y + Math.sin(a) * rr * 0.7).lineTo(
+            f.x + Math.cos(a) * rr,
+            f.y + Math.sin(a) * rr,
+          );
+        }
+        g.stroke({ width: 2, color, alpha: BAND.telegraph * closing });
       } else if (f.kind === 'crit') {
         // A crit reads as a white starburst: unmistakable, and it does not need
         // damage numbers to be legible (§19.4 keeps those off by default).

@@ -721,6 +721,161 @@ describe('the rest of the grammar (GDD §5.5, §5.6, §7.4)', () => {
   });
 });
 
+describe('the action roster (GDD §5.4)', () => {
+  function rig(seed: string, action: string, trigger = 'clock'): World {
+    const w = new World({ seed, axiomId: 'ignition' });
+    w.enemies.length = 0;
+    w.engine.programs.forEach((p) => {
+      p.triggerId = null;
+      p.actionId = null;
+      p.modifierIds.fill(null);
+    });
+    w.engine.programs[0]!.triggerId = trigger;
+    w.engine.programs[0]!.actionId = action;
+    w.engine.recompile();
+    w.syncBudget();
+    return w;
+  }
+
+  it('Mine arms, then detonates on contact', () => {
+    const w = rig('mine', 'mine');
+    for (let i = 0; i < 90; i++) w.advance(NO_INPUT);
+    expect(w.mines.length).toBeGreaterThan(0);
+
+    // Walk a target onto it.
+    const mine = w.mines.find((m) => m.alive)!;
+    const e = w.spawnEnemy('drifter', mine.x + 8, mine.y, 'thermal')!;
+    const before = e.hp;
+    for (let i = 0; i < 60; i++) w.advance(NO_INPUT);
+    expect(before - e.hp).toBeGreaterThan(0);
+  });
+
+  it('Rupture detonates after a delay, at the marked spot', () => {
+    const w = rig('rupture', 'rupture');
+    const e = w.spawnEnemy('bulwark', w.player.x + 200, w.player.y, 'thermal')!;
+    const before = e.hp;
+    // Nothing should land instantly.
+    for (let i = 0; i < 20; i++) w.advance(NO_INPUT);
+    const early = before - e.hp;
+    for (let i = 0; i < 120; i++) w.advance(NO_INPUT);
+    expect(early).toBe(0);
+    expect(before - e.hp).toBeGreaterThan(0);
+  });
+
+  it('Beam hits everything along the line, not just the target', () => {
+    const w = rig('beam', 'beam');
+    const line: number[] = [];
+    for (let i = 1; i <= 5; i++) {
+      const e = w.spawnEnemy('bulwark', w.player.x + i * 120, w.player.y, 'thermal')!;
+      line.push(e.id);
+    }
+    for (let i = 0; i < 120; i++) w.advance(NO_INPUT);
+    const damaged = w.enemies.filter((e) => line.includes(e.id) && e.hp < e.maxHp).length;
+    expect(damaged).toBeGreaterThanOrEqual(4);
+  });
+
+  it('Orbital persists, stacks, and is capped', () => {
+    const w = rig('orbital', 'orbital');
+    for (let i = 0; i < 60 * 40; i++) w.advance(NO_INPUT);
+    expect(w.orbitals.length).toBeGreaterThan(1);
+    expect(w.orbitals.length).toBeLessThanOrEqual(TUNABLE.maxOrbitals);
+    // They circle the player.
+    for (const o of w.orbitals) {
+      const d = Math.hypot(o.x - w.player.x, o.y - w.player.y);
+      expect(Math.abs(d - o.orbitRadius)).toBeLessThan(6);
+    }
+  });
+
+  it('Surge speeds up every Clock while it lasts', () => {
+    const w = rig('surge', 'surge');
+    const other = w.engine.programs[1]!;
+    other.triggerId = 'clock';
+    other.actionId = 'bolt';
+    w.engine.recompile();
+    w.syncBudget();
+    // Long enough for the Clock to have fired Surge at least once.
+    for (let i = 0; i < 60 * 10; i++) w.advance(NO_INPUT);
+    expect(w.surgeRate).toBeGreaterThan(0);
+    const boosted = other.fireCount;
+
+    // Let it lapse, then compare an equal window with no Surge running.
+    w.engine.programs[0]!.actionId = null;
+    w.engine.recompile();
+    w.surgeRate = 0;
+    w.surgeRateTime = 0;
+    const mark = other.fireCount;
+    for (let i = 0; i < 60 * 10; i++) w.advance(NO_INPUT);
+    expect(boosted).toBeGreaterThan(other.fireCount - mark);
+  });
+
+  it('Pull drags enemies toward the vortex', () => {
+    const w = rig('pull', 'pull');
+    const e = w.spawnEnemy('bulwark', w.player.x + 170, w.player.y, 'thermal')!;
+    e.vx = 0;
+    e.vy = 0;
+    const before = Math.hypot(e.x - w.player.x, e.y - w.player.y);
+    for (let i = 0; i < 60; i++) w.advance(NO_INPUT);
+    expect(Math.hypot(e.x - w.player.x, e.y - w.player.y)).toBeLessThan(before);
+  });
+
+  it('§23.1 — Shove displacement is capped per enemy per second', () => {
+    // The named tension break: stacked Shoves must not hold the horde at arm's
+    // length forever. A build that stops the game asking you to move is a bug.
+    const w = rig('shove', 'shove');
+    for (let i = 1; i < 4; i++) {
+      const p = w.engine.programs[i]!;
+      p.triggerId = 'clock';
+      p.actionId = 'shove';
+    }
+    w.engine.recompile();
+    w.syncBudget();
+
+    const e = w.spawnEnemy('drifter', w.player.x + 60, w.player.y, 'thermal')!;
+    e.hp = 1e9;
+    let maxPush = 0;
+    for (let second = 0; second < 6; second++) {
+      const start = Math.hypot(e.x - w.player.x, e.y - w.player.y);
+      for (let i = 0; i < 60; i++) w.advance(NO_INPUT);
+      if (!e.alive) break;
+      maxPush = Math.max(maxPush, Math.hypot(e.x - w.player.x, e.y - w.player.y) - start);
+    }
+    // Four Shove rows cannot out-push the per-second budget.
+    expect(maxPush).toBeLessThan(TUNABLE.shoveBudgetPerSecond);
+    // And it still closes in: it is knockback, not a wall.
+    expect(Math.hypot(e.x - w.player.x, e.y - w.player.y)).toBeLessThan(1200);
+  });
+
+  it('Fragment steers toward a target instead of flying straight', () => {
+    const w = rig('fragment', 'fragment');
+    // Put the only target well off the firing axis.
+    w.spawnEnemy('bulwark', w.player.x + 40, w.player.y + 320, 'thermal');
+    let curved = false;
+    for (let i = 0; i < 240 && !curved; i++) {
+      w.advance(NO_INPUT);
+      for (const p of w.projectiles) {
+        if (p.seek > 0 && Math.abs(p.vy) > Math.abs(p.vx)) curved = true;
+      }
+    }
+    expect(curved).toBe(true);
+  });
+
+  it('Siphon steals fuel of the target’s hue on hit', () => {
+    const w = rig('siphon', 'siphon');
+    w.fuel.thermal = 0;
+    w.fuel.voltaic = 0;
+    w.fuel.void = 0;
+    // Not Bulwarks: their shield arc blocks projectiles from the front, which
+    // is exactly the direction the engine fires from.
+    for (let i = 0; i < 14; i++) {
+      const e = w.spawnEnemy('drifter', w.player.x + 90 + i * 4, w.player.y, 'voltaic')!;
+      e.hp = 1e6;
+    }
+    for (let i = 0; i < 200; i++) w.advance(NO_INPUT);
+    // Voltaic gained without any voltaic enemy having died and dropped.
+    expect(w.fuel.voltaic).toBeGreaterThan(0);
+  });
+});
+
 describe('pressure attacks the build, not the health bar (GDD §11)', () => {
   function quietWorld(seed: string): World {
     const w = new World({ seed, axiomId: 'ignition' });
@@ -834,6 +989,8 @@ describe('pressure attacks the build, not the health bar (GDD §11)', () => {
         bounces: 0,
         volatile: 0,
         leech: 0,
+        seek: 0,
+        siphon: 0,
         alive: true,
       });
       for (let i = 0; i < 30; i++) w.advance(NO_INPUT);
@@ -879,6 +1036,8 @@ describe('pressure attacks the build, not the health bar (GDD §11)', () => {
         bounces: 0,
         volatile: 0,
         leech: 0,
+        seek: 0,
+        siphon: 0,
         alive: true,
       });
       for (let i = 0; i < 90; i++) w.advance(NO_INPUT);
@@ -905,7 +1064,7 @@ describe('pressure attacks the build, not the health bar (GDD §11)', () => {
       w.projectiles.push({
         id: 9200 + i, x: 0, y: 0, vx: 0, vy: 0, life: 9, damage: 0, pierce: 0,
         hue: 'thermal', depth: 0, programIndex: 0, radius: 4, corrupted: false,
-        hits: [], age: 0, bounces: 0, volatile: 0, leech: 0, alive: true,
+        hits: [], age: 0, bounces: 0, volatile: 0, leech: 0, seek: 0, siphon: 0, alive: true,
       });
     }
     expect(w.waveWeightFor(template)).toBeGreaterThan(idle);

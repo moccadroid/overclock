@@ -79,6 +79,14 @@ export interface Enemy extends SpatialItem {
   /** Per-enemy movement personality: weave phase and a personal speed. */
   wobble: number;
   speedScale: number;
+  /**
+   * §23.1 — the Shove guard. Knockback displacement is budgeted per enemy per
+   * second, because "permanent knockback walls" is a named tension break: if
+   * stacked Shoves can hold the horde off indefinitely, the game stops asking
+   * the player to move and that is a bug, not a power break.
+   */
+  shoveBudget: number;
+  shoveWindow: number;
 }
 
 /** §10.3 — Wardens and Meltdown-tier enemies roll one or two of these. */
@@ -105,6 +113,10 @@ export interface Projectile extends SpatialItem {
   volatile: number;
   /** Leech — fraction of dealt damage returned as Integrity. */
   leech: number;
+  /** Fragment — steering strength toward a target, 0 for a straight shot. */
+  seek: number;
+  /** Siphon — fuel stolen from the target's hue on hit. */
+  siphon: number;
 }
 
 export type PickupKind = 'fuel' | 'xp';
@@ -119,6 +131,53 @@ export interface Pickup extends SpatialItem {
   age: number;
 }
 
+/** §5.4 Mine — a proximity charge left where the player stood. */
+export interface Mine extends SpatialItem {
+  id: number;
+  hue: Hue;
+  damage: number;
+  radius: number;
+  triggerRadius: number;
+  arm: number;
+  life: number;
+  maxLife: number;
+  depth: number;
+  programIndex: number;
+  leech: number;
+}
+
+/** §5.4 Orbital — a persistent body circling the avatar. Stacks. */
+export interface Orbital extends SpatialItem {
+  id: number;
+  hue: Hue;
+  damage: number;
+  radius: number;
+  orbitRadius: number;
+  orbitSpeed: number;
+  angle: number;
+  life: number;
+  maxLife: number;
+  depth: number;
+  programIndex: number;
+  leech: number;
+  /** Per-enemy hit cooldowns, so an orbital does not shred on contact. */
+  cooldowns: Map<number, number>;
+}
+
+/** §5.4 Rupture — a burst scheduled to land at a marked position. */
+interface PendingBurst {
+  time: number;
+  x: number;
+  y: number;
+  radius: number;
+  damage: number;
+  hue: Hue;
+  depth: number;
+  programIndex: number;
+  leech: number;
+  alive: boolean;
+}
+
 /** GDD §5.4 Field — a persistent damage zone. The Void archetype's space control. */
 export interface Zone extends SpatialItem {
   id: number;
@@ -131,6 +190,9 @@ export interface Zone extends SpatialItem {
   tickTimer: number;
   depth: number;
   programIndex: number;
+  /** Pull — inward acceleration applied every tick, 0 for a plain Field. */
+  force: number;
+  leech: number;
 }
 
 /**
@@ -198,7 +260,7 @@ export interface VisualDeath {
 /** Short-lived visual records for instantaneous actions. Sim-owned so replays match. */
 export interface Fx {
   id: number;
-  kind: 'burst' | 'chain' | 'hurt' | 'crit';
+  kind: 'burst' | 'chain' | 'hurt' | 'crit' | 'rupture';
   hue: Hue;
   x: number;
   y: number;
@@ -320,6 +382,9 @@ export class World {
   projectiles: Projectile[] = [];
   pickups: Pickup[] = [];
   zones: Zone[] = [];
+  mines: Mine[] = [];
+  orbitals: Orbital[] = [];
+  private pendingBursts: PendingBurst[] = [];
   terminals: Terminal[] = [];
   containment: Containment[] = [];
   fx: Fx[] = [];
@@ -371,6 +436,9 @@ export class World {
   eps = 0;
   /** Smoothed Cycles/sec the engine is drawing. Shown against capacity (§6). */
   demandAverage = 0;
+  /** §5.4 Surge — engine-rate bonus and its remaining time. */
+  surgeRate = 0;
+  surgeRateTime = 0;
 
   // ---- run structure (§9, §13.2) ----
   phase: RunPhase = 'build';
@@ -492,6 +560,9 @@ export class World {
     this.grid.rebuild(this.enemies);
     this.updateProjectiles(dt);
     this.updateZones(dt);
+    this.updateMines(dt);
+    this.updateOrbitals(dt);
+    this.releasePendingBursts();
     this.updatePickups(dt);
     this.consolidatePickups(dt);
     this.updateFx(dt);
@@ -499,6 +570,8 @@ export class World {
     this.updateMeltdown(dt);
     this.updateDirector(dt);
     if (this.surgeTime > 0) this.surgeTime = Math.max(0, this.surgeTime - dt);
+    this.surgeRateTime = Math.max(0, this.surgeRateTime - dt);
+    if (this.surgeRateTime <= 0) this.surgeRate = 0;
 
     // §11.2 — inside a Suppressor's zone the player's Triggers do not fire.
     // Actions already in flight resolve; nothing new starts.
@@ -592,10 +665,12 @@ export class World {
     for (let i = 0; i < this.engine.programs.length; i++) {
       const compiled = this.engine.compiled[i]!;
       if (!compiled.live || compiled.interval <= 0) continue;
+      // §5.4 Surge speeds up every Clock the player owns while it is active.
+      const interval = compiled.interval / (1 + this.surgeRate);
       this.engine.clocks[i] = (this.engine.clocks[i] ?? 0) + dt;
       let guard = 0;
-      while (this.engine.clocks[i]! >= compiled.interval && guard++ < 32) {
-        this.engine.clocks[i] = this.engine.clocks[i]! - compiled.interval;
+      while (this.engine.clocks[i]! >= interval && guard++ < 32) {
+        this.engine.clocks[i] = this.engine.clocks[i]! - interval;
         this.fireProgram(i, 0, this.player.x, this.player.y);
       }
     }
@@ -734,6 +809,7 @@ export class World {
           this.doChain(def.id, damage, depth, index, x, y, hue, compiled.ctx.leech);
           break;
         case 'zone':
+        case 'vortex':
           this.dropZone(
             def.id,
             damage,
@@ -745,6 +821,24 @@ export class World {
             compiled.ctx.duration,
             hue,
           );
+          break;
+        case 'mine':
+          this.dropMine(def, damage, depth, index, compiled.ctx, hue);
+          break;
+        case 'delayed':
+          this.markRupture(def, damage, depth, index, x, y, compiled.ctx, hue);
+          break;
+        case 'beam':
+          this.fireBeam(def, damage, depth, index, x, y, compiled.ctx, hue);
+          break;
+        case 'orbital':
+          this.addOrbital(def, damage, depth, index, compiled.ctx, hue);
+          break;
+        case 'buff':
+          this.applySurge(def, compiled.ctx);
+          break;
+        case 'knockback':
+          this.doShove(def, damage, depth, index, x, y, compiled.ctx, hue);
           break;
       }
     }
@@ -799,6 +893,8 @@ export class World {
       bounces: Math.round(ctx.bounce),
       volatile: ctx.volatile,
       leech: ctx.leech,
+      seek: def.seek ?? 0,
+      siphon: def.siphon ?? 0,
       alive: true,
     });
   }
@@ -917,8 +1013,260 @@ export class World {
       tickTimer: 0,
       depth,
       programIndex,
+      force: def.force ?? 0,
+      leech: 0,
       alive: true,
     });
+  }
+
+  /** §5.4 Mine — a proximity charge at the avatar's position. */
+  private dropMine(
+    def: ActionDef,
+    damage: number,
+    depth: number,
+    programIndex: number,
+    ctx: FireContext,
+    hue: Hue,
+  ): void {
+    if (this.mines.length >= SAFETY.maxZones) this.mines[0]!.alive = false;
+    const life = (def.lifetime ?? 8) * Math.max(0.1, ctx.duration);
+    this.mines.push({
+      id: this.nextId++,
+      hue,
+      x: this.player.x,
+      y: this.player.y,
+      damage,
+      radius: (def.radius ?? 100) * Math.max(0.1, ctx.area),
+      triggerRadius: (def.triggerRadius ?? 44) * Math.max(0.1, ctx.area),
+      arm: def.armTime ?? 0.3,
+      life,
+      maxLife: life,
+      depth,
+      programIndex,
+      leech: ctx.leech,
+      alive: true,
+    });
+  }
+
+  /** §5.4 Rupture — a delayed explosion at the target's position. */
+  private markRupture(
+    def: ActionDef,
+    damage: number,
+    depth: number,
+    programIndex: number,
+    x: number,
+    y: number,
+    ctx: FireContext,
+    hue: Hue,
+  ): void {
+    const target = this.grid.nearest(x, y, 900);
+    const tx = target ? target.x : x;
+    const ty = target ? target.y : y;
+    const radius = (def.radius ?? 120) * Math.max(0.1, ctx.area);
+    if (this.pendingBursts.length < SAFETY.maxScheduledFires) {
+      this.pendingBursts.push({
+        time: this.time + (def.delay ?? 0.7),
+        x: tx,
+        y: ty,
+        radius,
+        damage,
+        hue,
+        depth,
+        programIndex,
+        leech: ctx.leech,
+        alive: true,
+      });
+    }
+    // §17.1 — the mark is drawn before the detonation lands.
+    this.pushFx('rupture', hue, tx, ty, radius, [], def.delay ?? 0.7);
+  }
+
+  private releasePendingBursts(): void {
+    if (this.pendingBursts.length === 0) return;
+    let due = false;
+    for (const b of this.pendingBursts) {
+      if (!b.alive || b.time > this.time) continue;
+      b.alive = false;
+      due = true;
+      this.grid.queryRadius(b.x, b.y, b.radius, (enemy) => {
+        this.damageEnemy(enemy, b.damage, b.depth, b.programIndex, b.hue, b.leech);
+      });
+      this.pushFx('burst', b.hue, b.x, b.y, b.radius, [], 0.24);
+    }
+    if (due) {
+      let w = 0;
+      for (let r = 0; r < this.pendingBursts.length; r++) {
+        const b = this.pendingBursts[r]!;
+        if (b.alive) this.pendingBursts[w++] = b;
+      }
+      this.pendingBursts.length = w;
+    }
+  }
+
+  /** §5.4 Beam — an instant line to the farthest enemy in range. */
+  private fireBeam(
+    def: ActionDef,
+    damage: number,
+    depth: number,
+    programIndex: number,
+    x: number,
+    y: number,
+    ctx: FireContext,
+    hue: Hue,
+  ): void {
+    const range = def.range ?? 800;
+    // Farthest, not nearest: the point of a beam is everything on the way.
+    let far: Enemy | null = null;
+    let farD2 = 0;
+    for (const e of this.enemies) {
+      if (!e.alive || e.phased) continue;
+      const dx = e.x - x;
+      const dy = e.y - y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 <= range * range && d2 > farD2) {
+        farD2 = d2;
+        far = e;
+      }
+    }
+    const angle = far ? Math.atan2(far.y - y, far.x - x) : Math.atan2(this.player.dirY, this.player.dirX);
+    const ux = Math.cos(angle);
+    const uy = Math.sin(angle);
+    const width = (def.beamWidth ?? 12) * Math.max(0.1, ctx.area);
+
+    for (const e of this.enemies) {
+      if (!e.alive) continue;
+      const px = e.x - x;
+      const py = e.y - y;
+      const along = px * ux + py * uy;
+      if (along < 0 || along > range) continue;
+      if (Math.abs(px * -uy + py * ux) > width + e.radius) continue;
+      this.damageEnemy(e, damage, depth, programIndex, hue, ctx.leech);
+    }
+    this.pushFx('chain', hue, x, y, width, [x, y, x + ux * range, y + uy * range], 0.16);
+  }
+
+  /** §5.4 Orbital — persistent, and they stack. */
+  private addOrbital(
+    def: ActionDef,
+    damage: number,
+    depth: number,
+    programIndex: number,
+    ctx: FireContext,
+    hue: Hue,
+  ): void {
+    if (this.orbitals.length >= TUNABLE.maxOrbitals) this.orbitals[0]!.alive = false;
+    const life = (def.lifetime ?? 12) * Math.max(0.1, ctx.duration);
+    this.orbitals.push({
+      id: this.nextId++,
+      hue,
+      x: this.player.x,
+      y: this.player.y,
+      damage,
+      radius: (def.radius ?? 12) * Math.max(0.1, ctx.area),
+      orbitRadius: (def.orbitRadius ?? 110) * Math.max(0.1, ctx.area),
+      orbitSpeed: def.orbitSpeed ?? 2.2,
+      angle: this.rng.next() * Math.PI * 2,
+      life,
+      maxLife: life,
+      depth,
+      programIndex,
+      leech: ctx.leech,
+      cooldowns: new Map(),
+      alive: true,
+    });
+  }
+
+  /** §5.4 Surge — a short self-buff on the engine's own rate. */
+  private applySurge(def: ActionDef, ctx: FireContext): void {
+    this.surgeRate = Math.max(this.surgeRate, def.rateBonus ?? 0.4);
+    this.surgeRateTime = Math.max(
+      this.surgeRateTime,
+      (def.lifetime ?? 2) * Math.max(0.1, ctx.duration),
+    );
+  }
+
+  /**
+   * §5.4 Shove — radial knockback, with §23.1's guard.
+   *
+   * Each enemy has a displacement budget per second. Stacked Shoves therefore
+   * cannot hold the horde at arm's length forever: "permanent knockback walls"
+   * is a named tension break, and a build that stops the game asking you to move
+   * is a bug rather than a power break.
+   */
+  private doShove(
+    def: ActionDef,
+    damage: number,
+    depth: number,
+    programIndex: number,
+    x: number,
+    y: number,
+    ctx: FireContext,
+    hue: Hue,
+  ): void {
+    const radius = (def.radius ?? 180) * Math.max(0.1, ctx.area);
+    const impulse = def.knockback ?? 240;
+    this.grid.queryRadius(x, y, radius, (enemy) => {
+      const dx = enemy.x - x;
+      const dy = enemy.y - y;
+      const d = Math.hypot(dx, dy) || 1;
+      const falloff = 1 - d / radius;
+      const wanted = impulse * falloff;
+      const allowed = Math.min(wanted, enemy.shoveBudget);
+      if (allowed > 0) {
+        enemy.shoveBudget -= allowed;
+        enemy.x += (dx / d) * allowed * SIM_DT * 6;
+        enemy.y += (dy / d) * allowed * SIM_DT * 6;
+        this.resolveRuins(enemy, enemy.radius);
+      }
+      if (damage > 0) this.damageEnemy(enemy, damage, depth, programIndex, hue, ctx.leech);
+    });
+    this.pushFx('burst', hue, x, y, radius, [], 0.2);
+  }
+
+  private updateMines(dt: number): void {
+    for (const m of this.mines) {
+      if (!m.alive) continue;
+      m.arm = Math.max(0, m.arm - dt);
+      m.life -= dt;
+      if (m.life <= 0) {
+        m.alive = false;
+        continue;
+      }
+      if (m.arm > 0) continue;
+      let triggered = false;
+      this.grid.queryRadius(m.x, m.y, m.triggerRadius, () => {
+        triggered = true;
+      });
+      if (!triggered) continue;
+      m.alive = false;
+      this.grid.queryRadius(m.x, m.y, m.radius, (enemy) => {
+        this.damageEnemy(enemy, m.damage, m.depth, m.programIndex, m.hue, m.leech);
+      });
+      this.pushFx('burst', m.hue, m.x, m.y, m.radius, [], 0.26);
+    }
+  }
+
+  private updateOrbitals(dt: number): void {
+    for (const o of this.orbitals) {
+      if (!o.alive) continue;
+      o.life -= dt;
+      if (o.life <= 0) {
+        o.alive = false;
+        continue;
+      }
+      o.angle += o.orbitSpeed * dt;
+      o.x = this.player.x + Math.cos(o.angle) * o.orbitRadius;
+      o.y = this.player.y + Math.sin(o.angle) * o.orbitRadius;
+
+      for (const [id, until] of o.cooldowns) {
+        if (until <= this.time) o.cooldowns.delete(id);
+      }
+      this.grid.queryRadius(o.x, o.y, o.radius + 12, (enemy) => {
+        if (o.cooldowns.has(enemy.id)) return;
+        o.cooldowns.set(enemy.id, this.time + TUNABLE.orbitalHitCooldown);
+        this.damageEnemy(enemy, o.damage, o.depth, o.programIndex, o.hue, o.leech);
+      });
+    }
   }
 
   private updateZones(dt: number): void {
@@ -929,11 +1277,24 @@ export class World {
         z.alive = false;
         continue;
       }
+      // §5.4 Pull — a vortex drags everything toward its centre. Continuous, so
+      // it is applied every tick rather than on the damage cadence.
+      if (z.force > 0) {
+        this.grid.queryRadius(z.x, z.y, z.radius, (enemy) => {
+          const dx = z.x - enemy.x;
+          const dy = z.y - enemy.y;
+          const d = Math.hypot(dx, dy) || 1;
+          const pull = z.force * (1 - d / z.radius) * dt;
+          enemy.x += (dx / d) * pull;
+          enemy.y += (dy / d) * pull;
+        });
+      }
+
       z.tickTimer -= dt;
       if (z.tickTimer > 0) continue;
       z.tickTimer = z.tickInterval;
       this.grid.queryRadius(z.x, z.y, z.radius, (enemy) => {
-        this.damageEnemy(enemy, z.damage, z.depth, z.programIndex, z.hue);
+        this.damageEnemy(enemy, z.damage, z.depth, z.programIndex, z.hue, z.leech);
       });
     }
   }
@@ -1721,6 +2082,12 @@ export class World {
       if (!e.alive) continue;
       e.spawnAge += dt;
       e.flash = Math.max(0, e.flash - dt);
+      // §23.1 — refresh the per-second knockback budget.
+      e.shoveWindow -= dt;
+      if (e.shoveWindow <= 0) {
+        e.shoveWindow = 1;
+        e.shoveBudget = TUNABLE.shoveBudgetPerSecond;
+      }
       const def = getEnemy(e.defId);
 
       // §10.3 Phasing — untargetable for a beat, on a steady cycle.
@@ -1993,6 +2360,24 @@ export class World {
       if (!proj.alive) continue;
       proj.age += dt;
       proj.life -= dt;
+
+      // §5.4 Fragment — "a short-lived autonomous mote that seeks and
+      // detonates". Steers toward the nearest target rather than flying true.
+      if (proj.seek > 0) {
+        const target = this.grid.nearest(proj.x, proj.y, 600);
+        if (target) {
+          const dx = target.x - proj.x;
+          const dy = target.y - proj.y;
+          const d = Math.hypot(dx, dy) || 1;
+          const speed = Math.hypot(proj.vx, proj.vy) || 1;
+          proj.vx += (dx / d) * proj.seek * speed * dt;
+          proj.vy += (dy / d) * proj.seek * speed * dt;
+          const norm = Math.hypot(proj.vx, proj.vy) || 1;
+          proj.vx = (proj.vx / norm) * speed;
+          proj.vy = (proj.vy / norm) * speed;
+        }
+      }
+
       proj.x += proj.vx * dt;
       proj.y += proj.vy * dt;
 
@@ -2039,6 +2424,14 @@ export class World {
           }
         }
         proj.hits.push(enemy.id);
+        // §5.4 Siphon — "steals 1 fuel of the target's hue on hit".
+        if (proj.siphon > 0) {
+          this.fuel[enemy.hue] = Math.min(
+            TUNABLE.fuelGaugeCap,
+            this.fuel[enemy.hue] + proj.siphon,
+          );
+          this.fuelGainTick[enemy.hue] += proj.siphon;
+        }
         this.damageEnemy(enemy, proj.damage, proj.depth, proj.programIndex, proj.hue, proj.leech);
         if (proj.hits.length > proj.pierce) {
           // §5.5 Ricochet — spend a bounce to redirect at a fresh target rather
@@ -2520,6 +2913,8 @@ export class World {
       beamActive: 0,
       wobble: this.rng.next() * Math.PI * 2,
       speedScale: this.rng.range(1 - TUNABLE.speedVariance, 1 + TUNABLE.speedVariance),
+      shoveBudget: TUNABLE.shoveBudgetPerSecond,
+      shoveWindow: 1,
       alive: true,
     };
 
@@ -2663,6 +3058,8 @@ export class World {
     compactInPlace(this.projectiles);
     compactInPlace(this.pickups);
     compactInPlace(this.zones);
+    compactInPlace(this.mines);
+    compactInPlace(this.orbitals);
     compactInPlace(this.terminals);
     compactInPlace(this.containment);
     compactInPlace(this.fx);

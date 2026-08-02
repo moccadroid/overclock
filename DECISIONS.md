@@ -916,6 +916,43 @@ ahead against 2 behind, where it used to be the reverse.
 
 ---
 
+## D-42 · SETTLED · The action roster is complete — 14 of 14
+
+Nine new Actions, and seven of them needed new engine primitives rather than
+data. Before this the game had exactly four ways to deal damage — one projectile,
+one burst, one chain, one zone — which is why every build converged.
+
+| Action | primitive | what it adds |
+|---|---|---|
+| Mine | `mine` | a proximity charge left where you stood; arms, then detonates |
+| Rupture | `delayed` | marks a target, explodes at that spot after 0.7s |
+| Beam | `beam` | instant line to the *farthest* enemy, hitting everything on the way |
+| Orbital | `orbital` | persistent bodies circling the avatar; they stack |
+| Surge | `buff` | +40% engine rate for 2s — speeds up every Clock you own |
+| Pull | `vortex` | continuous inward force; sets up bursts |
+| Shove | `knockback` | radial displacement, budgeted (below) |
+| Fragment | projectile + `seek` | steers toward a target instead of flying true |
+| Siphon | projectile + `siphon` | steals fuel of the *target's* hue on hit |
+
+Fragment and Siphon reuse the projectile primitive rather than adding two more:
+one is a steering term, the other a hit side-effect.
+
+**§23.1's guard on Shove is implemented, not deferred.** "Permanent knockback
+walls" is named in the design as a *tension break* — a bug to fix rather than a
+power break to protect — so each enemy carries a displacement budget per second.
+Four Shove rows firing together cannot out-push it, and the horde still closes.
+Tested directly.
+
+Two supporting caps, both because these Actions persist rather than resolving:
+orbitals are capped and carry a per-enemy hit cooldown (otherwise contact shreds),
+and mines share the zone cap.
+
+Measured with Mine, Orbital, Beam and Shove all live: 0.51ms/frame. The
+persistent-entity primitives are cheap; it is per-entity draw calls that cost,
+and those are already batched.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

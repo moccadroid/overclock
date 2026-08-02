@@ -112,7 +112,26 @@ export interface TriggerDef extends PoolWeighted {
   description: string;
 }
 
-export type ActionPrimitive = 'projectile' | 'burst' | 'chain' | 'zone' | 'convert';
+export type ActionPrimitive =
+  | 'projectile'
+  | 'burst'
+  | 'chain'
+  | 'zone'
+  | 'convert'
+  /** Mine — a proximity charge left where you stood. */
+  | 'mine'
+  /** Rupture — a burst that lands at a target's position after a delay. */
+  | 'delayed'
+  /** Beam — an instant line to the farthest enemy in range. */
+  | 'beam'
+  /** Orbital — a persistent body circling the avatar. Stacks. */
+  | 'orbital'
+  /** Surge — a short self-buff on the engine's own rate. */
+  | 'buff'
+  /** Pull — a vortex that drags enemies toward a point. */
+  | 'vortex'
+  /** Shove — radial knockback. See §23.1's displacement guard. */
+  | 'knockback';
 
 export interface ActionDef extends PoolWeighted {
   id: string;
@@ -147,6 +166,27 @@ export interface ActionDef extends PoolWeighted {
   cooldown?: number;
   /** §7.4 — set when `primitive` is `convert`. */
   convert?: ConvertSpec;
+
+  /** Mine: seconds before it can trigger, and its trigger radius. */
+  armTime?: number;
+  triggerRadius?: number;
+  /** Rupture: seconds between marking a target and the detonation. */
+  delay?: number;
+  /** Beam: half-width of the damaged line. */
+  beamWidth?: number;
+  /** Orbital: orbit distance and angular speed. */
+  orbitRadius?: number;
+  orbitSpeed?: number;
+  /** Surge: fractional engine-rate bonus while active. */
+  rateBonus?: number;
+  /** Pull: inward acceleration applied inside the vortex. */
+  force?: number;
+  /** Shove: outward impulse applied to everything in radius. */
+  knockback?: number;
+  /** Fragment: a projectile that steers toward a target and detonates. */
+  seek?: number;
+  /** Siphon: fuel stolen from the target's hue on hit. */
+  siphon?: number;
   description: string;
 }
 
