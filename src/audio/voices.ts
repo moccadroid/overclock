@@ -888,10 +888,17 @@ export function ui(v: VoiceCtx, at: number, sound: UiSound): void {
   switch (sound) {
     // One tick, two weights. If you can describe the hover individually, it is
     // too loud; if the click does not feel like the same object, they are wrong.
+    //
+    // Both centres dropped about an octave. They sat at 2400 and 1900, which is
+    // the middle of where human hearing peaks — a tick there is *piercing* at
+    // any level, and a hover fires hundreds of times a session. Lower and
+    // slightly longer reads as wood rather than as glass, and it stays audible
+    // at the same gain, so this softens the character without undoing the "a bit
+    // louder please" from earlier.
     case 'hover':
-      return tick(v, at, 0.09, 2400, 0.018);
+      return tick(v, at, 0.085, 1400, 0.024);
     case 'click':
-      return tick(v, at, 0.3, 1900, 0.03);
+      return tick(v, at, 0.28, 1100, 0.04);
 
     case 'draft': {
       // A Draft arriving. Two notes up, quiet: an offer, not an announcement.
@@ -907,7 +914,7 @@ export function ui(v: VoiceCtx, at: number, sound: UiSound): void {
     case 'confirm': {
       // A Draft taken. The same interval, landing rather than rising, plus the
       // tick you get from every other button so it still feels like a press.
-      tick(v, at, 0.3, 1900, 0.03);
+      tick(v, at, 0.28, 1100, 0.04);
       for (const [i, degree] of [14, 12].entries()) {
         const t = at + i * 0.06;
         const g = env(ctx, t, 0.003, 0.2, 0.18);
@@ -963,11 +970,25 @@ export function ui(v: VoiceCtx, at: number, sound: UiSound): void {
 /** The whole UI vocabulary: a short filtered tick. Weight is the only variable. */
 function tick(v: VoiceCtx, at: number, gain: number, hz: number, dur: number): void {
   const { ctx } = v;
-  const g = env(ctx, at, 0.0008, dur, gain);
+  // 4ms rather than 0.8. An attack that fast is a step, and a step is broadband
+  // by definition — the bite people call "harsh" was the transient, not the
+  // level. 4ms is still far below the ~20ms where a press starts to feel late,
+  // so nothing about the response changes.
+  const g = env(ctx, at, 0.004, dur, gain);
   const bp = ctx.createBiquadFilter();
   bp.type = 'bandpass';
   bp.frequency.value = hz;
-  bp.Q.value = 2.2;
+  // Narrower, so less of the noise escapes either side of the centre.
+  bp.Q.value = 3;
+
+  // And a ceiling. A bandpass at Q 3 still passes plenty an octave up, and an
+  // octave up from here is 3–5kHz — the exact band the ear is most sensitive
+  // to and the reason a quiet sound can still be fatiguing. Same fix the snare
+  // needed, for the same reason.
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = hz * 2.4;
+  lp.Q.value = 0.6;
 
   // Noise, not a tone: a click with a pitch is a beep, and a beep is a sound
   // the player will learn to resent.
@@ -979,7 +1000,7 @@ function tick(v: VoiceCtx, at: number, gain: number, hz: number, dur: number): v
   }
   const src = ctx.createBufferSource();
   src.buffer = buf;
-  src.connect(bp).connect(g).connect(v.out);
+  src.connect(bp).connect(lp).connect(g).connect(v.out);
   src.start(at);
   src.stop(at + dur + 0.01);
 }
