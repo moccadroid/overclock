@@ -2024,15 +2024,22 @@
 }
 .results-panel .foot {
   display: flex;
-  align-items: baseline;
-  gap: 26px;
+  align-items: center;
+  gap: 12px;
   margin-top: 18px;
   padding-top: 14px;
   border-top: 1px solid var(--structure);
   color: #3f5570;
   font-size: 11px;
 }
+/* One line, one size, never wrapped. These carried their keyboard shortcut in
+   the label, which made "RETURN TO MENU [L / ESC]" long enough to break across
+   two lines in a fixed-width foot — three buttons of three different heights
+   reading as a layout accident. The keys moved to the hint on the right, where
+   they were always going to be read anyway. */
 .results-panel .foot .again {
+  flex: none;
+  min-width: 96px;
   padding: 8px 16px;
   border: 1px solid var(--structure);
   background: none;
@@ -2040,6 +2047,7 @@
   font: inherit;
   font-size: 11px;
   letter-spacing: 0.18em;
+  white-space: nowrap;
   cursor: pointer;
 }
 .results-panel .foot .again:hover {

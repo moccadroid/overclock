@@ -14,6 +14,7 @@ import { Library } from './meta/profile';
 import { Audio } from './audio/audio';
 import { applyEffects } from './app/visual';
 import { installUserCells } from './meta/cellstore';
+import { describeRun, loadRuns } from './meta/runstore';
 import './app/ui.css';
 
 const params = new URLSearchParams(location.search);
@@ -56,7 +57,24 @@ mount.appendChild(menuUi);
 if (import.meta.env.DEV) {
   // Exposed before the title screen, not after: half the things worth poking at
   // — the Library, the soundtrack — only exist in the menu.
-  (window as unknown as { __oc: Record<string, unknown> }).__oc = { library, audio };
+  // `__oc.runs()` is the last five runs, and `__oc.saveRuns()` writes them out
+  // as one file — the fastest way to hand a session's evidence to somebody who
+  // was not sitting here.
+  (window as unknown as { __oc: Record<string, unknown> }).__oc = {
+    library,
+    audio,
+    runs: loadRuns,
+    saveRuns: () => {
+      const runs = loadRuns();
+      if (runs.length === 0) return 'nothing recorded yet';
+      const blob = new Blob([JSON.stringify(runs)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `overclock-runs-${runs.length}.json`;
+      a.click();
+      return runs.map(describeRun);
+    },
+  };
 }
 
 const linkedSeed = params.get('seed');

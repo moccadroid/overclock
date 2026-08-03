@@ -269,9 +269,9 @@ export function renderResults(world: World, library: Library): string {
     ${wastedLine}${extractLine}
     </div>
     <div class="foot">
-      <button class="btn again" data-action="confirm">RUN AGAIN &nbsp;[ENTER]</button>
-      <button class="btn again" data-action="library">RETURN TO MENU &nbsp;[L / ESC]</button>
+      <button class="btn again" data-action="confirm">AGAIN</button>
+      <button class="btn again" data-action="library">MENU</button>
       <button class="btn again" data-action="save-run">SAVE RUN</button>
-      <span class="dim">${BRANDING.title} · this seed is in the URL — reload to set it up again</span>
+      <span class="dim">${BRANDING.title} · ENTER again · ESC menu · the seed is in the URL</span>
     </div>`;
 }

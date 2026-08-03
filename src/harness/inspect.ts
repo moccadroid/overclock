@@ -16,15 +16,25 @@ import { analyse, report, type Analysis } from '../sim/analyse';
 import type { Recording } from '../sim/record';
 import { RECORDING_VERSION } from '../sim/record';
 
-function load(path: string): Recording {
-  const raw = JSON.parse(readFileSync(path, 'utf8')) as Recording;
-  if (raw.version !== RECORDING_VERSION) {
-    process.stderr.write(
-      `warning: ${path} is format v${raw.version}, this build reads v${RECORDING_VERSION}. ` +
-        `A tunable change invalidates old recordings — expect a divergence.\n`,
-    );
+/**
+ * One recording or a whole session's worth.
+ *
+ * The in-game rolling window exports as an array, and asking somebody to split
+ * it up before it can be read would be a chore invented for no reason.
+ */
+function load(path: string): Recording[] {
+  const raw = JSON.parse(readFileSync(path, 'utf8')) as Recording | Recording[];
+  const list = Array.isArray(raw) ? raw : [raw];
+  for (const r of list) {
+    if (r.version !== RECORDING_VERSION) {
+      process.stderr.write(
+        `warning: ${path} holds format v${r.version}, this build reads v${RECORDING_VERSION}. ` +
+          `A tunable change invalidates old recordings — expect a divergence.\n`,
+      );
+      break;
+    }
   }
-  return raw;
+  return list;
 }
 
 /**
@@ -72,7 +82,7 @@ if (files.length === 0) {
   process.exit(1);
 }
 
-const analyses = files.map((f) => analyse(load(f)));
+const analyses = files.flatMap((f) => load(f).map(analyse));
 
 if (asPool) {
   process.stdout.write(`${pool(analyses)}\n`);

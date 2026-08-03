@@ -18,6 +18,7 @@ import {
 import { Input } from './input';
 import { NO_INPUT, World, type RunConfig } from '../sim/world';
 import { Recorder, type Recording } from '../sim/record';
+import { keepRun } from '../meta/runstore';
 import { SIM_DT } from '../sim/tunables';
 import { VISUAL } from './visual';
 import { Library } from '../meta/profile';
@@ -199,6 +200,11 @@ export class Game {
       // Leaving a run deliberately, rather than by dying. Two clicks, because a
       // misclick here throws away twenty minutes.
       if (this.confirmQuit) {
+        // Kept on the way out. A run somebody abandoned is often the most
+        // informative one in the window — nobody quits a run that is going well.
+        if (this.recorder.length > 0) {
+          keepRun({ ...this.recorder.finish(this.world), startedAt: Date.now() });
+        }
         location.href = location.pathname;
         return;
       }
@@ -518,7 +524,12 @@ export class Game {
       time: this.world.time,
     });
 
-    this.recording = this.recorder.finish(this.world);
+    // §14 — kept without being asked for. The run worth looking at is always the
+    // one nobody thought to save, and the wall-clock stamp goes on here because
+    // the sim may never read a clock.
+    this.recording = { ...this.recorder.finish(this.world), startedAt: Date.now() };
+    keepRun(this.recording);
+
     this.message.showResults(this.world, this.library, (cmd) => this.onCommand(cmd));
   }
 

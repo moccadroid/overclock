@@ -673,13 +673,13 @@ export class Renderer {
     g.stroke({
       width: 1,
       color: PALETTE.structure,
-      alpha: BAND.structure * (0.75 + load * 0.9) * (1 + pulse * 0.34),
+      alpha: BAND.structure * (0.75 + load * 0.9) * (1 + pulse * 0.85),
     });
 
     g.rect(0, 0, arena.width, arena.height).stroke({
       width: 2,
       color: PALETTE.structure,
-      alpha: BAND.structure * 1.6 * (1 + pulse * 0.22),
+      alpha: BAND.structure * 1.6 * (1 + pulse * 0.5),
     });
   }
 
