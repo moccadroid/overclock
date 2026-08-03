@@ -8,7 +8,7 @@ import { botInput } from '../harness/bot';
 import { applyDraft, purgeCard, rollDraft } from './draft';
 import { inertFields } from './engine';
 import { NODE_BY_ID } from '../content/index';
-import { hypot } from './num';
+import { atan2 as patan2, cos as pcos, hypot, pow as ppow, sin as psin } from './num';
 
 /** Run with the harness pilot, which actually collects XP. */
 function runPiloted(world: World, seconds: number): void {
@@ -20,8 +20,8 @@ function runPiloted(world: World, seconds: number): void {
 function scriptedInput(tick: number): InputState {
   const t = tick * SIM_DT;
   return {
-    moveX: Math.cos(t * 0.7),
-    moveY: Math.sin(t * 0.45),
+    moveX: pcos(t * 0.7),
+    moveY: psin(t * 0.45),
     dash: tick % 300 === 0,
     interact: false,
   };
@@ -678,7 +678,7 @@ describe('runaway containment and arena legibility', () => {
       for (const e of w.enemies) {
         if (seen.has(e.id)) continue;
         seen.add(e.id);
-        const angle = Math.atan2(e.y - w.player.y, e.x - w.player.x);
+        const angle = patan2(e.y - w.player.y, e.x - w.player.x);
         quadrants.add(Math.floor(((angle + Math.PI) / (Math.PI * 2)) * 8) % 8);
         counted++;
       }
@@ -890,8 +890,8 @@ describe('the action roster (GDD §5.4)', () => {
     const before = w.budget.heat;
     void before;
     // Output falls off geometrically with depth.
-    const atZero = Math.pow(TUNABLE.cascadeOutputFalloff, 0);
-    const atFive = Math.pow(TUNABLE.cascadeOutputFalloff, 5);
+    const atZero = ppow(TUNABLE.cascadeOutputFalloff, 0);
+    const atFive = ppow(TUNABLE.cascadeOutputFalloff, 5);
     expect(atFive).toBeLessThan(atZero * 0.6);
     // Cost climbs linearly with depth.
     const costAtFive = compiled.cycleCost * (1 + 5 * TUNABLE.cascadeCostGrowth);
@@ -941,13 +941,25 @@ describe('the action roster (GDD §5.4)', () => {
     const w = rig('beam', 'beam');
     const line: number[] = [];
     // Spaced to sit inside Beam's range, so this tests the line-hit rather than
-    // the reach.
+    // the reach. Base range is 300 now, down from 520 (see actions.json),
+    // so the spacing came down with it.
     for (let i = 1; i <= 5; i++) {
-      const e = w.spawnEnemy('bulwark', w.player.x + i * 85, w.player.y, 'thermal')!;
+      const e = w.spawnEnemy('bulwark', w.player.x + i * 52, w.player.y, 'thermal')!;
+      // Frozen. They converge on the player otherwise, and two seconds of that
+      // leaves them in a clump rather than on a line — which tests the chase
+      // rather than the beam. Before the range cut the spacing was wide enough
+      // to hide it; it is not a change in what the beam does.
+      e.speedScale = 0;
       line.push(e.id);
     }
     for (let i = 0; i < 120; i++) w.advance(NO_INPUT);
-    const damaged = w.enemies.filter((e) => line.includes(e.id) && e.hp < e.maxHp).length;
+    // Killed counts as damaged: at close spacing the beam finishes some of
+    // them outright, and a corpse is not evidence the beam missed.
+    const alive = new Map(w.enemies.map((e) => [e.id, e]));
+    const damaged = line.filter((id) => {
+      const e = alive.get(id);
+      return !e || !e.alive || e.hp < e.maxHp;
+    }).length;
     expect(damaged).toBeGreaterThanOrEqual(4);
   });
 

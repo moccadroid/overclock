@@ -78,6 +78,13 @@ const HUE_COLOUR: Record<Hue, number> = { thermal: 1, voltaic: 1.45, void: 0.7 }
 
 /** §18 — techno moves in 16-bar phrases. Everything automated rides this. */
 const PHRASE_BARS = 16;
+/**
+ * How many bars before the melodic material is reselected. Two phrases at 112
+ * BPM is a little over a minute — long enough that the line is a hook rather
+ * than a tour of the library, short enough that nobody sits through the same
+ * two motifs for eleven minutes, which is exactly what one recorded run did.
+ */
+const VARY_BARS = 32;
 
 /**
  * **There is no saturation stage in this graph, and there must never be one.**
@@ -247,6 +254,11 @@ export class Audio {
   private pendingPlan: Arrangement | null = null;
   /** Set by `beginRun`; makes the next `setEngine` skip the phrase boundary. */
   private freshRun = true;
+  /** §18.1 — which pass through the material the soundtrack is on. */
+  private variation = 0;
+  private lastVaryBar = 0;
+  /** The last Engine handed over, so the variation timer can re-arrange it. */
+  private lastInput: ArrangeInput | null = null;
   private cells = compile(openingArrangement('ignition'));
   /** Bars elapsed, for walking the progression. */
   private bar = 0;
@@ -544,7 +556,21 @@ export class Audio {
    * really did.
    */
   setEngine(input: ArrangeInput): void {
-    const next = arrange(input);
+    // Remembered so the variation timer can re-arrange the same Engine without
+    // the caller having to hand it over again.
+    this.lastInput = input;
+    const next = arrange({
+      ...input,
+      variation: this.variation,
+      // What is playing right now, so a variation pass moves off it rather than
+      // reselecting the same cell and calling it a change.
+      avoid: {
+        motif: this.plan.motif.id,
+        bass: this.plan.bass.id,
+        stab: this.plan.stab.id,
+        hats: this.plan.hats.id,
+      },
+    });
     if (next.signature === this.plan.signature && next.harmony.id === this.plan.harmony.id) return;
     // The first arrangement of a run lands immediately; every later one waits
     // for a phrase boundary. The bar counter cannot stand in for "first" — it
@@ -553,6 +579,25 @@ export class Audio {
     if (this.freshRun) this.adopt(next);
     else this.pendingPlan = next;
     this.freshRun = false;
+  }
+
+  /**
+   * §18.1 — move the line on, on a timer.
+   *
+   * Called once a bar. Every `VARY_BARS` it bumps the variation counter and asks
+   * for a fresh arrangement of the *same* Engine: new motif, new bassline, new
+   * stab, new chord sequence within the same mood — same kit, same key, same
+   * groove. That is how the genre stays hypnotic without becoming a loop you can
+   * hear the seams of, and it is the fix for a run whose music stopped
+   * developing three minutes before it ended.
+   */
+  private maybeVary(): void {
+    if (!this.lastInput) return;
+    if (this.bar === this.lastVaryBar) return;
+    if (this.bar - this.lastVaryBar < VARY_BARS) return;
+    this.lastVaryBar = this.bar;
+    this.variation++;
+    this.setEngine(this.lastInput);
   }
 
   /**
@@ -743,6 +788,7 @@ export class Audio {
       this.bar = Math.floor(count / 16);
       // A new arrangement lands on a phrase boundary and nowhere else.
       if (this.pendingPlan && this.bar % PHRASE_BARS === 0) this.adopt(this.pendingPlan);
+      this.maybeVary();
     }
     const tones = this.chordTones();
     this.tones = tones;
@@ -821,11 +867,18 @@ export class Audio {
       }
     }
 
-    // The motif: one or two bars, repeated unchanged. The hook is repetition,
-    // not development — so it arrives on a phrase boundary and then never varies.
-    const motifStep = step(cells.motif, count);
+    // The motif: one or two bars, and the hook is repetition rather than
+    // development — but *unchanged for sixteen bars* is not repetition, it is a
+    // loop, and it was audible as one. So the back half of every phrase answers
+    // the front half an octave up, and the last two bars of a phrase drop the
+    // lead entirely. Same line, three shapes: statement, answer, silence. That
+    // is the smallest amount of arrangement that stops a hook from wearing out,
+    // and it costs nothing but a transposition.
+    const answering = phrase >= 0.5 && phrase < 0.875;
+    const resting = phrase >= 0.875;
+    const motifStep = resting ? null : step(cells.motif, count);
     if (motifStep && !motifStep.hold && (phrase > 0.48 || i > 0.65)) {
-      const hz = semiHz(tone(tones, motifStep) + 24);
+      const hz = semiHz(tone(tones, motifStep) + (answering ? 36 : 24));
       motif(music, swung, hz, 0.9, plan.leadVoice, this.lastLeadHz);
       if (plan.echo > 0.01) motif(this.voice(this.echoSend), swung, hz, 0.9, plan.leadVoice);
       this.lastLeadHz = hz;

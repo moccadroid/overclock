@@ -166,6 +166,17 @@ export const TUNABLE = {
    * routine tidy-up — it should almost never be visible.
    */
   pickupSoftCap: 700,
+  /**
+   * §7.3 The Magnet — the rare drop that sweeps every shard on the map.
+   *
+   * The pair of numbers is a cadence, not odds: the cooldown sets how often one
+   * *can* exist, the chance decides how long after that it takes to actually
+   * fall. Forty seconds and 2% means roughly one a minute in ordinary play, and
+   * — because the cooldown is wall-clock rather than per-kill — still roughly
+   * one a minute when the Engine is deleting two thousand enemies a second.
+   */
+  magnetCooldown: 40,
+  magnetDropChance: 0.02,
   /** Radius within which drops of the same kind merge. Local, so piles keep their shape. */
   consolidateRadius: 90,
   consolidateInterval: 0.6,

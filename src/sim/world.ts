@@ -14,7 +14,7 @@ import { CycleBudget } from './cycles';
 import { DiscoveryTracker } from './discoveries';
 import { Engine, type FireContext, type Program } from './engine';
 import { LOADBEARING, SAFETY, SIM_DT, TUNABLE } from './tunables';
-import { hypot } from './num';
+import { atan2 as patan2, cos as pcos, hypot, pow as ppow, sin as psin } from './num';
 import {
   HUES,
   type ActionDef,
@@ -120,7 +120,18 @@ export interface Projectile extends SpatialItem {
   siphon: number;
 }
 
-export type PickupKind = 'xp';
+/**
+ * §7.3 — what falls on the floor.
+ *
+ * `xp` is the ordinary drop. `magnet` is the rare one: picking it up sweeps
+ * every XP shard on the map into you at once, wherever it is. It exists because
+ * walking over shards one at a time is the least interesting thing in the game,
+ * and the two obvious fixes are both worse — a bigger collect radius makes the
+ * shards meaningless, and an automatic sweep on level-up makes them invisible.
+ * A rare, loud, worth-crossing-the-arena-for object keeps the pickup a
+ * *decision* while removing the tedium.
+ */
+export type PickupKind = 'xp' | 'magnet';
 
 export interface Pickup extends SpatialItem {
   id: number;
@@ -411,6 +422,8 @@ export interface RunStats {
   peakEps: number;
   peakConcurrentEnemies: number;
   overheats: number;
+  /** Magnets collected. A run\'s XP tedium, counted. */
+  magnets: number;
   damageTaken: number;
   beaconsChannelled: number;
   converts: number;
@@ -485,7 +498,7 @@ export class World {
    * to the others, which is what makes taking one a decision about the build you
    * are in rather than a number that always goes up.
    */
-  bonuses = { crit: 0, magnet: 0, speed: 0, power: 0, travels: 0, area: 0, lingers: 0 };
+  bonuses = { crit: 0, magnet: 0, speed: 0, power: 0, travels: 0, area: 0, lingers: 0, reach: 0 };
 
   /** Class-stat multipliers, read at the point of use so they cannot go stale. */
   get areaMul(): number {
@@ -494,6 +507,18 @@ export class World {
 
   get durationMul(): number {
     return 1 + this.bonuses.lingers;
+  }
+
+  /**
+   * How far anything of yours reaches, as a multiplier.
+   *
+   * Base ranges are deliberately short now — shorter than the screen, so a kill
+   * you never saw is a rare event rather than the normal case. Reach is how you
+   * buy that back, and it is the one axis of power the draft can hand out that
+   * changes *where you have to stand* rather than how big a number is.
+   */
+  get reachMul(): number {
+    return 1 + this.bonuses.reach;
   }
   /**
    * §14 — a Results screen that cannot say how you died teaches nothing. The
@@ -513,6 +538,8 @@ export class World {
   /** Fractional spawns carried between ticks so the stream is smooth. */
   private refillDebt = 0;
   private consolidateTimer = 0;
+  /** Seconds until another Magnet may drop. See maybeDropMagnet. */
+  private magnetCooldown = 0;
   beaconTimer = 20;
   recompileTimer = 0;
   wardenTimer: number = TUNABLE.wardenInterval;
@@ -557,6 +584,7 @@ export class World {
     peakEps: 0,
     peakConcurrentEnemies: 0,
     overheats: 0,
+    magnets: 0,
     damageTaken: 0,
     beaconsChannelled: 0,
     converts: 0,
@@ -670,6 +698,7 @@ export class World {
     this.releasePendingBursts();
     this.updatePickups(dt);
     this.consolidatePickups(dt);
+    if (this.magnetCooldown > 0) this.magnetCooldown = Math.max(0, this.magnetCooldown - dt);
     this.updateFx(dt);
     this.updateTerminals(input, dt);
     this.updateMeltdown(dt);
@@ -699,7 +728,7 @@ export class World {
     // Smoothed, so the HUD shows a depth you can read rather than a per-tick
     // number that flickers. This is the number Heat is *caused by*, and showing
     // it beside the gauge is the whole point of moving Heat onto depth.
-    const depthDecay = Math.pow(0.5, dt / 0.6);
+    const depthDecay = ppow(0.5, dt / 0.6);
     this.depthAverage =
       this.depthAverage * depthDecay + this.budget.depthThisTick * (1 - depthDecay);
     if (this.budget.heat > this.stats.peakHeat) this.stats.peakHeat = this.budget.heat;
@@ -896,7 +925,7 @@ export class World {
     for (let n = 0; n < instances; n++) {
       // ...and pays less. Together these let a cascade run wild near its source
       // and run out of steam as it travels, rather than being cut off.
-      const depthFalloff = Math.pow(TUNABLE.cascadeOutputFalloff, depth);
+      const depthFalloff = ppow(TUNABLE.cascadeOutputFalloff, depth);
       const output =
         compiled.ctx.output *
         outputMul *
@@ -991,7 +1020,7 @@ export class World {
       y,
       vx: dx * speed,
       vy: dy * speed,
-      life: def.lifetime ?? 2,
+      life: (def.lifetime ?? 2) * this.reachMul,
       damage,
       pierce: (def.pierce ?? 0) + Math.round(ctx.pierce) + this.bonuses.travels,
       hue,
@@ -1041,7 +1070,7 @@ export class World {
   ): void {
     const def = ACTION_BY_ID.get(actionId)!;
     const jumps = def.jumps ?? 3;
-    const range = def.range ?? 200;
+    const range = (def.range ?? 200) * this.reachMul;
     const hit: number[] = [];
     const points: number[] = [x, y];
     let cx = x;
@@ -1228,7 +1257,7 @@ export class World {
     ctx: FireContext,
     hue: Hue,
   ): void {
-    const range = def.range ?? 800;
+    const range = (def.range ?? 800) * this.reachMul;
     // Farthest, not nearest: the point of a beam is everything on the way.
     let far: Enemy | null = null;
     let farD2 = 0;
@@ -1242,9 +1271,9 @@ export class World {
         far = e;
       }
     }
-    const angle = far ? Math.atan2(far.y - y, far.x - x) : Math.atan2(this.player.dirY, this.player.dirX);
-    const ux = Math.cos(angle);
-    const uy = Math.sin(angle);
+    const angle = far ? patan2(far.y - y, far.x - x) : patan2(this.player.dirY, this.player.dirX);
+    const ux = pcos(angle);
+    const uy = psin(angle);
     const width = (def.beamWidth ?? 12) * Math.max(0.1, (ctx.area * this.areaMul));
 
     for (const e of this.enemies) {
@@ -1369,8 +1398,8 @@ export class World {
         continue;
       }
       o.angle += o.orbitSpeed * dt;
-      o.x = this.player.x + Math.cos(o.angle) * o.orbitRadius;
-      o.y = this.player.y + Math.sin(o.angle) * o.orbitRadius;
+      o.x = this.player.x + pcos(o.angle) * o.orbitRadius;
+      o.y = this.player.y + psin(o.angle) * o.orbitRadius;
 
       for (const [id, until] of o.cooldowns) {
         if (until <= this.time) o.cooldowns.delete(id);
@@ -1547,7 +1576,7 @@ export class World {
     if (share <= 0) return 0;
     // Super-linear in share, so committing beats nibbling — see the note on
     // TUNABLE.kernelShareExponent.
-    const weight = Math.pow(share, TUNABLE.kernelShareExponent);
+    const weight = ppow(share, TUNABLE.kernelShareExponent);
     return Math.min(
       TUNABLE.kernelMaxPercent,
       (TUNABLE.kernelBasePercent + TUNABLE.kernelPercentPerEps * this.outputAverage) * weight,
@@ -1694,7 +1723,7 @@ export class World {
         if (armed) this.testCell(c);
       } else {
         const t = Math.min(1, Math.max(0, (c.age - c.telegraph) / TUNABLE.nullFrontDuration));
-        c.advance = TUNABLE.nullFrontDepth * Math.sin(t * Math.PI);
+        c.advance = TUNABLE.nullFrontDepth * psin(t * Math.PI);
         if (armed) this.testNullFront(c);
       }
     }
@@ -1787,7 +1816,7 @@ export class World {
     const d = hypot(dx, dy);
     if (Math.abs(d - c.radius) > 20 + TUNABLE.playerRadius) return;
     // Standing in one of the cage's gaps is how you get out.
-    const angle = Math.atan2(dy, dx);
+    const angle = patan2(dy, dx);
     for (const gap of c.gapAngles) {
       if (Math.abs(angleDelta(angle, gap)) < 0.34) return;
     }
@@ -1854,8 +1883,8 @@ export class World {
 
     for (let i = 0; i < TUNABLE.spawnCandidates; i++) {
       const angle = offset + (i / TUNABLE.spawnCandidates) * Math.PI * 2;
-      const x = clamp(this.player.x + Math.cos(angle) * dist, 30, this.arena.width - 30);
-      const y = clamp(this.player.y + Math.sin(angle) * dist, 30, this.arena.height - 30);
+      const x = clamp(this.player.x + pcos(angle) * dist, 30, this.arena.width - 30);
+      const y = clamp(this.player.y + psin(angle) * dist, 30, this.arena.height - 30);
       // How far outside the nominal view this lands. Positive means off-screen.
       const hidden = Math.max(
         Math.abs(x - this.player.x) - halfW,
@@ -1863,7 +1892,7 @@ export class World {
       );
       if (hidden > 0) {
         // When biasing forward, only keep candidates roughly ahead of travel.
-        if (!forward || (Math.cos(angle) * fx + Math.sin(angle) * fy) > 0.25) {
+        if (!forward || (pcos(angle) * fx + psin(angle) * fy) > 0.25) {
           viable.push({ x, y });
         }
       }
@@ -1882,8 +1911,8 @@ export class World {
     for (let attempt = 0; attempt < 12; attempt++) {
       const angle = this.rng.next() * Math.PI * 2;
       const dist = this.rng.range(minDist, maxDist);
-      const x = clamp(this.player.x + Math.cos(angle) * dist, 60, this.arena.width - 60);
-      const y = clamp(this.player.y + Math.sin(angle) * dist, 60, this.arena.height - 60);
+      const x = clamp(this.player.x + pcos(angle) * dist, 60, this.arena.width - 60);
+      const y = clamp(this.player.y + psin(angle) * dist, 60, this.arena.height - 60);
       if (!this.insideRuin(x, y, 40)) return { x, y };
     }
     return { x: this.arena.spawnX, y: this.arena.spawnY };
@@ -2059,6 +2088,7 @@ export class World {
     const bonus = enemy.enriched ? 1 + TUNABLE.beaconDropBonus : 1;
 
     this.dropPickup('xp', enemy.x, enemy.y, enemy.hue, def.xp * bonus);
+    this.maybeDropMagnet(enemy.x, enemy.y);
 
     // §10.3 Volatile — a telegraphed death explosion.
     if (enemy.affixes.includes('volatile')) {
@@ -2080,8 +2110,8 @@ export class World {
         const a = (i / def.splitsInto.count) * Math.PI * 2;
         const child = this.spawnEnemy(
           def.splitsInto.enemy,
-          enemy.x + Math.cos(a) * 24,
-          enemy.y + Math.sin(a) * 24,
+          enemy.x + pcos(a) * 24,
+          enemy.y + psin(a) * 24,
           enemy.hue,
         );
         if (child) child.enriched = enemy.enriched;
@@ -2320,9 +2350,9 @@ export class World {
         //  1. a slow weave, phase-offset per enemy, so paths differ
         //  2. separation from neighbours, so they spread instead of stacking
         //  3. a personal speed, so a group does not arrive as one rank
-        const weave = Math.sin(this.time * TUNABLE.weaveRate + e.wobble) * TUNABLE.weaveAmount;
-        const cos = Math.cos(weave);
-        const sin = Math.sin(weave);
+        const weave = psin(this.time * TUNABLE.weaveRate + e.wobble) * TUNABLE.weaveAmount;
+        const cos = pcos(weave);
+        const sin = psin(weave);
         let vx = sx * cos - sy * sin;
         let vy = sx * sin + sy * cos;
 
@@ -2427,7 +2457,7 @@ export class World {
     const dx = goalX - e.x;
     const dy = goalY - e.y;
     const len = hypot(dx, dy) || 1;
-    e.facing = Math.atan2(dy, dx);
+    e.facing = patan2(dy, dx);
     e.vx = (dx / len) * def.speed;
     e.vy = (dy / len) * def.speed;
     e.x += e.vx * dt;
@@ -2435,7 +2465,8 @@ export class World {
     this.resolveRuins(e, e.radius);
 
     // Eat anything it reaches.
-    if (target && bestD2 < (e.radius + 10) ** 2) {
+    const eat = e.radius + 10;
+    if (target && bestD2 < eat * eat) {
       target.alive = false;
       e.meals++;
       const growth = 1 + (def.growthPerMeal ?? 0.1);
@@ -2496,15 +2527,15 @@ export class World {
       if (e.beamTimer <= 0 && this.chargingLancers < TUNABLE.maxChargingLancers) {
         e.beamTimer = (def.windup ?? 0.9) + 2.4;
         e.beamActive = def.windup ?? 0.9;
-        e.facing = Math.atan2(dy, dx);
+        e.facing = patan2(dy, dx);
         this.chargingLancers++;
       }
     }
 
     // Fires at the end of the telegraph, along the aim drawn at the start.
     if (e.beamActive > 0 && e.beamActive - dt <= 0) {
-      const ux = Math.cos(e.facing);
-      const uy = Math.sin(e.facing);
+      const ux = pcos(e.facing);
+      const uy = psin(e.facing);
       const px = this.player.x - e.x;
       const py = this.player.y - e.y;
       const along = px * ux + py * uy;
@@ -2596,8 +2627,8 @@ export class World {
         // counter is to flank it, or to use something that is not a projectile.
         const shield = getEnemy(enemy.defId).shieldArc;
         if (shield) {
-          const incoming = Math.atan2(proj.y - enemy.y, proj.x - enemy.x);
-          const facing = Math.atan2(this.player.y - enemy.y, this.player.x - enemy.x);
+          const incoming = patan2(proj.y - enemy.y, proj.x - enemy.x);
+          const facing = patan2(this.player.y - enemy.y, this.player.x - enemy.x);
           if (Math.abs(angleDelta(incoming, facing)) < shield / 2) {
             proj.alive = false;
             this.pushFx('burst', enemy.hue, proj.x, proj.y, 14, [], 0.1);
@@ -2736,13 +2767,63 @@ export class World {
 
       if (d < TUNABLE.playerRadius + 6) {
         item.alive = false;
-        {
-          this.gainXp(item.value);
-        }
+        if (item.kind === 'magnet') this.sweepShards();
+        else this.gainXp(item.value);
         this.cue('pickup', item.hue, 0, item.kind === 'xp' ? 0.3 : 0.2);
         this.emit({ type: 'pickup', depth: 0, x: p.x, y: p.y, hue: item.hue });
       }
     }
+  }
+
+  /**
+   * Roll for a Magnet on a kill.
+   *
+   * A flat per-kill chance cannot work here, and that is worth spelling out: an
+   * ordinary early minute is forty kills, and a late one measured **31,744 kills
+   * in eleven minutes**. Any chance rare enough to be special at minute eleven
+   * is a chance you will never see at minute one, and vice versa. So the roll is
+   * gated on time instead — never two at once, never within `magnetCooldown` of
+   * the last one, and then a low chance per kill. That makes the *cadence* the
+   * tunable rather than the odds, and it behaves the same at 4 EPS and 2,000.
+   */
+  private maybeDropMagnet(x: number, y: number): void {
+    if (this.magnetCooldown > 0) return;
+    if (!this.rng.chance(TUNABLE.magnetDropChance)) return;
+    for (const item of this.pickups) {
+      if (item.alive && item.kind === 'magnet') return;
+    }
+    this.magnetCooldown = TUNABLE.magnetCooldown;
+    this.dropPickup('magnet', x, y, 'voltaic', 1);
+  }
+
+  /**
+   * The Magnet, collected: every XP shard on the map, at once.
+   *
+   * One `gainXp` for the total rather than one per shard, because the sum is the
+   * only thing that differs and a thousand separate calls would fire a thousand
+   * level checks. The shards still die individually, and each one still emits —
+   * On Pickup builds get the whole burst, which is the loudest moment the
+   * trigger will ever have and exactly the point of it.
+   */
+  private sweepShards(): void {
+    let total = 0;
+    let swept = 0;
+    for (const item of this.pickups) {
+      if (!item.alive || item.kind !== 'xp') continue;
+      item.alive = false;
+      total += item.value;
+      swept++;
+      // Bounded: a screen carrying eight hundred shards would otherwise emit
+      // eight hundred cascade roots in one tick, which is the shape of the
+      // freeze that `bigEvent` was capped for.
+      if (swept <= 24) {
+        this.emit({ type: 'pickup', depth: 0, x: item.x, y: item.y, hue: item.hue });
+      }
+    }
+    if (total > 0) this.gainXp(total);
+    this.stats.magnets++;
+    this.pushFx('burst', 'voltaic', this.player.x, this.player.y, 420, [], 0.5);
+    this.cue('pickup', 'voltaic', 0, 1);
   }
 
   /**
@@ -3117,8 +3198,8 @@ export class World {
       value,
       x,
       y,
-      vx: Math.cos(a) * s,
-      vy: Math.sin(a) * s,
+      vx: pcos(a) * s,
+      vy: psin(a) * s,
       age: 0,
       alive: true,
     });
@@ -3137,7 +3218,7 @@ export class World {
       this.mark('level', `level ${this.level}`);
       // level 2 costs xpBase, and the curve compounds from there. Level 1's cost
       // was set separately in the constructor.
-      this.xpToNext = Math.ceil(TUNABLE.xpBase * Math.pow(TUNABLE.xpGrowth, this.level - 2));
+      this.xpToNext = Math.ceil(TUNABLE.xpBase * ppow(TUNABLE.xpGrowth, this.level - 2));
       if (this.stats.firstLevelTime === 0) this.stats.firstLevelTime = this.time;
       if (this.pendingDrafts < TUNABLE.maxQueuedDrafts) this.pendingDrafts++;
     }
@@ -3196,7 +3277,7 @@ export class World {
     if (this.eps > this.stats.peakEps) this.stats.peakEps = this.eps;
     // §9.1 — recent average output of the live Engine. Decays when the Engine
     // goes quiet, which is what makes Recompile timing a decision.
-    const outputDecay = Math.pow(0.5, dt / TUNABLE.kernelAverageHalfLife);
+    const outputDecay = ppow(0.5, dt / TUNABLE.kernelAverageHalfLife);
     this.outputAverage = this.outputAverage * outputDecay + this.eps * (1 - outputDecay);
     this.peakOutputAverage = Math.max(this.peakOutputAverage, this.outputAverage);
     if (this.enemies.length > this.stats.peakConcurrentEnemies) {
@@ -3217,7 +3298,7 @@ export class World {
     // Per-row EPS attribution for the editor readout (§19.6): an exponential
     // moving average with a 2s half-life, so "share of total EPS" reacts fast
     // enough that a player can see a row go dead.
-    const decay = Math.pow(0.5, dt / 2);
+    const decay = ppow(0.5, dt / 2);
     for (const p of this.engine.programs) {
       p.recentEvents = p.recentEvents * decay + (p.tickEvents / dt) * (1 - decay);
       p.tickEvents = 0;

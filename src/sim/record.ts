@@ -39,8 +39,14 @@ import { hashWorld } from './hash';
 import { applyDraft, purgeCard, rollDraft, type DraftCard } from './draft';
 import type { NodeSlot } from './engine';
 
-/** Bumped whenever the format or anything a replay depends on changes. */
-export const RECORDING_VERSION = 2;
+/**
+ * Bumped whenever the format or anything a replay depends on changes.
+ *
+ * 3: the sim stopped calling Math.sin/cos/pow/atan2 and started using the
+ * portable ones in num.ts. Every number in the game moved in its last bits, so
+ * every v2 recording now describes a run this build cannot reproduce.
+ */
+export const RECORDING_VERSION = 3;
 
 /**
  * Everything that changes the world other than time passing.

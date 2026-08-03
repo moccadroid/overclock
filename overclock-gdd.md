@@ -185,6 +185,12 @@ Every Action has a **hue affinity** (Thermal / Voltaic / Void — Section 7) tha
 | Convert | — | Exchanges resources per its configuration (7.4) | 2 |
 | Siphon | — | Steals 1 fuel of target's hue on hit | 2 |
 
+### 5.4b Range
+
+**Base ranges are short — shorter than the screen.** A Bolt crosses ~430 units against a visible arena nearly two thousand across; a Beam reaches 300; an Arc jumps 150. Deliberate, and a correction: a recorded run at 2,368 EPS killed most of what it killed off-screen, which turns a bullet-heaven into a spreadsheet with a light show. If the player cannot see it die, it may as well not have been there.
+
+Range is then something you **buy**. The Reach stat (+25% to all of it) is the first source and more should follow — they are the only cards in the game that change *where the player has to stand* rather than how large a number is, which also means they are the only cards with a real trade-off: further away is also alone. The camera gives a little ground as output climbs (16.6), twelve per cent at full tilt and no more.
+
 ### 5.5 Modifier nodes (v1: 14)
 
 Modifiers transform the Action (or the event stream reaching it). **Order matters** — the canonical example, required to work exactly this way:
@@ -917,27 +923,75 @@ Left open intentionally — resolve with design, not silently:
    decision the game is about.
 
    If it is ever built, build it as a *bonus* and never as a requirement, and
-   test it with the music muted before anything else.
+   test it with the music muted before anything else. Reaffirmed after playing
+   the audio-visual sync work: the game reads well without it, so this is the
+   lowest-priority idea in this section rather than the most exciting one.
 
-9. **Chassis — more than one character, combinable with Axioms.** The avatar is
-   now a machine with parts rather than a triangle (16.4), which is the
-   groundwork for this rather than the thing itself.
+9. **The Axiom is the whole character.** Decided, not open: an Axiom is a
+   *character* — starting Program, base stats, and the draft-pool bias — chosen
+   as one thing at Run Setup. There is no separate chassis pick and there will
+   not be one. Two dropdowns where one would do is a worse decision, not a
+   deeper one, and "which body plus which build" is a combinatorial space nobody
+   asked for.
 
-   The idea: pick a chassis at Run Setup alongside the Axiom. The Axiom decides
-   what you are *building*; the chassis decides what you are *flying*. Sketched
-   differences, all of them single numbers that already exist as tunables —
-   faster, more Heat headroom, less headroom but a hotter opening, faster fire,
-   one more Program row from the start.
+   So an Axiom carries three things:
 
-   Two things to resolve before it is scheduled. First, it multiplies the run
-   space by the number of chassis, and 15.1's iron rule says none of them may be
-   a *permanent* upgrade — every chassis must be available from the first run or
-   it is meta progression wearing a hat. Second, a chassis that grants a row is
-   not a sidegrade, it is the strongest card in the game handed out for free at
-   setup; that one probably has to pay elsewhere, hard.
+   - **A starting Program.** The row you begin with (Clock → Bolt, Clock → Arc),
+     which is what it already carried.
+   - **Base stats.** Move speed, Integrity, Cycle capacity, Heat headroom, fire
+     rate, pickup radius — the `CHASSIS` line the pipeline editor already prints.
+     Feedback's -20 Cycle capacity is the first of these and proves the shape.
+   - **Draft bias.** What the pool leans toward, which it also already carried.
 
-   Visually the work is small and mostly done: hull silhouette, thruster shape
-   and core geometry are already drawn from parameters in one function.
+   Sketch of a roster, all sidegrades: balanced; faster but thinner; more Heat
+   headroom; less headroom but a hotter opening; one extra Program row and a
+   hard cost somewhere else.
+
+   Two constraints when this is built. 15.1's iron rule — every Axiom is
+   available from the first run, none of it is meta progression. And the extra
+   row is not a sidegrade unless it pays for itself: a free row is the strongest
+   card in the game handed out at setup.
+
+   Visually the work is done: hull silhouette, thruster and core are drawn from
+   parameters in one function (16.4).
+
+10. **Trigger retune.** On Hit and On Kill are the only triggers that feed
+    themselves, so every strong build in every recorded run routes through one
+    of them. Measured, an 11:41 run: On Dash and On Wound each offered twice and
+    refused twice. The other triggers need a reason to exist that is not "you
+    did not draw On Hit" — On Dash wants a movement build to reward, On Wound
+    wants a reason to take damage, On Wave wants the director's rhythm to be
+    worth playing around.
+
+11. **Cards and drafts.** The offer itself needs a pass. From the same run:
+    **six Program Slots offered and all six refused**, plus Focus x4 and Echo x2.
+    A card the pool keeps handing you and you keep refusing is either mispriced
+    or mis-timed, and an empty row is worthless when one row does 88% of the
+    output. Open questions: should the pool know what you have refused; should
+    upgrades (slot, capacity) be a separate track from nodes; is three cards the
+    right number.
+
+12. **Build escalation.** The curve is too steep at the top. Measured: EPS 5 at
+    1:00, 100 at 3:50, **1,132 at 5:10**, peaking at 2,368 — and the row doing
+    88% of it was `on_crit > split > split > resonate > beam`. Two Splits and a
+    Resonate is a multiplicative loop with nothing growing against it, and Heat
+    does not price it because Split is *wide*, not deep. Either depth stops
+    being the only thing Heat charges for, or width gets its own price.
+
+13. **Map size and POIs.** The arena is one flat field with three terminal types
+    on it, and a recorded run gave the player no reason to go anywhere. It wants
+    to be bigger, and it wants places: things that are worth crossing the map
+    for, things that happen on their own, things that make a corner of the arena
+    different from every other corner. The Magnet (7.3) is the first of these
+    and the cheapest possible version.
+
+14. **A global leaderboard and a daily seed.** Runs already record as config
+    plus a command log, and now replay bit-identically across engines (the
+    portable math in `sim/num.ts`), which is the hard part of a leaderboard
+    nobody can lie to: a submitted run can be *verified* rather than trusted.
+    Firebase is the leaning. Open: what a daily seed does to the Library
+    (unlocks are per-account and would let a late player start stronger on the
+    same seed), and how much of a run must be uploaded.
 
 ---
 
@@ -964,7 +1018,7 @@ Left open intentionally — resolve with design, not silently:
 | The Mirror | Elite that runs a snapshot of the player's own Programs |
 | Scrap | Delete a node/Program for a Cycle refund + permanent output bonus |
 | Discovery | Named in-run achievement; the tutorialization and unlock system |
-| Axiom | Starting Program + draft-pool bias, chosen at Run Setup |
+| Axiom | The character: starting Program, base stats, and draft-pool bias, chosen as one thing at Run Setup |
 
 ---
 

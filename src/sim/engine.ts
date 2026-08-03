@@ -192,24 +192,29 @@ export function inertFields(modifierId: string, actionId: string | null): FireFi
 export type Tag = 'travels' | 'area' | 'lingers';
 
 /**
- * Words, not symbols.
+ * Words, not symbols — and *nouns*, not verbs.
  *
- * This shipped as ▸ ◍ ⧗ and they were terrible: an hourglass at eleven pixels
+ * This shipped as ▸ ◍ ⧗, which were terrible: an hourglass at eleven pixels
  * reads as a loading spinner, and every one of them is a thing you have to be
- * taught. The whole point of the tags was legibility, and a symbol you must
- * learn is strictly worse than a word you already know. The colour carries the
- * grouping; the word carries the meaning.
+ * taught. Then it shipped as "travels / area / lingers", which were still
+ * wrong for a subtler reason: two of them were verbs describing the card, so
+ * they read as flavour rather than as a category. "lingers" in particular says
+ * nothing about *what* lingers or why you'd care.
+ *
+ * A tag names the property the Modifiers key off. So: what does this thing
+ * have — flight, area, or duration. The word is the property; the colour is the
+ * grouping; the tooltip says which Modifiers it unlocks.
  */
 export const TAG_GLYPH: Record<Tag, string> = {
-  travels: 'travels',
+  travels: 'flight',
   area: 'area',
-  lingers: 'lingers',
+  lingers: 'duration',
 };
 
 export const TAG_LABEL: Record<Tag, string> = {
-  travels: 'travels — Pierce and Ricochet work here',
-  area: 'area — Enlarge works here',
-  lingers: 'lingers — Sustain works here',
+  travels: 'flight — it crosses ground, so Pierce and Ricochet work',
+  area: 'area — it covers ground, so Enlarge works',
+  lingers: 'duration — it stays, so Sustain works',
 };
 
 /** Which fire-context field marks each tag. */

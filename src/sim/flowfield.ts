@@ -13,7 +13,10 @@
 import type { ArenaDef } from './types';
 import { hypot } from './num';
 
-const SQRT2 = Math.SQRT2;
+// Written out rather than Math.SQRT2: the spec calls that value
+// implementation-approximated too, and this file is inside the determinism
+// boundary. See num.ts.
+const SQRT2 = 1.4142135623730951;
 
 /** 8-neighbour offsets with their step costs. */
 const NEIGHBOURS: readonly [number, number, number][] = [

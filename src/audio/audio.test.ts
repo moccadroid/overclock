@@ -31,20 +31,56 @@ describe('audio never touches the simulation (GDD §0, §18)', () => {
     }
   });
 
-  it('src/sim does not use Math.hypot', () => {
+  it('src/sim uses no implementation-approximated Math function', () => {
     // Not an audio concern, but the same shape of rule and the same file guards
     // it: a constraint that only holds while somebody remembers is not a
     // constraint.
     //
-    // `Math.hypot` is implementation-approximated — engines are free to return
-    // different bits and they do. A run recorded in Chrome and replayed in Node
-    // diverged after thirty seconds because of it: enemy positions drifted by
-    // ~1e-8 per step until one crossed a contact radius a tick early, and from
-    // there it was a different run. `Math.sqrt` is IEEE-exact, so `num.ts`
-    // spells the arithmetic out instead.
+    // ECMA-262 lets an engine return whatever it likes from these, within a
+    // tolerance, and engines use that freedom. Two recordings caught it in this
+    // project: `Math.hypot` (Chrome vs Node, diverged at 0:30) and then
+    // `Math.sin`/`Math.cos` (diverged at tick 3120 of an 11:41 run). `pow` and
+    // `atan2` agreed between the two runtimes measured, which is luck rather
+    // than a guarantee, so they are banned on the same grounds.
+    //
+    // What is left in here is the exact set: + - * /, sqrt, and the operations
+    // that are integer arithmetic in disguise. See sim/num.ts.
+    const banned = [
+      'Math.hypot',
+      'Math.sin',
+      'Math.cos',
+      'Math.tan',
+      'Math.atan',
+      'Math.asin',
+      'Math.acos',
+      'Math.pow',
+      'Math.exp',
+      'Math.log',
+      'Math.cbrt',
+      'Math.sinh',
+      'Math.cosh',
+      'Math.tanh',
+      'Math.SQRT2',
+      'Math.SQRT1_2',
+      'Math.LN2',
+      'Math.LN10',
+      'Math.LOG2E',
+      'Math.LOG10E',
+      'Math.E',
+      '**',
+    ];
     for (const [file, src] of sourcesIn('src/sim')) {
-      if (file === 'num.ts') continue;
-      expect(src.includes('Math.hypot'), `${file} uses Math.hypot — see sim/num.ts`).toBe(false);
+      // num.ts is the implementation; num.test.ts is what proves it agrees with
+      // the platform, which it cannot do without calling the platform.
+      if (file === 'num.ts' || file === 'num.test.ts') continue;
+      // Comments are allowed to name them — that is how the rule explains
+      // itself. Only code counts.
+      const code = src
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/(^|[^:])\/\/.*$/gm, '$1');
+      for (const name of banned) {
+        expect(code.includes(name), `${file} uses ${name} — see sim/num.ts`).toBe(false);
+      }
     }
   });
 

@@ -46,6 +46,23 @@ export interface ArrangeInput {
   rows: EngineRow[];
   /** 0..1, smoothed. Drives how much arrangement the run has earned. */
   intensity: number;
+  /**
+   * Which pass through the material this is. Bumped on a timer by the audio
+   * layer; every increment reselects the *melodic* cells and leaves the kit,
+   * the key and the groove alone.
+   *
+   * It exists because of an eleven-minute run where the Engine stopped changing
+   * at 8:18 and so did the music. An arrangement keyed only to the build stops
+   * developing the moment the build is finished — which is exactly when the
+   * player has attention spare to listen to it. Techno repeats; it does not
+   * repeat *forever*. It swaps the line every so many bars and keeps the kit.
+   */
+  variation?: number;
+  /**
+   * The melodic cells currently playing, so a variation pass can move off them.
+   * Handed over by the audio layer from the plan it is already running.
+   */
+  avoid?: { motif?: string; bass?: string; stab?: string; hats?: string };
 }
 
 export interface Arrangement {
@@ -155,6 +172,18 @@ function pick<T extends { id: string; energy: number }>(
   candidates: readonly T[],
   want: Want,
   seed: number,
+  /**
+   * Cell ids this pass should move away from, and how hard.
+   *
+   * Nine motifs in the library and a run that heard two of them: the jitter
+   * below is deliberately too small to overrule a real preference, which also
+   * makes it too small to ever pick anything else. Rather than raise it — and
+   * start getting cells that do not fit the build — a variation pass says which
+   * cell it just used, and that one takes a penalty big enough to lose a tie it
+   * would otherwise always win. Preference still beats novelty; novelty only
+   * breaks ties.
+   */
+  avoid?: string,
 ): T {
   let best = candidates[0]!;
   let bestScore = -Infinity;
@@ -167,6 +196,7 @@ function pick<T extends { id: string; energy: number }>(
     if (want.feel && c.feel === want.feel) score += 3;
     if (want.space && c.space === want.space) score += 2;
     if (want.register && c.register === want.register) score += 4;
+    if (avoid && cell.id === avoid) score -= 2.5;
     // A deterministic jitter, small enough never to beat a real preference but
     // large enough that two equally good cells do not always resolve the same
     // way for every build in the game.
@@ -194,10 +224,17 @@ function dominantHue(rows: readonly EngineRow[]): ArrangeHue {
 export function arrange(input: ArrangeInput): Arrangement {
   const bias = AXIOM_BIAS[input.axiomId] ?? AXIOM_BIAS.ignition!;
   const rows = input.rows;
+  // The variation counter is part of the signature: `setEngine` refuses a plan
+  // whose signature it already has, so a pass that changed nothing but the
+  // melodic seeds would be silently dropped.
+  const vary = input.variation ?? 0;
   const signature =
-    `${input.axiomId}|` +
+    `${input.axiomId}|v${vary}|` +
     rows.map((r) => `${r.triggerId}:${r.primitive}:${r.hue}:${r.modifiers.join(',')}`).join(';');
   const seed = hash(signature);
+  // The drums keep the *build's* seed, so the kit and the groove are stable for
+  // as long as the Engine is. Everything melodic moves with the variation.
+  const kitSeed = hash(`${input.axiomId}|` + rows.map((r) => `${r.triggerId}:${r.primitive}:${r.hue}`).join(';'));
 
   // Authored cells plus whatever the player has written. Read once, so a cell
   // added mid-audition cannot change the arrangement halfway through building it.
@@ -212,6 +249,22 @@ export function arrange(input: ArrangeInput): Arrangement {
   const size = rows.length;
   const i = input.intensity;
 
+  // What a *section* is, on top of what the build is.
+  //
+  // Reselecting cells with a different seed was not enough on its own: the
+  // energy and space the build asks for narrow the field so hard that only two
+  // motifs in a library of nine were ever plausible, and the pass alternated
+  // between them. So a variation also moves the ask — one section runs a little
+  // denser, the next a little sparser. That is what a section *is* in this
+  // genre, and it opens the library without ever asking for a cell that does
+  // not fit the Engine.
+  const lift = [0, 1, 0, -1][vary % 4] ?? 0;
+  const shiftSpace = (base: Space): Space => {
+    if (lift > 0) return base === 'sparse' ? 'mid' : 'busy';
+    if (lift < 0) return base === 'busy' ? 'mid' : 'sparse';
+    return base;
+  };
+
   // ---- harmony ------------------------------------------------------------
   //
   // Read off what the Engine is *for*. A build that feeds on its own output
@@ -222,9 +275,8 @@ export function arrange(input: ArrangeInput): Arrangement {
     (r) => r.triggerId === 'on_convert' || r.primitive === 'convert',
   );
   const mood = hasConvert ? 'suspended' : hasCascade ? 'driving' : size >= 3 ? 'lifting' : 'dark';
-  const harmony =
-    CELLS.harmonies.filter((h) => h.mood === mood)[seed % Math.max(1, CELLS.harmonies.filter((h) => h.mood === mood).length)] ??
-    CELLS.harmonies[0]!;
+  const inMood = CELLS.harmonies.filter((h) => h.mood === mood);
+  const harmony = inMood[(seed + vary * 3) % Math.max(1, inMood.length)] ?? CELLS.harmonies[0]!;
   const seventhAvailable = harmony.chords.some((c) => c.quality === 'min7');
 
   // ---- drums --------------------------------------------------------------
@@ -240,16 +292,17 @@ export function arrange(input: ArrangeInput): Arrangement {
   const feel: Feel =
     count('accelerate') > 0 ? 'rolling' : count('ricochet') > 0 ? 'broken' : bias.feel;
 
-  const kick = pick(CELLS.kicks, { energy: 1 + Math.min(4, size), feel, space: 'sparse' }, seed);
+  const kick = pick(CELLS.kicks, { energy: 1 + Math.min(4, size), feel, space: 'sparse' }, kitSeed);
   const backbeat = pick(
     CELLS.backbeats,
     { energy: Math.max(1, Math.round(1 + i * 4)), feel },
-    seed + 1,
+    kitSeed + 1,
   );
   const hats = pick(
     CELLS.hats,
-    { energy: Math.max(1, Math.round(1 + i * 4)), feel, space: i > 0.6 ? 'busy' : 'mid' },
+    { energy: Math.max(1, Math.round(1 + i * 4) + lift), feel, space: shiftSpace(i > 0.6 ? 'busy' : 'mid') },
     seed + 2,
+    input.avoid?.hats,
   );
 
   // ---- bass ---------------------------------------------------------------
@@ -269,12 +322,13 @@ export function arrange(input: ArrangeInput): Arrangement {
   const bass = pick(
     CELLS.basslines,
     {
-      energy: Math.max(1, Math.round(1 + i * 3)),
+      energy: Math.max(1, Math.round(1 + i * 3) + lift),
       register: 'low',
-      space: bassSpace,
+      space: shiftSpace(bassSpace),
       seventhAvailable,
     },
     seed + 3,
+    input.avoid?.bass,
   );
 
   // ---- lead and stab ------------------------------------------------------
@@ -287,21 +341,23 @@ export function arrange(input: ArrangeInput): Arrangement {
   const motif = pick(
     CELLS.motifs,
     {
-      energy: Math.max(1, Math.round(1 + i * 3)),
+      energy: Math.max(1, Math.round(1 + i * 3) + lift),
       register: highest === 2 ? 'high' : 'mid',
       // Same ladder the bass uses, for the same reason — and because asking only
       // ever for sparse or mid made every busy motif in the library unreachable.
       // A one-row Engine has room for a two-bar line; a five-row one does not.
-      space: size >= 4 ? 'sparse' : size >= 2 ? 'mid' : 'busy',
+      space: shiftSpace(size >= 4 ? 'sparse' : size >= 2 ? 'mid' : 'busy'),
       seventhAvailable,
     },
     seed + 4,
+    input.avoid?.motif,
   );
 
   const stab = pick(
     CELLS.stabs,
-    { energy: Math.max(1, Math.min(4, size)), space: size >= 4 ? 'sparse' : 'mid' },
+    { energy: Math.max(1, Math.min(4, size) + lift), space: shiftSpace(size >= 4 ? 'sparse' : 'mid') },
     seed + 5,
+    input.avoid?.stab,
   );
 
   // ---- timbre -------------------------------------------------------------

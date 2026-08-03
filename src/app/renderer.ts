@@ -132,6 +132,8 @@ export class Renderer {
   private shakeX = 0;
   private shakeY = 0;
   private jitterSeed = 1;
+  /** §16.6 — how far the camera has pulled back. See updateZoom. */
+  private zoom = 1;
   /** Shared phase for the loot pulse — see drawPickups. Presentation only. */
   private lootPhase = 0;
   /**
@@ -228,17 +230,47 @@ export class Renderer {
     if (this.lights) this.post.setLightTexture(this.lights.source);
   }
 
+  /** Visible world size right now, zoom included. */
+  private get viewW(): number {
+    return this.viewWidth * this.zoom;
+  }
+
+  private get viewH(): number {
+    return VIEW_HEIGHT * this.zoom;
+  }
+
   private get scale(): number {
-    return Math.min(this.app.screen.width / this.viewWidth, this.app.screen.height / VIEW_HEIGHT);
+    return Math.min(this.app.screen.width / this.viewW, this.app.screen.height / this.viewH);
+  }
+
+  /**
+   * §16.6 — the camera gives ground as the Engine takes it.
+   *
+   * A recorded run measured 2,368 EPS with a beam build, and most of what it
+   * killed died off-screen: somewhere around four minutes the arena the player
+   * could see stopped containing the fight. Much shorter base ranges are the
+   * real fix; this is the other half, because an Engine that has drafted Reach
+   * three times has *bought* its reach and should get to watch it work.
+   *
+   * So the view widens with output, and barely: twelve per cent at full tilt,
+   * approached over seconds. Enough that a busy screen breathes, far too little
+   * to read as the camera moving — which it must not, since §16.2's whole
+   * bargain is that the player can always find themselves.
+   */
+  private updateZoom(world: World, dt: number): void {
+    const load = Math.min(1, world.eps / 400);
+    const target = 1 + load * 0.12;
+    this.zoom += (target - this.zoom) * Math.min(1, dt * 0.6);
+    this.camera.setViewSize(this.viewW, this.viewH);
   }
 
   /** Apply the shared world->screen transform to every layer that needs it. */
   private applyTransform(): void {
     const scale = this.scale;
-    const offsetX = (this.app.screen.width - this.viewWidth * scale) / 2 + this.shakeX;
-    const offsetY = (this.app.screen.height - VIEW_HEIGHT * scale) / 2 + this.shakeY;
-    const worldX = this.viewWidth / 2 - this.camera.x;
-    const worldY = VIEW_HEIGHT / 2 - this.camera.y;
+    const offsetX = (this.app.screen.width - this.viewW * scale) / 2 + this.shakeX;
+    const offsetY = (this.app.screen.height - this.viewH * scale) / 2 + this.shakeY;
+    const worldX = this.viewW / 2 - this.camera.x;
+    const worldY = this.viewH / 2 - this.camera.y;
 
     for (const layer of [this.structureLayer, this.worldLayer]) {
       layer.scale.set(scale);
@@ -309,6 +341,7 @@ export class Renderer {
     this.particles.update(frameDt);
     this.lootPhase += frameDt * 3.6;
     this.updateShake(frameDt);
+    this.updateZoom(world, frameDt);
     this.applyTransform();
 
     const heat = Math.min(1, world.budget.heat / 100);
@@ -528,8 +561,15 @@ export class Renderer {
 
     for (const item of world.pickups) {
       if (!item.alive || !this.camera.isVisible(item.x, item.y, 90)) continue;
-      const colour = item.kind === 'xp' ? PALETTE.xp : HUE_COLOR[item.hue];
-      lights.point(item.x, item.y, 48, colour, 0.1);
+      if (item.kind === 'magnet') {
+        // A lighthouse, deliberately. It is the only thing on the floor worth
+        // walking towards, so it should be visible before it is identifiable.
+        const beat = 1 + Math.sin(item.age * 4) * 0.25;
+        lights.point(item.x, item.y, 260 * beat, PALETTE.voltaic, 0.5);
+        lights.point(item.x, item.y, 40, HOT_CORE.voltaic, 0.9);
+        continue;
+      }
+      lights.point(item.x, item.y, 48, PALETTE.xp, 0.1);
     }
 
     // §13.2 — Meltdown lights the whole arena from nowhere, which is the world
@@ -540,10 +580,10 @@ export class Renderer {
     }
 
     const scale = this.scale;
-    const offsetX = (this.app.screen.width - this.viewWidth * scale) / 2 + this.shakeX;
-    const offsetY = (this.app.screen.height - VIEW_HEIGHT * scale) / 2 + this.shakeY;
-    const worldX = this.viewWidth / 2 - this.camera.x;
-    const worldY = VIEW_HEIGHT / 2 - this.camera.y;
+    const offsetX = (this.app.screen.width - this.viewW * scale) / 2 + this.shakeX;
+    const offsetY = (this.app.screen.height - this.viewH * scale) / 2 + this.shakeY;
+    const worldX = this.viewW / 2 - this.camera.x;
+    const worldY = this.viewH / 2 - this.camera.y;
     lights.render(scale, offsetX + worldX * scale, offsetY + worldY * scale, dt);
   }
 
@@ -563,10 +603,10 @@ export class Renderer {
   private emitGlitchFields(world: World): void {
     this.glitchFields.length = 0;
     const scale = this.scale;
-    const offsetX = (this.app.screen.width - this.viewWidth * scale) / 2 + this.shakeX;
-    const offsetY = (this.app.screen.height - VIEW_HEIGHT * scale) / 2 + this.shakeY;
-    const worldX = this.viewWidth / 2 - this.camera.x;
-    const worldY = VIEW_HEIGHT / 2 - this.camera.y;
+    const offsetX = (this.app.screen.width - this.viewW * scale) / 2 + this.shakeX;
+    const offsetY = (this.app.screen.height - this.viewH * scale) / 2 + this.shakeY;
+    const worldX = this.viewW / 2 - this.camera.x;
+    const worldY = this.viewH / 2 - this.camera.y;
 
     for (const e of world.enemies) {
       if (!e.alive) continue;
@@ -1095,37 +1135,50 @@ export class Renderer {
     // at a glance even when the screen is full.
     const pulse = 0.78 + 0.22 * Math.sin(this.lootPhase);
 
-    for (const hue of HUE_ORDER) {
-      const color = HUE_COLOR[hue];
+    // §7.3 The Magnet. The one pickup worth crossing the arena for, so it is the
+    // one pickup allowed to shout: a counter-rotating pair of rings, three
+    // orbiting sparks, and a hot core. Everything about it moves, because every
+    // other object on this layer holds still and breathes on a shared clock —
+    // the tell for "this is not ordinary loot" is motion, not size.
+    for (const item of world.pickups) {
+      if (item.kind !== 'magnet') continue;
+      if (!this.camera.isVisible(item.x, item.y, 60)) continue;
+      const t = item.age;
+      const y = item.y + Math.sin(t * 2.2) * 2.4;
+      const breathe = 1 + Math.sin(t * 4) * 0.09;
 
-      let any = false;
-      for (const item of world.pickups) {
-        if (item.kind === 'xp' || item.hue !== hue) continue;
-        if (!this.camera.isVisible(item.x, item.y, 20)) continue;
-        const y = item.y + Math.sin(item.age * 3.4 + item.id) * 1.8;
-        const s = pickupScale(item.value);
-        const inner = 2.6 * s;
-        const outer = (6.5 + pulse * 1.6) * s;
-        g.moveTo(item.x - outer, y).lineTo(item.x - inner, y);
-        g.moveTo(item.x + inner, y).lineTo(item.x + outer, y);
-        g.moveTo(item.x, y - outer).lineTo(item.x, y - inner);
-        g.moveTo(item.x, y + inner).lineTo(item.x, y + outer);
-        any = true;
+      // Outer ring, spinning one way, drawn as six arcs so the rotation reads.
+      for (let i = 0; i < 6; i += 2) {
+        const a0 = (i / 6) * Math.PI * 2 + t * 1.6;
+        arcSegment(g, item.x, y, 15 * breathe, a0, a0 + Math.PI / 3.4);
       }
-      if (any) g.stroke({ width: 1.4, color, alpha: BAND.inFlight * pulse });
+      g.stroke({ width: 2, color: PALETTE.voltaic, alpha: BAND.entity });
 
-      any = false;
-      for (const item of world.pickups) {
-        if (item.kind === 'xp' || item.hue !== hue) continue;
-        if (!this.camera.isVisible(item.x, item.y, 20)) continue;
-        const y = item.y + Math.sin(item.age * 3.4 + item.id) * 1.8;
-        g.circle(item.x, y, 3.4 * pickupScale(item.value));
-        any = true;
+      // Inner ring, spinning the other.
+      for (let i = 0; i < 6; i += 2) {
+        const a0 = (i / 6) * Math.PI * 2 - t * 2.4;
+        arcSegment(g, item.x, y, 9.5 * breathe, a0, a0 + Math.PI / 2.6);
       }
-      // Band 4, not band 1: §16.2 reserves full luminance for the player alone,
-      // and loot popping is not worth breaking the one rule that lets you find
-      // yourself in chaos.
-      if (any) g.fill({ color, alpha: BAND.entity });
+      g.stroke({ width: 1.5, color: PALETTE.beacon, alpha: BAND.entity });
+
+      // Three sparks in orbit.
+      for (let i = 0; i < 3; i++) {
+        const a = (i / 3) * Math.PI * 2 + t * 3.1;
+        g.circle(item.x + Math.cos(a) * 21, y + Math.sin(a) * 21, 1.9);
+      }
+      g.fill({ color: PALETTE.beacon, alpha: BAND.telegraph });
+
+      // The core, and the radiating spikes that make it read at a distance.
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2 + t * 0.7;
+        const reach = 24 + Math.sin(t * 6 + i) * 4;
+        g.moveTo(item.x + Math.cos(a) * 17, y + Math.sin(a) * 17).lineTo(
+          item.x + Math.cos(a) * reach,
+          y + Math.sin(a) * reach,
+        );
+      }
+      g.stroke({ width: 1, color: PALETTE.voltaic, alpha: BAND.inFlight * pulse });
+      g.circle(item.x, y, 4.5 * breathe).fill({ color: HOT_CORE.voltaic, alpha: BAND.telegraph });
     }
   }
 
@@ -1758,8 +1811,8 @@ export class Renderer {
     const g = this.gIndicators;
     g.clear();
     const margin = 34;
-    const cx = this.viewWidth / 2;
-    const cy = VIEW_HEIGHT / 2;
+    const cx = this.viewW / 2;
+    const cy = this.viewH / 2;
 
     for (const b of world.terminals) {
       if (this.camera.isVisible(b.x, b.y, 0)) continue;
@@ -1786,6 +1839,29 @@ export class Renderer {
           1.4,
         ).fill({ color, alpha: BAND.inFlight });
       }
+    }
+
+    // §7.3 — and the Magnet, which is the only pickup that gets one. A rare
+    // object you never learn about is a rare object that does not exist, and it
+    // lands wherever the kill happened rather than somewhere the designer put
+    // it. The chevron pulses so it cannot be mistaken for a terminal.
+    for (const item of world.pickups) {
+      if (item.kind !== 'magnet' || !item.alive) continue;
+      if (this.camera.isVisible(item.x, item.y, 40)) continue;
+      const dx = item.x - this.camera.x;
+      const dy = item.y - this.camera.y;
+      const angle = Math.atan2(dy, dx);
+      const scale = Math.min(
+        (cx - margin) / Math.max(1e-3, Math.abs(Math.cos(angle))),
+        (cy - margin) / Math.max(1e-3, Math.abs(Math.sin(angle))),
+      );
+      const ix = cx + Math.cos(angle) * scale;
+      const iy = cy + Math.sin(angle) * scale;
+      const beat = 0.6 + 0.4 * Math.sin(item.age * 5);
+
+      polygonPath(g, shapeOutline('triangle', ix, iy, 10 + beat * 3, angle));
+      g.stroke({ width: 2, color: PALETTE.voltaic, alpha: BAND.telegraph });
+      g.circle(ix, iy, 3.5).fill({ color: HOT_CORE.voltaic, alpha: BAND.telegraph * beat });
     }
   }
 

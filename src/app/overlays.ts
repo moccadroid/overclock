@@ -21,7 +21,7 @@ import { MODIFIER_BY_ID, NODE_BY_ID } from '../content/index';
 import type { World } from '../sim/world';
 import { LOADBEARING, TUNABLE } from '../sim/tunables';
 import { ACTION_BY_ID } from '../content/index';
-import { inertFields, slotAccepts, type NodeSlot } from '../sim/engine';
+import { inertFields, slotAccepts, TAG_GLYPH, type NodeSlot } from '../sim/engine';
 import { renderResults } from './results';
 import { renderRunBody } from './pause';
 import type { Library } from '../meta/profile';
@@ -141,7 +141,7 @@ export class DraftOverlay extends Overlay {
       for (const t of info.tags ?? []) {
         const chip = document.createElement('span');
         chip.className = `tagmark t-${t}`;
-        chip.textContent = t;
+        chip.textContent = TAG_GLYPH[t];
         tag.appendChild(chip);
       }
 

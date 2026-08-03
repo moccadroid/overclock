@@ -34,6 +34,7 @@ export type StatKind =
   | 'speed'
   | 'integrity'
   | 'power'
+  | 'reach'
   | 'travels'
   | 'area'
   | 'lingers';
@@ -81,6 +82,22 @@ export const STAT_CARDS: Record<StatKind, { title: string; body: string; apply: 
         w.bonuses.power += 0.08;
       },
     },
+    // §7.x Reach — the stat that moves you.
+    //
+    // Base ranges are short on purpose: a Bolt crosses 430 units and the visible
+    // arena is nearly two thousand across, so an unaugmented Engine kills things
+    // you can see. Reach is how a build buys the screen back, and unlike every
+    // other stat here it changes *where you stand* rather than what a number
+    // says — which makes it the first stat with a downside worth thinking about,
+    // since standing further away is also standing alone.
+    reach: {
+      title: 'Reach',
+      body: '+25% range on everything: shots fly further, beams and chains stretch.',
+      apply: (w) => {
+        w.bonuses.reach += 0.25;
+      },
+    },
+
     integrity: {
       title: 'Plating',
       body: '+25 max Integrity, and repairs that much now.',
@@ -93,7 +110,7 @@ export const STAT_CARDS: Record<StatKind, { title: string; body: string; apply: 
     // ---- the class stats. Worthless to a build that is not focused. --------
     travels: {
       title: 'Ballistics',
-      body: '+1 Pierce and +20% projectile speed on everything that travels.',
+      body: '+1 Pierce and +20% projectile speed on everything with flight.',
       apply: (w) => {
         w.bonuses.travels += 1;
       },
@@ -107,7 +124,7 @@ export const STAT_CARDS: Record<StatKind, { title: string; body: string; apply: 
     },
     lingers: {
       title: 'Half-Life',
-      body: '+30% duration on everything that lingers.',
+      body: '+30% duration on everything that has one.',
       apply: (w) => {
         w.bonuses.lingers += 0.3;
       },

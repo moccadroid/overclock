@@ -8,7 +8,7 @@
     "primitive": "projectile",
     "damage": 10,
     "speed": 430,
-    "lifetime": 2.2,
+    "lifetime": 1,
     "pierce": 0,
     "description": "Single projectile at nearest enemy."
   },
@@ -72,7 +72,7 @@
     "cycleCost": 4,
     "primitive": "beam",
     "damage": 11,
-    "range": 520,
+    "range": 300,
     "beamWidth": 13,
     "description": "Instant line to the farthest enemy in range. Hits everything on the way."
   },
@@ -139,7 +139,7 @@
     "primitive": "projectile",
     "damage": 8,
     "speed": 250,
-    "lifetime": 3,
+    "lifetime": 1.6,
     "seek": 4.5,
     "description": "Releases a mote that hunts on its own and detonates on contact."
   },
@@ -152,7 +152,7 @@
     "primitive": "projectile",
     "damage": 5,
     "speed": 380,
-    "lifetime": 2,
+    "lifetime": 1.2,
     "siphon": 6,
     "description": "Projectile that sheds 6 Heat on hit. Sustained cooling."
   },
@@ -239,7 +239,7 @@
     "primitive": "chain",
     "damage": 7,
     "jumps": 3,
-    "range": 230,
+    "range": 150,
     "description": "Chain lightning, jumps up to 3 targets."
   }
 ]
