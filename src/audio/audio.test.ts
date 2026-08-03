@@ -31,6 +31,23 @@ describe('audio never touches the simulation (GDD §0, §18)', () => {
     }
   });
 
+  it('src/sim does not use Math.hypot', () => {
+    // Not an audio concern, but the same shape of rule and the same file guards
+    // it: a constraint that only holds while somebody remembers is not a
+    // constraint.
+    //
+    // `Math.hypot` is implementation-approximated — engines are free to return
+    // different bits and they do. A run recorded in Chrome and replayed in Node
+    // diverged after thirty seconds because of it: enemy positions drifted by
+    // ~1e-8 per step until one crossed a contact radius a tick early, and from
+    // there it was a different run. `Math.sqrt` is IEEE-exact, so `num.ts`
+    // spells the arithmetic out instead.
+    for (const [file, src] of sourcesIn('src/sim')) {
+      if (file === 'num.ts') continue;
+      expect(src.includes('Math.hypot'), `${file} uses Math.hypot — see sim/num.ts`).toBe(false);
+    }
+  });
+
   it('draining cues leaves the run bit-identical', () => {
     // A world whose cues are consumed every tick and one whose cues pile up must
     // agree exactly — the cue list is derived data, like visualDeaths.

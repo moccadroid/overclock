@@ -11,6 +11,7 @@
  * recomputed on a fixed tick cadence. No wall-clock, no randomness.
  */
 import type { ArenaDef } from './types';
+import { hypot } from './num';
 
 const SQRT2 = Math.SQRT2;
 
@@ -168,7 +169,7 @@ export class FlowField {
             by = dy;
           }
         }
-        const len = Math.hypot(bx, by);
+        const len = hypot(bx, by);
         if (len > 0) {
           this.flow[i * 2] = bx / len;
           this.flow[i * 2 + 1] = by / len;
@@ -203,7 +204,7 @@ export class FlowField {
       }
     }
 
-    const len = Math.hypot(vx, vy);
+    const len = hypot(vx, vy);
     if (len > 1e-4) {
       out.x = vx / len;
       out.y = vy / len;

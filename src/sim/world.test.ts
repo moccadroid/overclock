@@ -8,6 +8,7 @@ import { botInput } from '../harness/bot';
 import { applyDraft, purgeCard, rollDraft } from './draft';
 import { inertFields } from './engine';
 import { NODE_BY_ID } from '../content/index';
+import { hypot } from './num';
 
 /** Run with the harness pilot, which actually collects fuel and XP. */
 function runPiloted(world: World, seconds: number): void {
@@ -86,7 +87,7 @@ describe('the run actually runs', () => {
       if (w.enemies.length > before) {
         for (let j = before; j < w.enemies.length; j++) {
           const e = w.enemies[j]!;
-          const d = Math.hypot(e.x - w.player.x, e.y - w.player.y);
+          const d = hypot(e.x - w.player.x, e.y - w.player.y);
           // Splitter children are allowed to appear near the player; wave spawns
           // come from off-screen edges and are held at the safe radius (§12.2).
           if (e.defId !== 'charger') {
@@ -115,12 +116,12 @@ describe('navigation (GDD §22 — ruins are cover, not walls that trap)', () =>
     w.engine.recompile();
     w.syncBudget();
 
-    const startDistance = Math.hypot(e.x - w.player.x, e.y - w.player.y);
+    const startDistance = hypot(e.x - w.player.x, e.y - w.player.y);
     let closest = startDistance;
     for (let i = 0; i < 60 * 12; i++) {
       w.advance(NO_INPUT);
       if (!e.alive) break;
-      closest = Math.min(closest, Math.hypot(e.x - w.player.x, e.y - w.player.y));
+      closest = Math.min(closest, hypot(e.x - w.player.x, e.y - w.player.y));
     }
 
     // Without navigation it would sit against the far face, ~280 units away.
@@ -146,7 +147,7 @@ describe('navigation (GDD §22 — ruins are cover, not walls that trap)', () =>
     }
     // A clear approach should be close to a straight line: no sideways detour.
     expect(Math.abs(e.x - 700)).toBeLessThan(40);
-    expect(Math.hypot(e.x - w.player.x, e.y - w.player.y)).toBeLessThan(60);
+    expect(hypot(e.x - w.player.x, e.y - w.player.y)).toBeLessThan(60);
   });
 });
 
@@ -623,7 +624,7 @@ describe('runaway containment and arena legibility', () => {
     const cx = sumX / alive.length;
     const cy = sumY / alive.length;
     const spread =
-      alive.reduce((s, e) => s + Math.hypot(e.x - cx, e.y - cy), 0) / alive.length;
+      alive.reduce((s, e) => s + hypot(e.x - cx, e.y - cy), 0) / alive.length;
 
     // Mean distance from their own centroid: a stacked column collapses to ~0.
     expect(spread).toBeGreaterThan(40);
@@ -649,7 +650,7 @@ describe('runaway containment and arena legibility', () => {
     }
 
     const near = w.enemies.filter(
-      (e) => e.alive && Math.hypot(e.x - w.player.x, e.y - w.player.y) < TUNABLE.pressureRadius,
+      (e) => e.alive && hypot(e.x - w.player.x, e.y - w.player.y) < TUNABLE.pressureRadius,
     ).length;
     // Measured against the density the director is aiming to hold, not a magic
     // number: with a global count this was zero.
@@ -870,7 +871,7 @@ describe('the action roster (GDD §5.4)', () => {
     w.advance(NO_INPUT);
 
     const atHit = w.fx.filter(
-      (f) => f.kind === 'burst' && Math.hypot(f.x - (px + 420), f.y - py) < 40,
+      (f) => f.kind === 'burst' && hypot(f.x - (px + 420), f.y - py) < 40,
     );
     expect(atHit.length).toBeGreaterThan(0);
   });
@@ -955,7 +956,7 @@ describe('the action roster (GDD §5.4)', () => {
     expect(w.orbitals.length).toBeLessThanOrEqual(TUNABLE.maxOrbitals);
     // They circle the player.
     for (const o of w.orbitals) {
-      const d = Math.hypot(o.x - w.player.x, o.y - w.player.y);
+      const d = hypot(o.x - w.player.x, o.y - w.player.y);
       expect(Math.abs(d - o.orbitRadius)).toBeLessThan(6);
     }
   });
@@ -987,9 +988,9 @@ describe('the action roster (GDD §5.4)', () => {
     const e = w.spawnEnemy('bulwark', w.player.x + 170, w.player.y, 'thermal')!;
     e.vx = 0;
     e.vy = 0;
-    const before = Math.hypot(e.x - w.player.x, e.y - w.player.y);
+    const before = hypot(e.x - w.player.x, e.y - w.player.y);
     for (let i = 0; i < 60; i++) w.advance(NO_INPUT);
-    expect(Math.hypot(e.x - w.player.x, e.y - w.player.y)).toBeLessThan(before);
+    expect(hypot(e.x - w.player.x, e.y - w.player.y)).toBeLessThan(before);
   });
 
   it('§23.1 — Shove displacement is capped per enemy per second', () => {
@@ -1008,15 +1009,15 @@ describe('the action roster (GDD §5.4)', () => {
     e.hp = 1e9;
     let maxPush = 0;
     for (let second = 0; second < 6; second++) {
-      const start = Math.hypot(e.x - w.player.x, e.y - w.player.y);
+      const start = hypot(e.x - w.player.x, e.y - w.player.y);
       for (let i = 0; i < 60; i++) w.advance(NO_INPUT);
       if (!e.alive) break;
-      maxPush = Math.max(maxPush, Math.hypot(e.x - w.player.x, e.y - w.player.y) - start);
+      maxPush = Math.max(maxPush, hypot(e.x - w.player.x, e.y - w.player.y) - start);
     }
     // Four Shove rows cannot out-push the per-second budget.
     expect(maxPush).toBeLessThan(TUNABLE.shoveBudgetPerSecond);
     // And it still closes in: it is knockback, not a wall.
-    expect(Math.hypot(e.x - w.player.x, e.y - w.player.y)).toBeLessThan(1200);
+    expect(hypot(e.x - w.player.x, e.y - w.player.y)).toBeLessThan(1200);
   });
 
   it('Fragment steers toward a target instead of flying straight', () => {

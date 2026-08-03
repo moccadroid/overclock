@@ -17,6 +17,7 @@ import {
 } from './overlays';
 import { Input } from './input';
 import { NO_INPUT, World, type RunConfig } from '../sim/world';
+import { Recorder, type Recording } from '../sim/record';
 import { SIM_DT } from '../sim/tunables';
 import { VISUAL } from './visual';
 import { Library } from '../meta/profile';
@@ -72,12 +73,24 @@ export class Game {
    * shared with the title screen so a preview and a run are the same instrument,
    * and so the AudioContext survives the handover between them.
    */
+  /**
+   * §14 — every run is recorded, always, with no opt-in.
+   *
+   * A recording is the config plus the decisions, so it costs a few kilobytes
+   * and one array push per *change* of input. Nothing reads it back during the
+   * run, so it cannot affect what it watches. The point is that a run you can
+   * replay is a run somebody can analyse, and "it felt weak" becomes a number.
+   */
+  private readonly recorder: Recorder;
+  private recording: Recording | null = null;
+
   constructor(
     config: RunConfig,
     private readonly library: Library,
     private readonly audio: Audio,
   ) {
     this.world = new World(config);
+    this.recorder = new Recorder(config);
   }
 
   async start(mount: HTMLElement): Promise<void> {
@@ -95,6 +108,9 @@ export class Game {
     this.recompileChoice = new RecompileOverlay(ui);
     this.stinger = new Stinger(ui);
     this.editor.attach(this.library, (cmd) => this.onCommand(cmd));
+    // §14 — the two places a run changes by hand rather than by time passing.
+    this.draft.onCommand = (c) => this.recorder.command(c);
+    this.editor.onCommand = (c) => this.recorder.command(c);
 
     this.input.onCommand((cmd) => this.onCommand(cmd));
     // §18.4 — the chrome answers when you touch it. See Audio.chrome.
@@ -126,6 +142,11 @@ export class Game {
   }
 
   private onCommand(cmd: string): void {
+    if (cmd === 'save-run') {
+      this.saveRecording();
+      return;
+    }
+
     if (this.mode === 'dead') {
       // A reload rather than a teardown. There is no path that unwinds a run in
       // place, and inventing one to save a page load would be a lot of surface
@@ -272,7 +293,11 @@ export class Game {
       // Cap catch-up steps so a stalled tab cannot spiral (still deterministic:
       // dropped time is simply time the run never experienced).
       while (this.accumulator >= SIM_DT && steps < 8) {
-        this.world.advance(this.input.consume(), SIM_DT);
+        const input = this.input.consume();
+        // Recorded before the tick it describes, so a replay applies exactly
+        // what this tick saw. See sim/record.ts.
+        this.recorder.step(this.world, input);
+        this.world.advance(input, SIM_DT);
         this.accumulator -= SIM_DT;
         steps++;
         this.applyImpactFeedback();
@@ -289,6 +314,7 @@ export class Game {
               this.mode = 'running';
               return;
             }
+            this.recorder.command({ k: 'recompile', rows: indices });
             this.world.recompile(indices);
             const pending = this.world.pendingCeremony;
             this.world.pendingCeremony = null;
@@ -492,7 +518,45 @@ export class Game {
       time: this.world.time,
     });
 
+    this.recording = this.recorder.finish(this.world);
     this.message.showResults(this.world, this.library, (cmd) => this.onCommand(cmd));
+  }
+
+  /**
+   * §14 — hand the finished recording over.
+   *
+   * Sealed at death rather than streamed, because a partial recording is worse
+   * than none: it replays cleanly right up to the point where it stops being
+   * true, and nothing in it says which point that is.
+   */
+  get lastRecording(): Recording | null {
+    // A run still in progress can still be handed over — the recorder is
+    // append-only, so sealing it early just yields a shorter run. Useful when the
+    // interesting thing happened at minute three and you are still alive.
+    return this.recording ?? (this.recorder.length > 0 ? this.recorder.finish(this.world) : null);
+  }
+
+  /**
+   * Save the run to a file. The Results screen's SAVE RUN.
+   *
+   * A download rather than an upload, deliberately, and for now: there is no
+   * backend, no account and nothing to opt out of. It is a file the player owns
+   * and can choose to send, which is the honest shape for something that records
+   * everything you did.
+   */
+  saveRecording(): void {
+    const recording = this.recording;
+    if (!recording) return;
+    // Stamped here rather than in the Recorder — the sim may never read a clock,
+    // and `startedAt` is metadata for a human sorting a folder, not run data.
+    const stamped: Recording = { ...recording, startedAt: Date.now() };
+    const blob = new Blob([JSON.stringify(stamped)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${recording.config.seed}-${recording.config.axiomId}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   /**
@@ -510,6 +574,10 @@ export class Game {
         this.draft.present(this.world, () => {});
         this.draft.handleKey(0);
       }
+      // Recorded like any other tick. A dev path that skipped this would produce
+      // recordings whose tick count did not match the run they came from, which
+      // is a divergence with no cause anyone could find.
+      this.recorder.step(this.world, NO_INPUT);
       this.world.advance(NO_INPUT, SIM_DT);
     }
     this.hud.update(this.world);
@@ -541,3 +609,4 @@ export class Game {
   }
 
 }
+

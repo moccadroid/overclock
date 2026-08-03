@@ -2315,6 +2315,64 @@ levels, since they cannot do anything while it holds.
 
 ---
 
+## D-104 · SETTLED · Runs are recorded, and the recorder found a real bug
+
+"I feel like it's really hard to show you what happened during a run."
+
+A run in this game was already a pure function — the sim never reads the clock or
+storage, the PRNG is seeded, the timestep is fixed. That constraint has been
+enforced since M1 and this is what it was for: **a whole run is the `RunConfig`
+plus every decision, and nothing else.** A minute of play is about 2–3 KB.
+
+Decisions, not just inputs: drafting, rerolling, purging, dragging a node and
+choosing what to burn all change the world from outside `advance()`, so a
+recording is a command log stamped by tick. Card *contents* are never stored,
+only the index chosen — `rollDraft` is deterministic given the world, so replay
+re-rolls the identical offer.
+
+Every second the recorder stores `hashWorld` and replay compares. That is the
+part that makes any of it trustworthy, and it earned its place three times before
+this entry was written:
+
+**1. A Reroll consumes a draw whether or not you keep the offer.** Replaying it
+as "decrement a counter" left the PRNG one draw ahead, and every draft for the
+rest of the run silently became a different one.
+
+**2. The analyser was corrupting the run it measured.** Recovering the offer at a
+draft by re-rolling it from a hook *consumes the Rng* — so looking at the cards
+changed which card was drawn next. Fixed by handing the offer out from inside the
+apply path, where it was rolled once and is about to be used. Watching is now
+free because nothing extra happens.
+
+**3. `Math.hypot` is not portable, and the sim used it 39 times.** This is the
+real one. A run recorded in Chrome replayed cleanly in Chrome and diverged in
+Node at exactly thirty seconds. Every scalar in the digest matched — position,
+health, score, kills, even the PRNG state — and the enemy coordinates differed by
+one unit at 1e-4.
+
+`Math.hypot` is *implementation-approximated*: the spec permits every engine to
+return different bits, and Node 24 (V8 13.6) and Chrome 148 do. `Math.sqrt` has
+no such freedom — IEEE-754 requires correct rounding. So `sim/num.ts` spells the
+arithmetic out, a test fails the build if `Math.hypot` reappears in `src/sim`,
+and a run recorded in the browser now replays bit-exactly in Node.
+
+That bug was invisible from inside the game and would have quietly invalidated
+every server-side verified leaderboard score. It was found on the first day the
+recorder existed, by the recorder.
+
+`pnpm inspect run.json` prints the play-by-play: the run second by second, every
+draft with what was *passed* as well as taken, the final Engine with each row's
+share of output, what did the damage, and notes for the thresholds nobody wants
+to eyeball a chart for — a spiral where EPS flattens while the crowd grows, a
+capacity-bound run, a first level-up slower than §3 asks. `--pool` runs the same
+pass over many recordings for pick rates, which is the only way a node nobody
+ever takes gets found.
+
+Not built yet, deliberately: uploading any of it. SAVE RUN writes a file the
+player owns. There is no backend, no account and nothing to opt out of.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

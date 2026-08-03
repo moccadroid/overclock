@@ -14,6 +14,7 @@ import { CycleBudget } from './cycles';
 import { DiscoveryTracker } from './discoveries';
 import { Engine, type FireContext, type Program } from './engine';
 import { LOADBEARING, SAFETY, SIM_DT, TUNABLE } from './tunables';
+import { hypot } from './num';
 import {
   HUES,
   type ActionDef,
@@ -989,7 +990,7 @@ export class World {
     if (target) {
       dx = target.x - x;
       dy = target.y - y;
-      const len = Math.hypot(dx, dy) || 1;
+      const len = hypot(dx, dy) || 1;
       dx /= len;
       dy /= len;
     } else {
@@ -1335,7 +1336,7 @@ export class World {
     this.grid.queryRadius(x, y, radius, (enemy) => {
       const dx = enemy.x - x;
       const dy = enemy.y - y;
-      const d = Math.hypot(dx, dy) || 1;
+      const d = hypot(dx, dy) || 1;
       const falloff = 1 - d / radius;
       const wanted = impulse * falloff;
       const allowed = Math.min(wanted, enemy.shoveBudget);
@@ -1410,7 +1411,7 @@ export class World {
         this.grid.queryRadius(z.x, z.y, z.radius, (enemy) => {
           const dx = z.x - enemy.x;
           const dy = z.y - enemy.y;
-          const d = Math.hypot(dx, dy) || 1;
+          const d = hypot(dx, dy) || 1;
           const pull = z.force * (1 - d / z.radius) * dt;
           enemy.x += (dx / d) * pull;
           enemy.y += (dy / d) * pull;
@@ -1436,13 +1437,13 @@ export class World {
   private updateTerminals(input: InputState, dt: number): void {
     this.spawnTerminals(dt);
 
-    const moving = Math.hypot(this.player.vx, this.player.vy) > 12;
+    const moving = hypot(this.player.vx, this.player.vy) > 12;
     for (const t of this.terminals) {
       if (!t.alive) continue;
       t.age += dt;
 
       const near =
-        Math.hypot(this.player.x - t.x, this.player.y - t.y) <
+        hypot(this.player.x - t.x, this.player.y - t.y) <
         TUNABLE.beaconRadius + TUNABLE.playerRadius;
       const channelling = near && input.interact && !(t.requiresStillness && moving);
 
@@ -1797,7 +1798,7 @@ export class World {
     const p = this.player;
     const dx = p.x - c.x;
     const dy = p.y - c.y;
-    const d = Math.hypot(dx, dy);
+    const d = hypot(dx, dy);
     if (Math.abs(d - c.radius) > 20 + TUNABLE.playerRadius) return;
     // Standing in one of the cage's gaps is how you get out.
     const angle = Math.atan2(dy, dx);
@@ -1852,7 +1853,7 @@ export class World {
     // be free: local density alone still let you outrun the horde, because what
     // you left behind stayed inside the pressure radius while the road ahead
     // stayed clear. Not a wall — just enough that fleeing costs something.
-    const moveLen = Math.hypot(this.player.vx, this.player.vy);
+    const moveLen = hypot(this.player.vx, this.player.vy);
     const forward = moveLen > 20 && this.rng.chance(TUNABLE.forwardSpawnBias);
     const fx = forward ? this.player.vx / moveLen : 0;
     const fy = forward ? this.player.vy / moveLen : 0;
@@ -2163,7 +2164,7 @@ export class World {
 
     let mx = input.moveX;
     let my = input.moveY;
-    const len = Math.hypot(mx, my);
+    const len = hypot(mx, my);
     if (len > 1) {
       mx /= len;
       my /= len;
@@ -2286,7 +2287,7 @@ export class World {
         // Charger: seek -> telegraphed windup -> dash (§10.2, §17.1).
         e.timer -= dt;
         if (e.state === 'seek') {
-          const d = Math.hypot(p.x - e.x, p.y - e.y);
+          const d = hypot(p.x - e.x, p.y - e.y);
           if (d < 320 && e.timer <= 0) {
             e.state = 'windup';
             e.timer = def.windup;
@@ -2313,7 +2314,7 @@ export class World {
       if (e.state === 'seek') {
         const dx = p.x - e.x;
         const dy = p.y - e.y;
-        const len = Math.hypot(dx, dy) || 1;
+        const len = hypot(dx, dy) || 1;
 
         // Steer along the navigation field so ruins get walked around rather
         // than pressed against. Close in, or where the field is undefined, fall
@@ -2349,19 +2350,19 @@ export class World {
           if (other === e) return;
           const ox = e.x - other.x;
           const oy = e.y - other.y;
-          const d = Math.hypot(ox, oy);
+          const d = hypot(ox, oy);
           if (d < 0.001 || d > near) return;
           const push = (1 - d / near) / d;
           sepX += ox * push;
           sepY += oy * push;
         });
-        const sepLen = Math.hypot(sepX, sepY);
+        const sepLen = hypot(sepX, sepY);
         if (sepLen > 0.001) {
           vx += (sepX / sepLen) * TUNABLE.separationStrength;
           vy += (sepY / sepLen) * TUNABLE.separationStrength;
         }
 
-        const norm = Math.hypot(vx, vy) || 1;
+        const norm = hypot(vx, vy) || 1;
         const speed = def.speed * e.speedScale;
         e.vx = (vx / norm) * speed;
         e.vy = (vy / norm) * speed;
@@ -2440,7 +2441,7 @@ export class World {
     const goalY = target ? target.y : this.player.y;
     const dx = goalX - e.x;
     const dy = goalY - e.y;
-    const len = Math.hypot(dx, dy) || 1;
+    const len = hypot(dx, dy) || 1;
     e.facing = Math.atan2(dy, dx);
     e.vx = (dx / len) * def.speed;
     e.vy = (dy / len) * def.speed;
@@ -2459,7 +2460,7 @@ export class World {
       this.pushFx('burst', e.hue, e.x, e.y, e.radius + 8, [], 0.12);
     }
 
-    const pd = Math.hypot(this.player.x - e.x, this.player.y - e.y);
+    const pd = hypot(this.player.x - e.x, this.player.y - e.y);
     if (pd < e.radius + TUNABLE.playerRadius) this.touchPlayer(e, def);
   }
 
@@ -2472,7 +2473,7 @@ export class World {
     // player without the Suppressor walking into contact range.
     const dx = this.player.x - e.x;
     const dy = this.player.y - e.y;
-    const d = Math.hypot(dx, dy) || 1;
+    const d = hypot(dx, dy) || 1;
     const want = (def.zoneRadius ?? 200) * 0.6;
     const push = d > want ? 1 : -0.6;
     e.vx = (dx / d) * def.speed * push;
@@ -2489,7 +2490,7 @@ export class World {
   private updateLancer(e: Enemy, def: EnemyDef, dt: number): void {
     const dx = this.player.x - e.x;
     const dy = this.player.y - e.y;
-    const d = Math.hypot(dx, dy) || 1;
+    const d = hypot(dx, dy) || 1;
     const standoff = def.standoff ?? 500;
 
     if (e.beamActive > 0) {
@@ -2560,11 +2561,11 @@ export class World {
         if (target) {
           const dx = target.x - proj.x;
           const dy = target.y - proj.y;
-          const d = Math.hypot(dx, dy) || 1;
-          const speed = Math.hypot(proj.vx, proj.vy) || 1;
+          const d = hypot(dx, dy) || 1;
+          const speed = hypot(proj.vx, proj.vy) || 1;
           proj.vx += (dx / d) * proj.seek * speed * dt;
           proj.vy += (dy / d) * proj.seek * speed * dt;
-          const norm = Math.hypot(proj.vx, proj.vy) || 1;
+          const norm = hypot(proj.vx, proj.vy) || 1;
           proj.vx = (proj.vx / norm) * speed;
           proj.vy = (proj.vy / norm) * speed;
         }
@@ -2640,8 +2641,8 @@ export class World {
             proj.bounces--;
             const dx = next.x - proj.x;
             const dy = next.y - proj.y;
-            const len = Math.hypot(dx, dy) || 1;
-            const speed = Math.hypot(proj.vx, proj.vy) || 1;
+            const len = hypot(dx, dy) || 1;
+            const speed = hypot(proj.vx, proj.vy) || 1;
             proj.vx = (dx / len) * speed;
             proj.vy = (dy / len) * speed;
             proj.hits = [];
@@ -2757,7 +2758,7 @@ export class World {
       item.age += dt;
       const dx = p.x - item.x;
       const dy = p.y - item.y;
-      const d = Math.hypot(dx, dy) || 1;
+      const d = hypot(dx, dy) || 1;
 
       const magnet = TUNABLE.collectRadius * (1 + this.bonuses.magnet);
       if (d < magnet) {
@@ -3070,7 +3071,7 @@ export class World {
   private pushOutsideSafeRadius(x: number, y: number): { x: number; y: number } {
     const dx = x - this.player.x;
     const dy = y - this.player.y;
-    const d = Math.hypot(dx, dy);
+    const d = hypot(dx, dy);
     const min = TUNABLE.spawnSafeRadius;
     if (d >= min) return { x, y };
     // Degenerate case: spawn point exactly on the player — push along facing.

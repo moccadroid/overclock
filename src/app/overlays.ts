@@ -7,6 +7,7 @@
  * Reordering here is click-based (move up/down). Drag-to-reorder is §19.6's
  * shipping interaction and lands with the real editor in M2.
  */
+import type { Command } from '../sim/record';
 import {
   applyDraft,
   describeCard,
@@ -75,6 +76,15 @@ export class DraftOverlay extends Overlay {
     this.setOpen(false);
   }
 
+  /**
+   * §14 — tell the recorder what was decided.
+   *
+   * Indices, never cards: `rollDraft` is a pure function of the world, so a
+   * replay re-rolls the identical offer and only needs to know which one was
+   * taken. It also means every replay is a standing test of that purity.
+   */
+  onCommand: ((c: Command) => void) | null = null;
+
   /** Keyboard 1/2/3 pick, R rerolls (§19.5 bottom rail). */
   handleKey(index: number): void {
     if (!this.offer) return;
@@ -85,12 +95,15 @@ export class DraftOverlay extends Overlay {
   reroll(): void {
     if (!this.world || !this.offer) return;
     if (!useReroll(this.world)) return;
+    this.onCommand?.({ k: 'reroll' });
     this.offer = rollDraft(this.world);
     this.render();
   }
 
   private choose(card: DraftCard): void {
     if (!this.world) return;
+    const index = this.offer?.cards.indexOf(card) ?? -1;
+    if (index >= 0) this.onCommand?.({ k: 'draft', i: index });
     applyDraft(this.world, card);
     this.setOpen(false);
     this.offer = null;
@@ -147,6 +160,7 @@ export class DraftOverlay extends Overlay {
       purge.addEventListener('click', (ev) => {
         ev.stopPropagation();
         if (purgeCard(world, card)) {
+          this.onCommand?.({ k: 'purge', i });
           this.offer = rollDraft(world);
           this.render();
         }
@@ -385,6 +399,7 @@ export class EditorOverlay extends Overlay {
         // Walk a modifier along the chain — §5.5's ordering axis, made operable.
         group.appendChild(
           slotButton('‹', s > 0 && id !== null, () => {
+            this.onCommand?.({ k: 'swap', p: i, a: s, b: s - 1 });
             world.engine.swapModifiers(i, s, s - 1);
             this.afterChange();
           }),
@@ -392,6 +407,7 @@ export class EditorOverlay extends Overlay {
         group.appendChild(chip(id, 'modifier', i, s, this, program.actionId));
         group.appendChild(
           slotButton('›', s < LOADBEARING.modifierSlotsPerProgram - 1 && id !== null, () => {
+            this.onCommand?.({ k: 'swap', p: i, a: s, b: s + 1 });
             world.engine.swapModifiers(i, s, s + 1);
             this.afterChange();
           }),
@@ -574,8 +590,13 @@ export class EditorOverlay extends Overlay {
       `  ·  ${refund.toFixed(1)} Cycles freed  ·  <span class="warn">cannot be undone</span>`;
 
     const confirm = button('CONFIRM', true, () => {
-      if (isRow) world.engine.scrapProgram(pending.program);
-      else world.engine.scrapNode(pending.program, pending.slot);
+      if (isRow) {
+        this.onCommand?.({ k: 'scrapRow', p: pending.program });
+        world.engine.scrapProgram(pending.program);
+      } else {
+        this.onCommand?.({ k: 'scrapNode', p: pending.program, s: pending.slot });
+        world.engine.scrapNode(pending.program, pending.slot);
+      }
       this.pendingScrap = null;
       this.afterChange();
     });
@@ -685,12 +706,16 @@ export class EditorOverlay extends Overlay {
     return !displaced || slotAccepts(from.slot, displaced);
   }
 
+  /** §14 — see DraftOverlay.onCommand. */
+  onCommand: ((c: Command) => void) | null = null;
+
   completeDrag(program: number, slot: NodeSlot): void {
     const world = this.world;
     const from = this.dragging;
     this.dragging = null;
     if (!world || !from) return;
 
+    this.onCommand?.({ k: 'move', fp: from.program, fs: from.slot, tp: program, ts: slot });
     const result = world.engine.moveNode(
       from.program,
       from.slot,
@@ -1074,3 +1099,4 @@ function nodeLabel(id: string | null): string {
   if (!id) return '·';
   return NODE_BY_ID.get(id)?.name ?? id;
 }
+

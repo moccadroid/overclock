@@ -9,6 +9,7 @@ import { TUNABLE } from '../sim/tunables';
 import type { InputState, World } from '../sim/world';
 import type { DraftCard } from '../sim/draft';
 import { NODE_BY_ID } from '../content/index';
+import { hypot } from '../sim/num';
 
 /**
  * Recompile policy, so the harness can A/B the §9.2 claim directly rather than
@@ -48,7 +49,7 @@ export function botInput(world: World): InputState {
   for (const item of world.pickups) {
     const dx = item.x - p.x;
     const dy = item.y - p.y;
-    const d = Math.hypot(dx, dy);
+    const d = hypot(dx, dy);
     if (d > 420) continue;
     if (!best || d < best.d) best = { dx, dy, d };
   }
@@ -93,7 +94,7 @@ export function botInput(world: World): InputState {
   if (target) {
     const dx = target.x - p.x;
     const dy = target.y - p.y;
-    const d = Math.hypot(dx, dy);
+    const d = hypot(dx, dy);
     const range = target.kind === 'recompile' ? 2200 : 900;
     if (d < range && threatDist > 150) {
       ax += (dx / (d || 1)) * 1.4;
@@ -102,7 +103,7 @@ export function botInput(world: World): InputState {
     if (d < TUNABLE.beaconRadius) channelling = true;
   }
 
-  const len = Math.hypot(ax, ay);
+  const len = hypot(ax, ay);
   if (len > 1) {
     ax /= len;
     ay /= len;
