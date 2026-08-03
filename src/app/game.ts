@@ -177,11 +177,27 @@ export class Game {
     }
 
     if (cmd === 'editor' || cmd === 'close') {
-      if (this.mode === 'draft' && cmd === 'editor') return;
+      if (this.mode === 'draft' && cmd === 'editor') {
+        // TAB during a draft used to do nothing at all, which is backwards: the
+        // draft is the one moment where you *most* need to see the Engine. "Does
+        // this Modifier have a row that can hold it, and what does that row do
+        // already" is the entire decision, and it was answerable only from
+        // memory. The offer is deferred rather than rerolled, so closing the
+        // editor returns to the same three cards.
+        this.draft.defer();
+        this.pausedFromDraft = true;
+        this.openConsole('pipeline');
+        this.input.clear();
+        return;
+      }
       const open = cmd === 'close' ? (this.editor.close(), false) : this.editor.toggle(this.world, 'pipeline');
       this.audio.chrome('click');
       this.mode = open ? 'editor' : 'running';
       this.confirmQuit = false;
+      if (!open && this.pausedFromDraft) {
+        this.pausedFromDraft = false;
+        this.openDraft();
+      }
       this.input.clear();
       return;
     }

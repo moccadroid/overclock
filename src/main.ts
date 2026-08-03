@@ -76,6 +76,49 @@ if (import.meta.env.DEV) {
     library,
     audio,
     runs: loadRuns,
+    /**
+     * Replay and analyse a recording *in the browser it was recorded in*.
+     *
+     * `pnpm inspect` does the same thing in Node, and the two disagreeing is
+     * itself a finding: the sim is supposed to be bit-identical everywhere, and
+     * the last time these two disagreed the cause was `Math.hypot` being
+     * implementation-approximated (see sim/num.ts). So this is not a convenience
+     * copy of the harness — it is the control.
+     */
+    replay: async (which = 0) => {
+      const { analyse, report } = await import('./sim/analyse');
+      const runs = loadRuns();
+      const run = runs[which];
+      if (!run) return 'no such run';
+      const a = analyse(run);
+      console.info(report(a));
+      return { ok: a.ok, divergedAt: a.divergedAt, notes: a.notes };
+    },
+
+    /**
+     * Ship recordings to the dev server, which writes them into ./runs.
+     *
+     * The download path works but ends with somebody hunting through a Downloads
+     * folder for a file with a generated name. This lands them where
+     * `pnpm inspect runs/*.json` can read them, which is the whole point of
+     * recording runs at all.
+     */
+    sendRuns: async (which?: number) => {
+      const runs = loadRuns();
+      if (runs.length === 0) return 'nothing recorded yet';
+      const chosen = which === undefined ? runs : [runs[which]!];
+      const written: string[] = [];
+      for (const run of chosen) {
+        const name = `${run.config.seed}-${run.config.axiomId}-${Math.round(run.ticks / 60)}s`;
+        const res = await fetch('/__run', {
+          method: 'POST',
+          headers: { 'x-run-name': name },
+          body: JSON.stringify(run),
+        });
+        written.push(`${res.status} ${name}`);
+      }
+      return written;
+    },
     saveRuns: () => {
       const runs = loadRuns();
       if (runs.length === 0) return 'nothing recorded yet';

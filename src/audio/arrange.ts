@@ -323,7 +323,15 @@ export function arrange(input: ArrangeInput): Arrangement {
     stab,
     swing: bias.swing,
     kickVoice: HUE_KICK[hue],
-    percVoice: HUE_PERC[hue],
+    // An Engine with no rows gets the rim, whatever its hue.
+    //
+    // The menu is this case, and it is the first thing anybody hears: a bed with
+    // no Engine behind it, so the backbeat is the loudest thing in a nearly empty
+    // mix, and a clap in an empty mix is a hand clapping in your ear. The rim is
+    // the same beat played by the quietest voice in the kit. It also earns its
+    // keep in a run's first minute — the drums now fill in as the Engine does,
+    // rather than arriving complete before you own anything.
+    percVoice: size === 0 ? 'rim' : HUE_PERC[hue],
     bassVoice,
     stabVoice: HUE_STAB[hue],
     leadVoice,

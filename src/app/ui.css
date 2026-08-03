@@ -309,6 +309,13 @@
    no legend; the colour does the grouping so matching an Action to a modifier is
    a glance. Three tints that belong to nothing else in the palette — hue is
    spoken for by enemy threat class, and node kind already owns the card border. */
+/* The behaviour tags. Neon, because everything around them is.
+ *
+ * The first pass used muted sage/terracotta/lavender — the palette of a
+ * different game entirely. Three rules for these: full-saturation, glowing, and
+ * none of them may be mistaken for a hue (16.3), because hue means damage class
+ * and a tag is not one. So: mint, magenta and electric indigo — three neons the
+ * game does not otherwise use. */
 .tagmark {
   display: inline-block;
   margin-left: 8px;
@@ -316,16 +323,19 @@
   font-size: 9px;
   letter-spacing: 0.18em;
   border: 1px solid currentColor;
-  opacity: 0.9;
+  text-shadow: 0 0 6px currentColor;
+  box-shadow:
+    0 0 5px -1px currentColor,
+    inset 0 0 8px -5px currentColor;
 }
 .t-travels {
-  color: #6fd08c;
+  color: #2bffa3;
 }
 .t-area {
-  color: #e08a5c;
+  color: #ff4fd8;
 }
 .t-lingers {
-  color: #8f8ce0;
+  color: #9d7bff;
 }
 /* Cards echo the chips: colour plus form. */
 .card.kind-trigger {
