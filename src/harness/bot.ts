@@ -97,9 +97,14 @@ export function botInput(world: World): InputState {
       ? world.terminals.find((t) => t.kind === 'cache' && t.alive)
       : undefined) ??
     // §21b.5 — a gate is the map opening, and the reference pilot has to take
-    // one or the whole map layer goes untested by the harness. Only while
-    // healthy: holding ground is the most dangerous thing in the game.
-    (healthy && p.integrity > p.maxIntegrity * 0.8
+    // one or the whole map layer goes untested by the harness.
+    //
+    // Not before the Engine is worth anything, though. Holding ground for
+    // twenty-two seconds is the most dangerous thing in the game, and a pilot
+    // that walks off to do it at minute one with a starter row is measuring
+    // recklessness — the same mistake the Recompile policy above already made
+    // once. It also stopped a zone-cap test from ever reaching its fight.
+    (healthy && world.time > 120 && p.integrity > p.maxIntegrity * 0.8
       ? world.terminals.find((t) => t.kind === 'gate' && t.alive)
       : undefined);
 
