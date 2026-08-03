@@ -136,6 +136,51 @@ const arenaSchema: Schema = {
       },
     },
   },
+  // §21b — biomes and the gates that open them.
+  biomes: {
+    type: 'array',
+    items: {
+      type: 'object',
+      fields: {
+        id: { type: 'string', required: true },
+        name: { type: 'string', required: true },
+        x: { type: 'number', required: true, min: 0 },
+        y: { type: 'number', required: true, min: 0 },
+        w: { type: 'number', required: true, min: 1 },
+        h: { type: 'number', required: true, min: 1 },
+        tint: { type: 'number', min: 0 },
+        ventMultiplier: { type: 'number', min: 0 },
+        xpMultiplier: { type: 'number', min: 0 },
+        poi: { type: 'array', items: { type: 'string' } },
+        description: { type: 'string', required: true },
+      },
+    },
+  },
+  gates: {
+    type: 'array',
+    items: {
+      type: 'object',
+      fields: {
+        id: { type: 'string', required: true },
+        name: { type: 'string', required: true },
+        x: { type: 'number', required: true, min: 0 },
+        y: { type: 'number', required: true, min: 0 },
+        radius: { type: 'number', required: true, min: 40 },
+        holdSeconds: { type: 'number', required: true, min: 1 },
+        opens: { type: 'string', required: true },
+        barrier: {
+          type: 'object',
+          required: true,
+          fields: {
+            x: { type: 'number', required: true, min: 0 },
+            y: { type: 'number', required: true, min: 0 },
+            w: { type: 'number', required: true, min: 1 },
+            h: { type: 'number', required: true, min: 1 },
+          },
+        },
+      },
+    },
+  },
   description: { type: 'string', required: true },
 };
 

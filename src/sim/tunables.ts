@@ -304,6 +304,14 @@ export const TUNABLE = {
   // ---- §5.7 scrap ----
   scrapOutputBonus: 0.04,
 
+  // ---- §21b.4 the Cooler ----
+  /**
+   * A place you stand to vent. Worth more than any Coolant card and impossible
+   * to take with you — the trade is that using it means being somewhere.
+   */
+  coolerRadius: 240,
+  coolerVenting: 26,
+
   // ---- §12.4 the Cache ----
   /**
    * A POI you channel for a free draft, paid for by the current composition
@@ -331,6 +339,14 @@ export const TUNABLE = {
    */
   hardenedHp: 4,
   hardenedDamage: 1.6,
+
+  /**
+   * §21b.6 — how far behind the player an enemy may fall before it is moved to
+   * the front. Three screen-widths: far enough that nothing is ever recycled
+   * while it could plausibly be seen, close enough that the fight travels with
+   * the player on a map twenty screens across.
+   */
+  recycleDistance: 2900,
 
   // ---- §12 director ----
   /** Threat reaches ~24 by the 20:00 Meltdown line — the scale wave bands use. */

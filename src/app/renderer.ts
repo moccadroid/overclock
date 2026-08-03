@@ -132,6 +132,10 @@ export class Renderer {
   private shakeX = 0;
   private shakeY = 0;
   private jitterSeed = 1;
+  /** Ruins drawn last time. A gate opening changes it; nothing else does. */
+  private ruinCount = -1;
+  /** §21b.4 — the background colour, easing toward the current biome's. */
+  private tint: number = PALETTE.background;
   /** §16.6 — how far the camera has pulled back. See updateZoom. */
   private zoom = 1;
   /** Shared phase for the loot pulse — see drawPickups. Presentation only. */
@@ -374,12 +378,19 @@ export class Renderer {
     this.bloom.setGlow(VIEW.glow);
     // Step 5: the background lightens toward white as the final minutes approach.
     // The world overexposes.
-    const background = mix(PALETTE.background, 0x243044, Math.min(0.85, melt * 0.55));
+    // §21b.4 — the biome you are standing in tints the world. Approached rather
+    // than snapped, so crossing a boundary reads as walking into somewhere.
+    const biomeTint = world.biome?.tint ?? PALETTE.background;
+    this.tint = mix(this.tint, biomeTint, Math.min(1, frameDt * 1.5));
+    const background = mix(this.tint, 0x243044, Math.min(0.85, melt * 0.55));
     this.app.renderer.background.color = background;
     this.backdrop.tint = background;
     // §16.7 — the degradation ladder pushes whatever preset the player chose
     // further than they asked, which is how Heat and Meltdown stay legible as
     // *damage to the picture* rather than as a separate effect.
+    // §21b.5 — the structure layer is static except when a gate opens.
+    if (world.ruins.length !== this.ruinCount) this.drawRuins();
+
     this.emitGlitchFields(world);
     this.emitLights(world, heat, melt, frameDt);
     this.post.update(
@@ -870,12 +881,14 @@ export class Renderer {
   private drawRuins(): void {
     const g = this.gRuins;
     g.clear();
-    for (const r of this.world.arena.ruins) {
+    // The live list, not the arena's: §21b.5 barriers are ruins that come down.
+    this.ruinCount = this.world.ruins.length;
+    for (const r of this.world.ruins) {
       g.rect(r.x, r.y, r.w, r.h);
     }
     g.fill({ color: PALETTE.structure, alpha: 0.16 });
 
-    for (const r of this.world.arena.ruins) {
+    for (const r of this.world.ruins) {
       g.rect(r.x, r.y, r.w, r.h);
       // Interior scanline hatch — reads as material, stays at band 5.
       for (let y = r.y + 9; y < r.y + r.h; y += 9) {
@@ -909,6 +922,46 @@ export class Renderer {
       if (t.kind === 'recompile') {
         g.rect(t.x - r + 6, t.y - r + 6, (r - 6) * 2, (r - 6) * 2);
         g.stroke({ width: 1, color, alpha: BAND.inFlight });
+      } else if (t.kind === 'gate') {
+        // §21b.5 — a gate is ground you hold, so it is drawn as ground: a wide
+        // ring you can see from across the arena, filling as you stand in it.
+        const gate = world.arena.gates?.find((x) => x.id === t.gateId);
+        const hold = gate?.radius ?? 240;
+        g.circle(t.x, t.y, hold).stroke({ width: 2, color, alpha: BAND.structure * 2.2 });
+        // The fill sweeps round from the top, and the whole disc lifts with it.
+        if (t.progress > 0) {
+          arcSegment(g, t.x, t.y, hold, -Math.PI / 2, -Math.PI / 2 + t.progress * Math.PI * 2);
+          g.stroke({ width: 6, color, alpha: BAND.telegraph });
+          g.circle(t.x, t.y, hold).fill({ color, alpha: 0.05 + t.progress * 0.09 });
+        }
+        // Chevrons pointing at the wall it opens: where this goes, before you
+        // have paid for it. §21b.5 — a gate you can see is a promise.
+        for (let i = 0; i < 3; i++) {
+          const ox = r + 14 + i * 13;
+          g.moveTo(t.x + ox - 7, t.y - 11).lineTo(t.x + ox, t.y).lineTo(t.x + ox - 7, t.y + 11);
+        }
+        g.stroke({ width: 2, color, alpha: BAND.entity * (0.4 + t.progress * 0.6) });
+      } else if (t.kind === 'cooler') {
+        // §21b.4 — a place, not a button: the field it works in *is* the object.
+        g.circle(t.x, t.y, TUNABLE.coolerRadius).stroke({
+          width: 2,
+          color,
+          alpha: BAND.structure * 2,
+        });
+        const breath = 0.5 + 0.5 * Math.sin(t.age * 1.6);
+        g.circle(t.x, t.y, TUNABLE.coolerRadius * (0.35 + breath * 0.12)).stroke({
+          width: 1.5,
+          color,
+          alpha: BAND.inFlight * (0.5 + breath * 0.5),
+        });
+        for (let i = 0; i < 6; i++) {
+          const a = (i / 6) * Math.PI * 2 - t.age * 0.35;
+          g.moveTo(t.x + Math.cos(a) * (r + 4), t.y + Math.sin(a) * (r + 4)).lineTo(
+            t.x + Math.cos(a) * (r + 16),
+            t.y + Math.sin(a) * (r + 16),
+          );
+        }
+        g.stroke({ width: 2, color, alpha: BAND.entity });
       } else if (t.kind === 'cache') {
         // §12.4 — a Cache is a box with something in it, and a ring of teeth to
         // say the something bites. Read from across the arena: the teeth turn.
@@ -970,6 +1023,28 @@ export class Renderer {
         TUNABLE.beaconRadius + TUNABLE.playerRadius;
       const moving = t.requiresStillness && Math.hypot(world.player.vx, world.player.vy) > 12;
       label.visible = true;
+      // §21b.5 — a gate is held by standing, so its label is a state, not an
+      // instruction, and it is legible from outside the ring.
+      if (t.kind === 'gate') {
+        const gate = world.terminals[i] ? world.arena.gates?.find((x) => x.id === t.gateId) : null;
+        label.visible = true;
+        label.text =
+          t.progress > 0
+            ? `${(gate?.name ?? 'GATE').toUpperCase()}  ${Math.round(t.progress * 100)}%`
+            : `${(gate?.name ?? 'GATE').toUpperCase()}  —  STAND HERE`;
+        label.alpha = BAND.telegraph;
+        label.style.fill = TERMINAL_COLOR.gate;
+        label.position.set(t.x, t.y + (gate?.radius ?? 240) + 18);
+        continue;
+      }
+      if (t.kind === 'cooler') {
+        label.visible = true;
+        label.text = near ? 'VENTING' : 'COOLER';
+        label.alpha = near ? BAND.telegraph : BAND.inFlight;
+        label.style.fill = TERMINAL_COLOR.cooler;
+        label.position.set(t.x, t.y + TUNABLE.coolerRadius + 14);
+        continue;
+      }
       // §12.4 — a POI whose price is a fight has to say so *before* it is paid.
       // "HOLD E" on a Cache would be a trap, and §17.1 does not allow traps.
       const prompt = t.kind === 'cache' ? 'HOLD  E  —  THEY WAKE UP' : 'HOLD  E';
@@ -2011,6 +2086,11 @@ const TERMINAL_COLOR: Record<TerminalKind, number> = {
   // §12.4 — the Cache is voltaic: it is the one POI that hands you a card, and
   // voltaic is the hue this game already uses for "your side of the fight".
   cache: PALETTE.voltaic,
+  // §21b.5 — a gate is the map itself opening, so it takes the beacon blue the
+  // game already uses for "a place worth going to", at full brightness.
+  gate: 0x9fd0ff,
+  // §21b.4 — the Cooler is the one POI that is a place rather than a button.
+  cooler: PALETTE.voltaic,
 };
 
 /**

@@ -24,6 +24,7 @@ import { shapeSvg } from './gfx/shapes';
 const MARKER_COLOR: Record<TraceMarkerKind, string> = {
   level: '#3f5570',
   cache: 'cache',
+  gate: 'gate',
   beacon: '#9fd0ff',
   recompile: '#b44cff',
   meltdown: '#ffb000',

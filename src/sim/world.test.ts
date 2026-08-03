@@ -1345,8 +1345,15 @@ describe('cascade physics (GDD §5.2)', () => {
     runPiloted(greedy, 150);
 
     expect(greedy.stats.maxDepth).toBeGreaterThan(lean.stats.maxDepth);
-    expect(greedy.stats.peakHeat).toBeGreaterThan(lean.stats.peakHeat);
     expect(greedy.stats.events).toBeGreaterThan(lean.stats.events);
+    // Sustained Heat, not peak. Peak was measuring the wrong thing: a Leech
+    // touching the player adds 16 Heat in one frame, so the *lean* run peaked
+    // higher (15.9 vs 15.4) purely because it was slower at killing Leeches.
+    // What the claim is actually about is the Heat an Engine *produces*, which
+    // is a sustained level: measured, lean averages 0.13 and greedy 0.99.
+    expect(greedy.heatIntegral / greedy.time).toBeGreaterThan(
+      (lean.heatIntegral / lean.time) * 2,
+    );
   });
 });
 

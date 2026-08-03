@@ -23,7 +23,9 @@ import {
   type EnemyDef,
   type EventType,
   type GameEvent,
+  type BiomeDef,
   type Hue,
+  type RuinRect,
   type WaveTemplateDef,
 } from './types';
 import {
@@ -244,7 +246,7 @@ export interface Zone extends SpatialItem {
  * and one colour in the renderer's table — no new timer field, no new branch in
  * the spawner, no new branch in the completion path.
  */
-export type TerminalKind = 'beacon' | 'recompile' | 'extract' | 'cache';
+export type TerminalKind = 'beacon' | 'recompile' | 'extract' | 'cache' | 'gate' | 'cooler';
 
 export interface PoiDef {
   kind: TerminalKind;
@@ -273,6 +275,16 @@ export interface Terminal extends SpatialItem {
   channelTime: number;
   /** §9.1 — Recompile must be channelled while stationary. */
   requiresStillness: boolean;
+  /**
+   * §21b.5 — a gate is *held*, not pressed: stand anywhere inside this radius
+   * and it fills, step outside and it drains. Zero for ordinary POIs, which are
+   * channelled at arm's length with E.
+   */
+  holdRadius?: number;
+  /** The gate this terminal is, if it is one. */
+  gateId?: string;
+  /** Whether the hardened wave has already been called. */
+  woken?: boolean;
 }
 
 /**
@@ -297,6 +309,29 @@ export const POIS: readonly PoiDef[] = [
     interval: TUNABLE.cacheInterval,
     fromTime: TUNABLE.cacheFromTime,
     ring: [TUNABLE.spawnRingMin * 0.7, TUNABLE.spawnRingMax * 1.2],
+  },
+  {
+    // §21b.4 The Cooler — the first POI that is a *place*. It is never
+    // channelled: it works because you are standing in it, which makes "where
+    // am I" a decision rather than "what did I press". Placed by its biome.
+    kind: 'cooler',
+    channelTime: 1,
+    requiresStillness: false,
+    maxAlive: 0,
+    interval: 0,
+    fromTime: 0,
+    ring: [0, 0],
+  },
+  {
+    // §21b.5 — gates are placed once at run start by placeGates, never by the
+    // scheduler. maxAlive 0 keeps the scheduler's hands off them entirely.
+    kind: 'gate',
+    channelTime: 20,
+    requiresStillness: false,
+    maxAlive: 0,
+    interval: 0,
+    fromTime: 0,
+    ring: [0, 0],
   },
   {
     // §9.1 — Recompile terminals appear from minute 8.
@@ -329,7 +364,9 @@ const POI_EFFECTS: Record<TerminalKind, (w: World, t: Terminal) => void> = {
     w.spawnWaveNow(true);
     w.mark('beacon', 'beacon');
   },
-  cache: (w, t) => w.openCacheNow(t.x, t.y),
+  cache: (w, t) => w.openCacheNow(t.x, t.y),
+  gate: (w, t) => w.openGateNow(t),
+  cooler: () => {},
   // Does not fire immediately: the player chooses how much to sacrifice.
   recompile: (w) => {
     w.pendingRecompileChoice = true;
@@ -519,7 +556,7 @@ export interface TraceSample {
   eps: number;
 }
 
-export type TraceMarkerKind = 'level' | 'recompile' | 'meltdown' | 'extract' | 'death' | 'beacon' | 'cache';
+export type TraceMarkerKind = 'level' | 'recompile' | 'meltdown' | 'extract' | 'death' | 'beacon' | 'cache' | 'gate';
 
 export interface TraceMarker {
   t: number;
@@ -539,6 +576,10 @@ export interface RunStats {
   overheats: number;
   /** Magnets collected. A run\'s XP tedium, counted. */
   magnets: number;
+  /** §21b.6 — enemies moved from behind the player to in front of them. */
+  recycled: number;
+  /** §21b.5 — gates held open. */
+  gatesOpened: number;
   /** §12.4 — Caches channelled. */
   cachesOpened: number;
   /** Gorged Interceptors detonated. */
@@ -683,6 +724,11 @@ export class World {
   private consolidateTimer = 0;
   /** Seconds until another Magnet may drop. See maybeDropMagnet. */
   private magnetCooldown = 0;
+  /**
+   * Heat integrated over the run, in heat-seconds. The honest measure of "how
+   * hot did this Engine run" — a peak can be one Leech touching you.
+   */
+  heatIntegral = 0;
   /** §5.3 On Enter — was the player in a hazard last tick? */
   private wasInHazard = false;
   /** §5.3 On Threshold — the Heat tier last seen, so only climbs fire. */
@@ -746,6 +792,8 @@ export class World {
     peakConcurrentEnemies: 0,
     overheats: 0,
     magnets: 0,
+    recycled: 0,
+    gatesOpened: 0,
     cachesOpened: 0,
     gluttonsPopped: 0,
     suppressorsKilledInside: 0,
@@ -772,6 +820,15 @@ export class World {
   private pendingSpawns: PendingSpawn[] = [];
   private grid: SpatialGrid<Enemy>;
   private flow: FlowField;
+  /**
+   * §21b.5 — walls that are still up, and the biomes that are open.
+   *
+   * A barrier is a ruin: collision, pathing and rendering all already handle
+   * ruins, so a gate opening is a ruin being removed rather than a new kind of
+   * object. `ruins` is the live list everything else reads.
+   */
+  ruins: RuinRect[] = [];
+  readonly openBiomes = new Set<string>();
   private readonly flowSample = { x: 0, y: 0 };
   private nextId = 1;
   private eventsThisTick = 0;
@@ -784,7 +841,11 @@ export class World {
     this.rng = new Rng(config.seed);
     this.arena = getArena(config.arenaId ?? 'heap');
     this.grid = new SpatialGrid<Enemy>(this.arena.width, this.arena.height);
+    // §21b.5 — barriers are ruins, so the live list is the arena's plus every
+    // gate's wall, and the field is baked from the live list.
+    this.ruins = [...this.arena.ruins, ...(this.arena.gates ?? []).map((g) => g.barrier)];
     this.flow = new FlowField(this.arena);
+    this.flow.rebuild(this.ruins);
 
     this.engine = new Engine();
     this.installAxiomStarter();
@@ -792,6 +853,7 @@ export class World {
     this.baseCapacity = TUNABLE.cycleCapacityBase + getAxiom(config.axiomId).capacityDelta;
     this.budget = new CycleBudget(this.baseCapacity);
     this.budget.setStaticLoad(this.engine.staticLoad);
+    this.placeGates();
 
     this.player = {
       x: this.arena.spawnX,
@@ -853,6 +915,7 @@ export class World {
     // player has left their cell.
     this.flow.update(this.player.x, this.player.y);
     this.updateEnemies(dt);
+    this.recycleStragglers();
     this.grid.rebuild(this.enemies);
     this.updateProjectiles(dt);
     this.updateZones(dt);
@@ -901,6 +964,25 @@ export class World {
       this.drainEvents();
     }
 
+    // §21b.4 — where you are standing changes how fast you vent. A Cooler is
+    // worth more than any single Coolant card, and it cannot be taken with you:
+    // the trade is that using it means being in one place.
+    let vent = this.bonuses.coolant;
+    const biome = this.biome;
+    if (biome?.ventMultiplier) {
+      vent += TUNABLE.heatDecayPerSec * (biome.ventMultiplier - 1);
+    }
+    for (const t of this.terminals) {
+      if (!t.alive || t.kind !== 'cooler') continue;
+      const dx = this.player.x - t.x;
+      const dy = this.player.y - t.y;
+      if (dx * dx + dy * dy < TUNABLE.coolerRadius * TUNABLE.coolerRadius) {
+        vent += TUNABLE.coolerVenting;
+        break;
+      }
+    }
+    this.budget.extraVenting = vent;
+
     // §6.2 — the tick's event volume, priced before the gauge is closed.
     this.budget.chargeVolume(this.eventsThisTick, dt);
 
@@ -912,6 +994,7 @@ export class World {
     }
 
     this.stats.tierSeconds[this.budget.tier] += dt;
+    this.heatIntegral += this.budget.heat * dt;
     // Smoothed, so the HUD shows a depth you can read rather than a per-tick
     // number that flickers. This is the number Heat is *caused by*, and showing
     // it beside the gauge is the whole point of moving Heat onto depth.
@@ -1754,12 +1837,21 @@ export class World {
       if (!t.alive) continue;
       t.age += dt;
 
-      const near =
-        hypot(this.player.x - t.x, this.player.y - t.y) <
-        TUNABLE.beaconRadius + TUNABLE.playerRadius;
-      const channelling = near && input.interact && !(t.requiresStillness && moving);
+      const d = hypot(this.player.x - t.x, this.player.y - t.y);
+      const inside = t.holdRadius ? d < t.holdRadius : d < TUNABLE.beaconRadius + TUNABLE.playerRadius;
+      // §21b.5 — ground you hold needs no keypress. Standing there *is* the
+      // input, which is what makes it a fight rather than a button.
+      const channelling = inside && (t.holdRadius ? true : input.interact) &&
+        !(t.requiresStillness && moving);
 
       if (channelling) {
+        // The neighbourhood wakes the moment you commit, not when you finish.
+        if (t.gateId && !t.woken) {
+          t.woken = true;
+          this.openCache(t.x, t.y);
+          this.pendingDrafts = Math.max(0, this.pendingDrafts - 1);
+          this.mark('gate', `${t.kind} contested`);
+        }
         t.progress += dt / t.channelTime;
         if (t.progress >= 1) {
           t.alive = false;
@@ -1767,9 +1859,81 @@ export class World {
         }
       } else if (t.progress > 0) {
         // Generous interrupt-resume: it drains rather than snapping to zero.
-        t.progress = Math.max(0, t.progress - (dt / t.channelTime) * 0.6);
+        // A gate drains more slowly still — losing twenty seconds of holding to
+        // one dodge would make the mechanic a punishment for playing well.
+        const drain = t.holdRadius ? 0.25 : 0.6;
+        t.progress = Math.max(0, t.progress - (dt / t.channelTime) * drain);
       }
     }
+  }
+
+  /**
+   * §21b.5 — put every gate on the map at run start.
+   *
+   * Placed once and left standing, rather than scheduled like other POIs: a gate
+   * you can see and cannot yet reach is a promise, and the whole reason the map
+   * unlocks instead of being explored is that the player can see where it goes.
+   */
+  private placeGates(): void {
+    for (const gate of this.arena.gates ?? []) {
+      const t = this.pushTerminal('gate', gate.x, gate.y, gate.holdSeconds, false);
+      t.holdRadius = gate.radius;
+      t.gateId = gate.id;
+    }
+  }
+
+  /** §21b.5 — a gate finished: the wall comes down and the biome is open. */
+  private openGate(t: Terminal): void {
+    const gate = (this.arena.gates ?? []).find((g) => g.id === t.gateId);
+    if (!gate) return;
+    this.openBiomes.add(gate.opens);
+    // The wall was a ruin; remove it and tell the field, or every enemy keeps
+    // walking around something that is not there.
+    this.ruins = this.ruins.filter(
+      (r) => !(r.x === gate.barrier.x && r.y === gate.barrier.y && r.w === gate.barrier.w),
+    );
+    this.flow.rebuild(this.ruins);
+    this.flow.update(this.player.x, this.player.y, true);
+
+    // Whatever the biome guarantees, placed now that it can be reached.
+    const biome = (this.arena.biomes ?? []).find((b) => b.id === gate.opens);
+    for (const kind of biome?.poi ?? []) {
+      const poi = POIS.find((p) => p.kind === kind);
+      if (!poi) continue;
+      const x = biome!.x + this.rng.range(biome!.w * 0.2, biome!.w * 0.8);
+      const y = biome!.y + this.rng.range(biome!.h * 0.2, biome!.h * 0.8);
+      this.pushTerminal(poi.kind, x, y, poi.channelTime, poi.requiresStillness);
+    }
+
+    this.pushFx('rupture', 'voltaic', gate.x, gate.y, 900, [], 1.2);
+    this.cue('level', 'voltaic', 0, 1);
+    this.mark('gate', `${gate.name} open`);
+    this.stats.gatesOpened++;
+  }
+
+  /** §21b.6 — is this point inside a biome that has not been opened? */
+  isSealed(x: number, y: number): boolean {
+    for (const b of this.arena.biomes ?? []) {
+      if (this.openBiomes.has(b.id)) continue;
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return true;
+    }
+    return false;
+  }
+
+  /** §21b.4 — the biome the player is standing in, if any. */
+  get biome(): BiomeDef | null {
+    for (const b of this.arena.biomes ?? []) {
+      if (!this.openBiomes.has(b.id)) continue;
+      if (
+        this.player.x >= b.x &&
+        this.player.x <= b.x + b.w &&
+        this.player.y >= b.y &&
+        this.player.y <= b.y + b.h
+      ) {
+        return b;
+      }
+    }
+    return null;
   }
 
   private spawnTerminals(dt: number): void {
@@ -1803,8 +1967,8 @@ export class World {
     y: number,
     channelTime: number,
     requiresStillness: boolean,
-  ): void {
-    this.terminals.push({
+  ): Terminal {
+    const t: Terminal = {
       id: this.nextId++,
       kind,
       x,
@@ -1814,7 +1978,9 @@ export class World {
       channelTime,
       requiresStillness,
       alive: true,
-    });
+    };
+    this.terminals.push(t);
+    return t;
   }
 
   private completeTerminal(t: Terminal): void {
@@ -1836,6 +2002,11 @@ export class World {
   /** Called by POI_EFFECTS. See openCache. */
   openCacheNow(x: number, y: number): void {
     this.openCache(x, y);
+  }
+
+  /** Called by POI_EFFECTS. See openGate. */
+  openGateNow(t: Terminal): void {
+    this.openGate(t);
   }
 
   /** Called by POI_EFFECTS. See spawnWave. */
@@ -2198,6 +2369,36 @@ export class World {
    * rectangle. Near a corner there may be no fully-hidden option; this picks the
    * least-visible one available rather than silently doing the worst thing.
    */
+  /**
+   * §12.2 / §21b.6 — enemies that fall too far behind are recycled to the front.
+   *
+   * This is a bullet-heaven, not an RPG: the horde is a pressure field around
+   * the player, not a population that lives somewhere. On a six-screen arena the
+   * distinction barely showed; on a twenty-screen one it decides whether
+   * `targetAlive` means anything at all, because a hundred enemies strung out
+   * behind you are a hundred enemies not in the fight.
+   *
+   * Relocated rather than killed and respawned: the count stays exactly where
+   * the director put it, no drop is lost, and nothing has to be re-rolled.
+   */
+  private recycleStragglers(): void {
+    const limit = TUNABLE.recycleDistance * TUNABLE.recycleDistance;
+    for (const e of this.enemies) {
+      if (!e.alive) continue;
+      const dx = e.x - this.player.x;
+      const dy = e.y - this.player.y;
+      if (dx * dx + dy * dy < limit) continue;
+      // Anything anchored to a place stays there: a Suppressor's field and a
+      // Glutton's fuse are both about *where they are*.
+      if (e.meals > 0 || (getEnemy(e.defId).zoneRadius ?? 0) > 0) continue;
+      const origin = this.pickSpawnOrigin();
+      e.x = clamp(origin.x, 20, this.arena.width - 20);
+      e.y = clamp(origin.y, 20, this.arena.height - 20);
+      e.spawnAge = 0;
+      this.stats.recycled++;
+    }
+  }
+
   private pickSpawnOrigin(): { x: number; y: number } {
     const halfW = TUNABLE.nominalViewWidth / 2;
     const halfH = TUNABLE.nominalViewHeight / 2;
@@ -2642,7 +2843,7 @@ export class World {
    */
   private resolveRuins(body: { x: number; y: number }, radius: number): boolean {
     let touched = false;
-    for (const r of this.arena.ruins) {
+    for (const r of this.ruins) {
       const nx = clamp(body.x, r.x, r.x + r.w);
       const ny = clamp(body.y, r.y, r.y + r.h);
       const dx = body.x - nx;
@@ -2672,7 +2873,7 @@ export class World {
 
   /** True if the point sits inside any ruin — used for projectiles and spawns. */
   insideRuin(x: number, y: number, pad = 0): boolean {
-    for (const r of this.arena.ruins) {
+    for (const r of this.ruins) {
       if (x >= r.x - pad && x <= r.x + r.w + pad && y >= r.y - pad && y <= r.y + r.h + pad) {
         return true;
       }
@@ -3260,7 +3461,7 @@ export class World {
       if (d < TUNABLE.playerRadius + 6) {
         item.alive = false;
         if (item.kind === 'magnet') this.sweepShards();
-        else this.gainXp(item.value);
+        else this.gainXp(item.value * (this.biome?.xpMultiplier ?? 1));
         this.cue('pickup', item.hue, 0, item.kind === 'xp' ? 0.3 : 0.2);
         this.emit({ type: 'pickup', depth: 0, x: p.x, y: p.y, hue: item.hue });
       }
@@ -3618,6 +3819,8 @@ export class World {
     // the hard no-spawn-on-player guarantee.
     const hidden = this.pushOutsideView(rx, ry);
     const safe = this.pushOutsideSafeRadius(hidden.x, hidden.y);
+    // §21b.6 — nothing arrives in ground the player has not opened.
+    if (this.isSealed(safe.x, safe.y)) return;
     this.pendingSpawns.push({
       time: this.time + delay,
       enemy,
@@ -3768,7 +3971,6 @@ export class World {
     // build, which makes taking it a real read on where the run is going.
     const empty = this.engine.programs.filter((_, i) => !this.engine.compiled[i]?.live).length;
     this.budget.capacity = this.baseCapacity + this.bonuses.capacitor * empty;
-    this.budget.extraVenting = this.bonuses.coolant;
   }
 
   /**

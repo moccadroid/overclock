@@ -95,13 +95,20 @@ export function botInput(world: World): InputState {
     // never exercises the POI at all.
     (healthy && p.integrity > p.maxIntegrity * 0.75
       ? world.terminals.find((t) => t.kind === 'cache' && t.alive)
+      : undefined) ??
+    // §21b.5 — a gate is the map opening, and the reference pilot has to take
+    // one or the whole map layer goes untested by the harness. Only while
+    // healthy: holding ground is the most dangerous thing in the game.
+    (healthy && p.integrity > p.maxIntegrity * 0.8
+      ? world.terminals.find((t) => t.kind === 'gate' && t.alive)
       : undefined);
 
   if (target) {
     const dx = target.x - p.x;
     const dy = target.y - p.y;
     const d = hypot(dx, dy);
-    const range = target.kind === 'recompile' ? 2200 : target.kind === 'cache' ? 1800 : 900;
+    const range =
+      target.kind === 'recompile' ? 2200 : target.kind === 'gate' ? 4000 : target.kind === 'cache' ? 1800 : 900;
     // The pull has to survive a crowd. `threatDist > 150` meant the bot only
     // approached a POI when nothing was near it, and at this game's densities
     // that is never: measured across three full runs, the reference pilot
@@ -112,7 +119,10 @@ export function botInput(world: World): InputState {
       ax += (dx / (d || 1)) * 1.4;
       ay += (dy / (d || 1)) * 1.4;
     }
-    if (d < TUNABLE.beaconRadius) channelling = true;
+    // A gate is held by standing anywhere inside its ring, not by pressing E
+    // at arm's length, so "arrived" is a different distance for it.
+    const hold = target.holdRadius ? target.holdRadius * 0.5 : TUNABLE.beaconRadius;
+    if (d < hold) channelling = true;
   }
 
   const len = hypot(ax, ay);

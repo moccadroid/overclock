@@ -924,6 +924,81 @@ Full rebinding for keyboard and gamepad; two preset layouts each; stick deadzone
 
 ---
 
+## 21b. The arena — biomes, gates, and how the map grows
+
+The Heap started as one flat field, 4200x2400, with 21 rectangular ruins and a spawn point in the middle. About six screens of area, and every one of them the same screen. Three failures, all measured in play: nothing is ever *over there* (terminals spawn in a ring around the player, so the map comes to you), density is one global number so the fight is identical everywhere, and the ruins block movement and nothing else.
+
+### 21b.1 How big, and why
+
+The limit is **time**, not memory. The player moves at 300 units/sec and a screen is 1920x900, so one screen-width is 6.4 seconds of walking. A twenty-minute run has room for perhaps ten to fifteen real journeys before travel starts eating the game.
+
+That puts the end state at **15-25 screens**, roughly 8000x4500 — about 3.5x today. Not as one field: **unlocked in stages**, so the player is never walking through map they have already cleared.
+
+The technical ceiling was measured rather than guessed. The flow field is a full-arena Dijkstra rebuilt whenever the player crosses a 60-unit cell, about five times a second:
+
+```
+ 4200x2400    6 screens    1.0ms      today
+ 8000x4500   21 screens    3.4ms
+12000x7000   49 screens    8.2ms      a visible hitch, 5x a second
+16000x9000   83 screens   15.0ms
+```
+
+At 144Hz the whole frame is 6.9ms, so past ~20 screens the field must become **local**: Dijkstra over a window around the player, with enemies outside it walking straight in. That is ~1.2ms regardless of total map size, and after it map size costs nothing at runtime.
+
+### 21b.2 Staged unlock
+
+```
+0:00    The Core          1-2 screens    no travel; the fight is immediate
+lv5     two biomes open   +6 screens
+lv12    two more          +6 screens
+15:00   the Deep          +5 screens
+20:00   Meltdown          every gate blows open at once
+```
+
+Each stage is a place you fight in for three to five minutes. **Gates never close.** Biomes may later have multiple states; a biome that changes is a better idea than a biome that locks.
+
+This is the answer to the objection that a large map in a bullet-heaven is mostly empty: the player does not *explore*, the walls move outward. Everywhere reachable is somewhere you are fighting, and the arena grows at the rate the Engine does.
+
+### 21b.3 Generated from the seed, revealed by gates
+
+**Generate the whole map at run start, from the seed.** Lazy generation buys nothing — the seed fixes the result either way — and it risks the one thing the recorder cannot tolerate, which is content appearing at an unpredictable moment (§14).
+
+Two layers:
+
+- **The grammar is fixed.** There is always a Core. There are always five or six biomes. Gates always sit at these progression points. The player learns the *city*.
+- **The instance rolls per seed.** Which biomes, their arrangement, their contents, where cover falls. The player never learns the *run*.
+
+### 21b.4 What makes a biome different
+
+**Not enemy rosters, and not corridors.** The director owns what spawns and it spawns around the player wherever they are; a biome with its own enemy list would fight that. Narrow passages are worse — in a game where the player circles constantly, a corridor is a death trap that reads as the level being unfair. Cover must always be something you can go *around*: pillars, big blocks, broken plazas. Nothing that stops movement in two dimensions.
+
+Four axes instead:
+
+1. **Terrain shape** — scattered pillars vs a few enormous blocks vs open ground with hazard patches. Same enemies, a different fight.
+2. **POI mix** — the Freezer always has Coolers, the Foundry always has a Forge. This is the actual reason to go somewhere.
+3. **One legible rule per biome**, the strongest lever and the cheapest to build. Sketches: *Freezer* — venting x3, XP x0.6. *Foundry* — +25 Cycle capacity inside, Heat +25%. *Yard* — no POIs, pickups collect themselves, density doubled. *Static* — permanent weak suppression, double XP.
+4. **Look** — background tint, grid pattern, ruin silhouettes. Cheap, and it does most of the "where am I" work.
+
+### 21b.5 Gates
+
+A gate is a **POI** (§12.4), which is why the POI registry exists. Requirement types: a level, a kill or event count, a Gatekeeper dead, another POI channelled.
+
+The v1 gate is a **hold-ground**: a large circle, channelled by standing in it for a stretch, progress draining if you leave, and a hardened wave arriving when you start. It is the simplest thing that makes opening the map an *event* rather than a button, and it reuses the Cache's menagerie.
+
+A gate must be **visible from across the arena before it can be opened**. A gate you can see and cannot yet open is a promise, and promises are most of what "story feel" means mechanically.
+
+Barriers are ruins that are removed when their gate opens. That reuses collision, pathing and rendering rather than inventing a wall type.
+
+### 21b.6 Consequences
+
+- **Density is local.** `targetAlive` means "around the player" — enemies that fall too far behind are recycled to a spawn position ahead. This is a bullet-heaven, not an RPG: the horde is a pressure field, not a population that lives somewhere.
+- **Spawns respect locks.** Nothing spawns inside a biome the player has not opened.
+- **Extract is the goal.** Reaching it *is* winning the run (§12.5), so it sits at the far end rather than at home.
+- **Containment (§11.4)** is arena-scale geometry and will need rethinking once the arena is twenty screens.
+- **No minimap.** The off-screen indicators (§19.4) already carry direction and distance; the map is legible from them plus the biome tint. Revisit only if that stops being true.
+
+---
+
 ## 22. Content scope — v1 ship list
 
 | System | v1 quantity |

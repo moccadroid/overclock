@@ -251,6 +251,55 @@ export interface RuinRect {
   h: number;
 }
 
+/**
+ * §21b.4 — a region of the arena with its own character.
+ *
+ * A biome is *not* an enemy roster. The director owns what spawns and it spawns
+ * around the player wherever they are; a biome with its own creatures would
+ * fight that and would mean walking somewhere to meet a list. A biome is
+ * terrain, the POIs it guarantees, one legible rule, and a colour.
+ */
+export interface BiomeDef {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** Background tint while inside. The cheapest "where am I" there is. */
+  tint?: number;
+  /** The one rule. Multiplies base Heat venting while the player is inside. */
+  ventMultiplier?: number;
+  /** Multiplies XP from shards collected inside. */
+  xpMultiplier?: number;
+  /** POIs this biome guarantees, placed inside it when it opens. */
+  poi?: readonly string[];
+  description: string;
+}
+
+/**
+ * §21b.5 — a gate: the thing that opens the map.
+ *
+ * Held rather than pressed. You stand in the circle while it fills, it drains
+ * if you leave, and the neighbourhood arrives the moment you start. That makes
+ * opening the map an event instead of a button, and it reuses the Cache's
+ * hardened menagerie for the price.
+ */
+export interface GateDef {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  /** The circle you have to stand in. Large — this is ground you hold. */
+  radius: number;
+  /** Seconds of standing, and how fast it drains when you step out. */
+  holdSeconds: number;
+  /** The biome this opens. */
+  opens: string;
+  /** The wall that falls with it. A ruin, so collision and pathing are free. */
+  barrier: RuinRect;
+}
+
 export interface ArenaDef {
   id: string;
   name: string;
@@ -262,6 +311,9 @@ export interface ArenaDef {
   extractX: number;
   extractY: number;
   ruins: readonly RuinRect[];
+  /** §21b — the Core is implicit: everything not inside a biome. */
+  biomes?: readonly BiomeDef[];
+  gates?: readonly GateDef[];
   description: string;
 }
 

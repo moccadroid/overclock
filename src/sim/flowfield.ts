@@ -9,6 +9,19 @@
  *
  * Deterministic: a pure function of the player's position and the static ruins,
  * recomputed on a fixed tick cadence. No wall-clock, no randomness.
+ *
+ * **Windowed.** The Dijkstra runs over a box around the player, not the whole
+ * arena, because the arena is about to get much bigger. Measured on a full-arena
+ * rebuild at 60-unit cells, five times a second:
+ *
+ *     4200x2400   6 screens    1.0ms
+ *     8000x4500  21 screens    3.4ms
+ *    12000x7000  49 screens    8.2ms   — a visible hitch at 144Hz
+ *    16000x9000  83 screens   15.0ms
+ *
+ * The window makes that constant. Enemies outside it get a zero vector and fall
+ * back to a direct seek, which is correct: they are far off screen, and the
+ * only thing pathing buys is going *around* structure the player can see.
  */
 import type { ArenaDef } from './types';
 import { hypot } from './num';
@@ -44,11 +57,24 @@ export class FlowField {
 
   private lastTargetCell = -1;
 
+  /** Cell bounds of the window built by the last update. */
+  private winX0 = 0;
+  private winY0 = 0;
+  private winX1 = -1;
+  private winY1 = -1;
+
   constructor(
     private readonly arena: ArenaDef,
     cellSize = 60,
     /** Ruins are inflated by roughly an enemy radius so paths clear the corners. */
-    clearance = 16,
+    private readonly clearance = 16,
+    /**
+     * Half-width of the window, in cells. 28 cells at 60 units is 1680 either
+     * side of the player; the far corner of a 1920x900 view is 1060 away, so
+     * everything on screen — and half a screen past it — steers on a live field,
+     * and nothing else needs to.
+     */
+    private readonly windowCells = 28,
   ) {
     this.cellSize = cellSize;
     this.cols = Math.ceil(arena.width / cellSize);
@@ -59,13 +85,25 @@ export class FlowField {
     this.dist = new Float64Array(count);
     this.flow = new Float32Array(count * 2);
 
+    this.rebuild(arena.ruins);
+  }
+
+  /**
+   * Re-bake the blocked cells from a list of ruins.
+   *
+   * Called once at construction, and again whenever a §21b.5 barrier comes down
+   * — a gate opening is a ruin being removed, and the field has to hear about it
+   * or every enemy will keep walking around a wall that is no longer there.
+   */
+  rebuild(ruins: readonly { x: number; y: number; w: number; h: number }[]): void {
+    this.blocked.fill(0);
     for (let cy = 0; cy < this.rows; cy++) {
       for (let cx = 0; cx < this.cols; cx++) {
-        const x0 = cx * cellSize - clearance;
-        const y0 = cy * cellSize - clearance;
-        const x1 = (cx + 1) * cellSize + clearance;
-        const y1 = (cy + 1) * cellSize + clearance;
-        for (const r of arena.ruins) {
+        const x0 = cx * this.cellSize - this.clearance;
+        const y0 = cy * this.cellSize - this.clearance;
+        const x1 = (cx + 1) * this.cellSize + this.clearance;
+        const y1 = (cy + 1) * this.cellSize + this.clearance;
+        for (const r of ruins) {
           if (x0 < r.x + r.w && x1 > r.x && y0 < r.y + r.h && y1 > r.y) {
             this.blocked[cy * this.cols + cx] = 1;
             break;
@@ -73,6 +111,8 @@ export class FlowField {
         }
       }
     }
+    // Whatever field was built described a different arena.
+    this.lastTargetCell = -1;
   }
 
   private cellIndex(x: number, y: number): number {
@@ -94,7 +134,25 @@ export class FlowField {
     if (!force && target === this.lastTargetCell) return false;
     this.lastTargetCell = target;
 
-    this.dist.fill(Infinity);
+    // The window, clamped to the arena.
+    const tcx0 = target % this.cols;
+    const tcy0 = (target - tcx0) / this.cols;
+    this.winX0 = Math.max(0, tcx0 - this.windowCells);
+    this.winY0 = Math.max(0, tcy0 - this.windowCells);
+    this.winX1 = Math.min(this.cols - 1, tcx0 + this.windowCells);
+    this.winY1 = Math.min(this.rows - 1, tcy0 + this.windowCells);
+
+    // Clear only the window. `dist.fill(Infinity)` over the whole arena is
+    // itself O(area) and would put the cost straight back.
+    for (let cy = this.winY0; cy <= this.winY1; cy++) {
+      const row = cy * this.cols;
+      for (let cx = this.winX0; cx <= this.winX1; cx++) {
+        this.dist[row + cx] = Infinity;
+        this.flow[(row + cx) * 2] = 0;
+        this.flow[(row + cx) * 2 + 1] = 0;
+      }
+    }
+
     this.heap.length = 0;
     this.heapKey.length = 0;
 
@@ -106,7 +164,7 @@ export class FlowField {
       for (const [dx, dy] of NEIGHBOURS) {
         const nx = tcx + dx;
         const ny = tcy + dy;
-        if (nx < 0 || ny < 0 || nx >= this.cols || ny >= this.rows) continue;
+        if (!this.inWindow(nx, ny)) continue;
         const ni = ny * this.cols + nx;
         if (this.blocked[ni] === 1) continue;
         this.dist[ni] = 0;
@@ -126,7 +184,7 @@ export class FlowField {
       for (const [dx, dy, cost] of NEIGHBOURS) {
         const nx = cx + dx;
         const ny = cy + dy;
-        if (nx < 0 || ny < 0 || nx >= this.cols || ny >= this.rows) continue;
+        if (!this.inWindow(nx, ny)) continue;
         const ni = ny * this.cols + nx;
         if (this.blocked[ni] === 1) continue;
         // Do not let diagonals slip through the corner between two blocked cells.
@@ -147,10 +205,15 @@ export class FlowField {
     return true;
   }
 
+  /** Is this cell inside the window the last update built? */
+  private inWindow(cx: number, cy: number): boolean {
+    return cx >= this.winX0 && cx <= this.winX1 && cy >= this.winY0 && cy <= this.winY1;
+  }
+
   /** Each open cell points at whichever neighbour is closest to the target. */
   private buildFlow(): void {
-    for (let cy = 0; cy < this.rows; cy++) {
-      for (let cx = 0; cx < this.cols; cx++) {
+    for (let cy = this.winY0; cy <= this.winY1; cy++) {
+      for (let cx = this.winX0; cx <= this.winX1; cx++) {
         const i = cy * this.cols + cx;
         this.flow[i * 2] = 0;
         this.flow[i * 2 + 1] = 0;
@@ -162,7 +225,7 @@ export class FlowField {
         for (const [dx, dy] of NEIGHBOURS) {
           const nx = cx + dx;
           const ny = cy + dy;
-          if (nx < 0 || ny < 0 || nx >= this.cols || ny >= this.rows) continue;
+          if (!this.inWindow(nx, ny)) continue;
           const ni = ny * this.cols + nx;
           if (this.blocked[ni] === 1) continue;
           const nd = this.dist[ni]!;
@@ -187,6 +250,13 @@ export class FlowField {
    * where the field is undefined; callers should fall back to a direct seek.
    */
   sample(x: number, y: number, out: { x: number; y: number }): void {
+    // Outside the window there is no field, and saying so is better than
+    // returning a stale direction from wherever the player used to be.
+    if (!this.inWindow(Math.floor(x / this.cellSize), Math.floor(y / this.cellSize))) {
+      out.x = 0;
+      out.y = 0;
+      return;
+    }
     const gx = x / this.cellSize - 0.5;
     const gy = y / this.cellSize - 0.5;
     const x0 = Math.floor(gx);
