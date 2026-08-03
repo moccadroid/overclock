@@ -505,6 +505,14 @@ export class World {
   pendingDrafts = 0;
   rerolls = TUNABLE.rerollsPerRun;
   purges = TUNABLE.purgesPerRun;
+  /** §8.3 — rerolls taken in the current draft. Each one costs more Heat. */
+  rerollsThisDraft = 0;
+  /** §8.3 — a node id held over for the next draft, or null. */
+  locked: string | null = null;
+  /** §8.3 — how many times each node has been offered and refused. */
+  refused = new Map<string, number>();
+  /** Node ids in the offer currently on the table. See applyDraft. */
+  lastOffer: string[] = [];
   /** Node ids removed from this run's pool by Purge (§8.3). */
   purged = new Set<string>();
   /**
@@ -515,7 +523,20 @@ export class World {
    * to the others, which is what makes taking one a decision about the build you
    * are in rather than a number that always goes up.
    */
-  bonuses = { crit: 0, magnet: 0, speed: 0, power: 0, travels: 0, area: 0, lingers: 0, reach: 0 };
+  bonuses = {
+    crit: 0,
+    magnet: 0,
+    speed: 0,
+    power: 0,
+    travels: 0,
+    area: 0,
+    lingers: 0,
+    reach: 0,
+    coolant: 0,
+    capacitor: 0,
+    salvage: 0,
+    momentum: 0,
+  };
 
   /** Class-stat multipliers, read at the point of use so they cannot go stale. */
   get areaMul(): number {
@@ -562,6 +583,18 @@ export class World {
   private killsThisTick = 0;
   /** §5.3 On Threshold — the Heat tier last seen, so only climbs fire. */
   private lastTier = 0;
+  /** §8.2 Momentum — seconds since the player was last hurt. */
+  private sinceHurt = 0;
+  /**
+   * Capacity before the Capacitor stat.
+   *
+   * Capacitor is the first thing that changes capacity *continuously* — it pays
+   * per empty row, so it has to be recomputed whenever the Engine changes. That
+   * means syncBudget writes `budget.capacity`, which means every permanent gain
+   * (the Axiom's delta, a Capacity card, a Recompile) has to be banked here
+   * instead, or the next sync would erase it.
+   */
+  baseCapacity: number = TUNABLE.cycleCapacityBase;
   /** §5.3 On Depth — cascades that already announced themselves this tick. */
   private deepThisTick = new Set<number>();
   beaconTimer = 20;
@@ -651,9 +684,8 @@ export class World {
     this.engine = new Engine();
     this.installAxiomStarter();
 
-    this.budget = new CycleBudget(
-      TUNABLE.cycleCapacityBase + getAxiom(config.axiomId).capacityDelta,
-    );
+    this.baseCapacity = TUNABLE.cycleCapacityBase + getAxiom(config.axiomId).capacityDelta;
+    this.budget = new CycleBudget(this.baseCapacity);
     this.budget.setStaticLoad(this.engine.staticLoad);
 
     this.player = {
@@ -747,6 +779,7 @@ export class World {
     // §5.3 On Lull — the arena went quiet. Kills reset it, so this fires when a
     // build has run out of things to feed on, which is exactly when a build that
     // feeds on kills has nothing.
+    this.sinceHurt += dt;
     this.quietFor = this.killsThisTick > 0 ? 0 : this.quietFor + dt;
     this.killsThisTick = 0;
     this.deepThisTick.clear();
@@ -1000,6 +1033,9 @@ export class World {
         depthFalloff *
         this.engine.globalOutput *
         (1 + this.bonuses.power) *
+        // §8.2 Momentum — output for staying untouched, capped so a passive
+        // build cannot farm it by hiding. Resets the instant anything lands.
+        (1 + Math.min(TUNABLE.momentumCap, this.sinceHurt * this.bonuses.momentum)) *
         // §7.4 Convert: Bleed — Integrity spent, damage back, for a few seconds.
         (1 + this.player.outputBoost);
       const damage = def.damage * output;
@@ -1766,7 +1802,8 @@ export class World {
     this.engine.recompile();
 
     this.kernels++;
-    this.budget.capacity += Math.round(TUNABLE.recompileCapacityGain * share);
+    this.baseCapacity += Math.round(TUNABLE.recompileCapacityGain * share);
+    this.syncBudget();
     this.syncBudget();
 
     // Rebuild surge (§9.1): double XP for 120s, and the next few drafts widen.
@@ -2307,6 +2344,7 @@ export class World {
   private hurtPlayer(amount: number, cause: DamageSource): void {
     const p = this.player;
     if (p.iframes > 0) return;
+    this.sinceHurt = 0;
     p.integrity -= amount;
     p.iframes = 0.5;
     this.stats.damageTaken += amount;
@@ -3447,6 +3485,12 @@ export class World {
   /** Called by the draft layer once a card is applied, so static load stays in sync. */
   syncBudget(): void {
     this.budget.setStaticLoad(this.engine.staticLoad);
+    // §6.1 Capacitor — capacity for rows you have *not* filled. A stat that pays
+    // you for restraint, and the only card in the game that gets worse as you
+    // build, which makes taking it a real read on where the run is going.
+    const empty = this.engine.programs.filter((_, i) => !this.engine.compiled[i]?.live).length;
+    this.budget.capacity = this.baseCapacity + this.bonuses.capacitor * empty;
+    this.budget.extraVenting = this.bonuses.coolant;
   }
 
   /**

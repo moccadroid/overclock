@@ -36,7 +36,7 @@
 import { NO_INPUT, World, type InputState, type RunConfig } from './world';
 import { SIM_DT } from './tunables';
 import { hashWorld } from './hash';
-import { applyDraft, purgeCard, rollDraft, type DraftCard } from './draft';
+import { applyDraft, lockCard, purgeCard, rollDraft, useReroll, type DraftCard } from './draft';
 import type { NodeSlot } from './engine';
 
 /**
@@ -60,6 +60,8 @@ export type Command =
   | { k: 'draft'; i: number }
   | { k: 'reroll' }
   | { k: 'purge'; i: number }
+  /** §8.3 Lock — hold a card over for the next draft. Costs what a reroll costs. */
+  | { k: 'lock'; i: number }
   | { k: 'recompile'; rows: number[] }
   | { k: 'move'; fp: number; fs: NodeSlot; tp: number; ts: NodeSlot }
   /**
@@ -323,12 +325,18 @@ function apply(world: World, c: Command, tick: number, hooks: ReplayHooks): void
       // the rest of the run would be a different one. This is the exact class of
       // bug the checkpoint hashes exist to make loud.
       rollDraft(world);
-      if (world.rerolls > 0) world.rerolls--;
+      useReroll(world);
       return;
     case 'purge': {
       const offer = rollDraft(world);
       const card = offer.cards[c.i];
       if (card) purgeCard(world, card);
+      return;
+    }
+    case 'lock': {
+      const offer = rollDraft(world);
+      const card = offer.cards[c.i];
+      if (card) lockCard(world, card);
       return;
     }
     case 'recompile':

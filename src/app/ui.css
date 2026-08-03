@@ -406,6 +406,16 @@
   opacity: 0.3;
   cursor: default;
 }
+/* Lock is the constructive twin of Purge — one deletes a card from the run, the
+ * other holds it for the next draft — so it reads in the beacon blue the game
+ * uses for "a thing worth going to" rather than in Purge's signal red. */
+.card .lock {
+  margin-top: 4px;
+}
+.card .lock:hover:enabled {
+  color: var(--beacon, #9fd0ff);
+  border-color: var(--beacon, #9fd0ff);
+}
 
 .rail {
   display: flex;

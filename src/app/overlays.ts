@@ -12,6 +12,9 @@ import {
   applyDraft,
   describeCard,
   purgeCard,
+  lockCard,
+  canReroll,
+  rerollCost,
   rollDraft,
   useReroll,
   type DraftCard,
@@ -164,7 +167,9 @@ export class DraftOverlay extends Overlay {
 
       const purge = document.createElement('button');
       purge.className = 'purge';
-      purge.textContent = `PURGE (${world.purges})`;
+      // What it pays, on the button. A Purge banks a Scrap stack now, and a
+      // tool whose value is invisible is a tool nobody presses.
+      purge.textContent = `PURGE +${(4 * (1 + world.bonuses.salvage)).toFixed(0)}% (${world.purges})`;
       purge.disabled = card.kind !== 'node' || world.purges <= 0;
       purge.addEventListener('click', (ev) => {
         ev.stopPropagation();
@@ -175,7 +180,20 @@ export class DraftOverlay extends Overlay {
         }
       });
 
-      el.append(tag, name, body, slot, foot, purge);
+      const lock = document.createElement('button');
+      lock.className = 'purge lock';
+      const lockPrice = rerollCost(world);
+      lock.textContent = lockPrice > 0 ? `LOCK ${lockPrice} HEAT` : 'LOCK (free)';
+      lock.disabled = card.kind !== 'node' || !canReroll(world);
+      lock.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        if (lockCard(world, card)) {
+          this.onCommand?.({ k: 'lock', i });
+          this.render();
+        }
+      });
+
+      el.append(tag, name, body, slot, foot, purge, lock);
       el.addEventListener('click', () => this.choose(card));
       cards.appendChild(el);
     });
@@ -189,8 +207,10 @@ export class DraftOverlay extends Overlay {
 
     const reroll = document.createElement('button');
     reroll.className = 'railbtn';
-    reroll.textContent = `REROLL [R] ×${world.rerolls}`;
-    reroll.disabled = world.rerolls <= 0;
+    const price = rerollCost(world);
+    reroll.textContent =
+      price > 0 ? `REROLL [R] — ${price} HEAT` : `REROLL [R] ×${world.rerolls} free`;
+    reroll.disabled = !canReroll(world);
     reroll.addEventListener('click', () => this.reroll());
 
     const rest = document.createElement('span');

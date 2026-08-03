@@ -108,6 +108,9 @@ export const TUNABLE = {
    */
   suppressorsAlive: 2,
 
+  /** §8.2 Momentum — the ceiling on the untouched bonus. */
+  momentumCap: 0.4,
+
   // ---- §5.3 the new triggers ----
   /**
    * On Lull — how long the arena must stay quiet. Two seconds is long enough
@@ -236,6 +239,21 @@ export const TUNABLE = {
   xpPerShard: 1,
   draftCards: 3,
   rerollsPerRun: 2,
+  /**
+   * §8.3 — what a reroll costs once the banked ones are gone, in Heat, rising
+   * with each reroll in the same draft. Twelve is about a second and a half of
+   * venting: real, payable, and it stacks into something you have to think about
+   * if you reroll three times looking for one card.
+   */
+  rerollHeatCost: 12,
+  /**
+   * §8.2 — a node offered and refused this many times stops being offered.
+   *
+   * Measured: a run refused six Program Slots and the pool kept asking. The
+   * draft is supposed to read what you own; reading what you have *rejected* is
+   * the same idea and it costs one counter.
+   */
+  refusalsBeforeDrop: 3,
   purgesPerRun: 1,
   /**
    * §8.3 — "+1 from certain drafts". The two tools differ in kind, so they are

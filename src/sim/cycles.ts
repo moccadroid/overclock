@@ -93,6 +93,12 @@ export class CycleBudget {
     return this.stall > 0;
   }
 
+  /**
+   * §8.2 Coolant — extra Heat vented per second, from stats. Added rather than
+   * multiplied so it reads as a rate on the HUD: "-8/s venting" becomes "-10/s".
+   */
+  extraVenting = 0;
+
   /** Direct Heat change — Overdrive adds, Coolant subtracts. */
   addHeat(amount: number): void {
     this.heat = Math.max(0, Math.min(100, this.heat + amount));
@@ -138,7 +144,7 @@ export class CycleBudget {
     // Overheat with nothing in between. The cap is what keeps this a *rate* the
     // player can watch rather than an event that happens to them.
     const gain = Math.min(TUNABLE.heatGainMaxPerSec, dt > 0 ? this.heatThisTick / dt : 0);
-    const decay = TUNABLE.heatDecayPerSec;
+    const decay = TUNABLE.heatDecayPerSec + this.extraVenting;
     this.heatRate = gain - decay;
     this.heat = Math.max(0, this.heat + (gain - decay) * dt);
 

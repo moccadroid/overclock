@@ -35,6 +35,10 @@ export type StatKind =
   | 'integrity'
   | 'power'
   | 'reach'
+  | 'coolant'
+  | 'capacitor'
+  | 'salvage'
+  | 'momentum'
   | 'travels'
   | 'area'
   | 'lingers';
@@ -95,6 +99,42 @@ export const STAT_CARDS: Record<StatKind, { title: string; body: string; apply: 
       body: '+25% range on everything: shots fly further, beams and chains stretch.',
       apply: (w) => {
         w.bonuses.reach += 0.25;
+      },
+    },
+
+    // §6 — the Heat stats. Heat is a whole economy with no stat attached to it,
+    // which is why every build treats it as weather rather than as a number they
+    // own. These are the two dials.
+    coolant: {
+      title: 'Coolant',
+      body: '+2 Heat vented per second, always.',
+      apply: (w) => {
+        w.bonuses.coolant += 2;
+      },
+    },
+    capacitor: {
+      title: 'Capacitor',
+      body: '+6 Cycle capacity for every Program row you have not filled.',
+      apply: (w) => {
+        w.bonuses.capacitor += 6;
+      },
+    },
+    // §8.3 — a stat that pays for using the draft economy, so narrowing the pool
+    // is a build rather than housekeeping.
+    salvage: {
+      title: 'Salvage',
+      body: 'Every Purge from here on also permanently adds +4% output.',
+      apply: (w) => {
+        w.bonuses.salvage += 1;
+      },
+    },
+    // The stat that pays for not being hit. Every other defensive card in the
+    // game buys Integrity; this one buys *play*.
+    momentum: {
+      title: 'Momentum',
+      body: '+2% output per second since you were last hurt, up to +40%. Resets when you are.',
+      apply: (w) => {
+        w.bonuses.momentum += 0.02;
       },
     },
 
@@ -258,12 +298,28 @@ export function rollDraft(world: World): DraftOffer {
     (n) =>
       (!available || available.includes(n.id)) &&
       !world.purged.has(n.id) &&
+      // §8.2 — the pool reads what you have *rejected* as well as what you own.
+      // A run refused six Program Slots and the draft kept offering them; three
+      // strikes and a node stops asking. Purge is still the deliberate version
+      // of this, and still the one that pays.
+      (world.refused.get(n.id) ?? 0) < TUNABLE.refusalsBeforeDrop &&
       placeable(world, n) &&
       affordable(world, n),
   );
 
   const cards: DraftCard[] = [];
   const taken = new Set<string>();
+
+  // §8.3 Lock — a card held over from the last draft comes back first, whatever
+  // the pool would otherwise have said.
+  if (world.locked) {
+    const held = pool.find((n) => n.id === world.locked);
+    if (held) {
+      cards.push({ kind: 'node', nodeId: held.id });
+      taken.add(held.id);
+    }
+    world.locked = null;
+  }
 
   // §9.1 — the next few drafts after a Recompile offer four cards, and §13.3
   // shifts the Meltdown pool toward capacity so a big Engine can keep running.
@@ -317,6 +373,10 @@ export function rollDraft(world: World): DraftOffer {
           'reach',
           'reach',
           'reach',
+          'coolant',
+          'capacitor',
+          'salvage',
+          'momentum',
           // Weighted up, because these only pay a focused Engine and a card that
           // only sometimes matters has to show up often enough to be planned for.
           'travels',
@@ -341,6 +401,9 @@ export function rollDraft(world: World): DraftOffer {
     cards.push({ kind: 'node', nodeId: node.id });
   }
 
+  // Remembered so applyDraft can tell which cards were passed over. Only node
+  // ids: a refused stat or capacity card is not a statement about the pool.
+  world.lastOffer = cards.filter((c) => c.kind === 'node').map((c) => c.nodeId);
   return { cards, rerolls: world.rerolls, purges: world.purges };
 }
 
@@ -416,8 +479,23 @@ export function describeCard(card: DraftCard): {
 export function applyDraft(world: World, card: DraftCard): number | null {
   let landed: number | null = null;
 
+  // §8.2 — everything else on the table was refused. Three refusals and the pool
+  // stops offering it. This is the automatic half of Purge: Purge is the
+  // deliberate, paid version that also deletes the card outright.
+  const chosen = card.kind === 'node' ? card.nodeId : null;
+  for (const id of world.lastOffer) {
+    // Not the one taken, and not the one locked: paying Heat to hold a card is
+    // the opposite of refusing it, and counting it as a refusal would have the
+    // pool quietly punish you for wanting something.
+    if (id === chosen || id === world.locked) continue;
+    world.refused.set(id, (world.refused.get(id) ?? 0) + 1);
+  }
+  world.lastOffer = [];
+
   if (card.kind === 'capacity') {
-    world.budget.capacity += card.amount;
+    // Banked on the run's base rather than on the live figure: syncBudget
+    // recomputes capacity every time the Engine changes (see Capacitor).
+    world.baseCapacity += card.amount;
   } else if (card.kind === 'program_slot') {
     world.engine.addProgramSlot();
   } else if (card.kind === 'stat') {
@@ -432,21 +510,77 @@ export function applyDraft(world: World, card: DraftCard): number | null {
   world.syncBudget();
   if (world.pendingDrafts > 0) world.pendingDrafts--;
   if (world.surgeDrafts > 0) world.surgeDrafts--;
+  world.rerollsThisDraft = 0;
   return landed;
 }
 
-/** §8.3 — Purge permanently removes a card from this run's pool. */
+/**
+ * §8.3 — Purge permanently removes a card from this run's pool, and pays you.
+ *
+ * The paying part is new, and it is the whole fix. Measured: the pool is 42
+ * nodes, a Purge deleted exactly one of them, and within the modifier slice that
+ * moved every remaining card's odds by half a percentage point. Over a
+ * twenty-draft run it changed roughly one card, once. It was not a weak tool, it
+ * was a rounding error with a button.
+ *
+ * Now a Purge also banks a Scrap stack — the same permanent +4% output that
+ * scrapping a node pays — so refusing a card is *progress* rather than
+ * housekeeping, and the third card in an offer is never wasted. Salvage doubles
+ * that, which is how a build turns the draft economy itself into a strategy.
+ */
 export function purgeCard(world: World, card: DraftCard): boolean {
   if (card.kind !== 'node') return false;
   if (world.purges <= 0) return false;
   world.purges--;
   world.purged.add(card.nodeId);
+  world.engine.scrapStacks += 1 + world.bonuses.salvage;
   return true;
 }
 
+/**
+ * §8.3 — Reroll, priced in Heat instead of rationed per run.
+ *
+ * Two per run meant you hoarded them and died holding them: a resource you are
+ * afraid to spend is not a decision, it is inventory. Every draft now offers a
+ * reroll for Heat — the run's own currency, which the player can already read on
+ * the gauge and which costs *more* the hotter they are running. Banked rerolls
+ * from tool cards are spent first, so those keep their value as "a free look".
+ */
+export function rerollCost(world: World): number {
+  if (world.rerolls > 0) return 0;
+  return TUNABLE.rerollHeatCost * (1 + world.rerollsThisDraft);
+}
+
+export function canReroll(world: World): boolean {
+  if (world.rerolls > 0) return true;
+  // Never a reroll that overheats you outright. Choosing to run hot is a
+  // decision; a button that ends the run is a trap.
+  return world.budget.heat + rerollCost(world) < 100;
+}
+
 export function useReroll(world: World): boolean {
-  if (world.rerolls <= 0) return false;
-  world.rerolls--;
+  if (!canReroll(world)) return false;
+  if (world.rerolls > 0) world.rerolls--;
+  else world.budget.addHeat(rerollCost(world));
+  world.rerollsThisDraft++;
+  return true;
+}
+
+/**
+ * §8.3 — Lock: keep one card on the table for the next draft too.
+ *
+ * The missing tool. "I need this but I cannot afford it yet" was a pure loss —
+ * you either took a card that did nothing or watched the one you wanted go back
+ * in the pool. A Lock costs the same Heat a reroll does and holds exactly one
+ * card, which makes saving up for an expensive Action a plan rather than a hope.
+ */
+export function lockCard(world: World, card: DraftCard): boolean {
+  if (card.kind !== 'node') return false;
+  if (world.locked === card.nodeId) return false;
+  if (!canReroll(world)) return false;
+  if (world.rerolls > 0) world.rerolls--;
+  else world.budget.addHeat(rerollCost(world));
+  world.locked = card.nodeId;
   return true;
 }
 
