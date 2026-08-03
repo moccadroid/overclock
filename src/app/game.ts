@@ -117,6 +117,7 @@ export class Game {
     this.audio.setVolume(settings.volume);
     this.audio.setMusicVolume(settings.music);
     this.audio.setSfxVolume(settings.effects);
+    this.renderer.setBeatSync(settings.beatSync);
     this.audio.start();
     this.audio.beginRun();
 
@@ -305,6 +306,11 @@ export class Game {
       }
       if (steps === 8) this.accumulator = 0;
     }
+
+    // §18.2 read backwards: the picture is told where the beat is. Read every
+    // frame from the audio clock rather than accumulated here, because the audio
+    // clock is the one the player is actually hearing.
+    this.renderer.setBeat(this.audio.beat);
 
     // The camera only tracks while time is running — a frozen draft or editor
     // should not drift the view out from under the player.

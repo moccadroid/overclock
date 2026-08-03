@@ -173,6 +173,8 @@ export class Audio {
   /** Everything the Engine and the chrome play. Under the Effects slider. */
   private sfxGroup!: GainNode;
   private uiBus!: GainNode;
+  /** The Effects slider, applied post-limiter for chrome. Mirrors `sfxGroup`. */
+  private uiLevel!: GainNode;
   private musicVolume = 1;
   private sfxVolume = 1;
   /** Kick and accents. Never ducked — the kick is what everything ducks under. */
@@ -276,7 +278,14 @@ export class Audio {
    * to chase. The menu's START RUN is that gesture.
    */
   start(): void {
-    if (this.ctx) return;
+    if (this.ctx) {
+      // Already built, but not necessarily running. A context created before a
+      // gesture starts suspended, and browsers also suspend on tab blur — both
+      // of which leave a graph that is wired correctly and completely silent.
+      // Returning early here was half of "there's no sound in the menu".
+      if (this.ctx.state !== 'running') void this.ctx.resume();
+      return;
+    }
     const Ctor =
       window.AudioContext ??
       (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
@@ -352,16 +361,33 @@ export class Audio {
     this.sfxGroup.gain.value = this.sfxVolume;
     this.sfxGroup.connect(this.lowShelf);
 
+    // The Effects slider still has to reach chrome, and chrome no longer passes
+    // through `sfxGroup`, so the level is mirrored here instead.
+    this.uiLevel = ctx.createGain();
+    this.uiLevel.gain.value = this.sfxVolume;
+    this.uiLevel.connect(this.master);
+
     this.punchBus = ctx.createGain();
     this.punchBus.gain.value = 0.95;
     this.punchBus.connect(this.musicGroup);
 
-    // Chrome used to share the punch bus, which put UI clicks under the music
-    // slider. It keeps that bus's level — a click that ducks under the kick
-    // reads as a click that did not register — but it is an effect, not music.
+    // Chrome sits *after* the limiter, and it is the only thing that does.
+    //
+    // A click that vanishes because the music is loud is a click that did not
+    // register, and with the limiter driven 12x into a -34dB threshold it is
+    // always working — so a busy passage was ducking the interface along with
+    // everything else. That is the whole failure mode a shared bus has, and no
+    // amount of raising the click fixes it, because raising it raises what the
+    // limiter is reacting to as well.
+    //
+    // This does not weaken §18.4's guarantee, and the reason is specific: the
+    // rule exists because *accumulation* raises RMS, and forty simultaneous
+    // voices are what accumulate. Chrome is one-shot, fixed-gain, throttled to
+    // one hover every 45ms, and never more than a couple at once. It has no
+    // mechanism to get louder. Nothing else may follow it here.
     this.uiBus = ctx.createGain();
-    this.uiBus.gain.value = 0.95;
-    this.uiBus.connect(this.sfxGroup);
+    this.uiBus.gain.value = 0.5;
+    this.uiBus.connect(this.uiLevel);
 
     this.musicFilter = ctx.createBiquadFilter();
     this.musicFilter.type = 'lowpass';
@@ -419,6 +445,7 @@ export class Audio {
   setSfxVolume(v: number): void {
     this.sfxVolume = clamp01(v);
     if (this.sfxGroup) this.sfxGroup.gain.value = this.sfxVolume;
+    if (this.uiLevel) this.uiLevel.gain.value = this.sfxVolume;
   }
 
   /**
@@ -450,6 +477,37 @@ export class Audio {
   /** True while the arrangement is running — the Music pane shows a ▶ for it. */
   get playing(): boolean {
     return this.clock !== null && !this.silenced;
+  }
+
+  /**
+   * Where we are in the bar, right now. GDD §18.2 read backwards.
+   *
+   * Everything in this game already waits for the grid; the picture was the one
+   * thing that did not know the grid existed. So when a Nova landed on a
+   * downbeat it was luck, and it read as a moment rather than as the game.
+   *
+   * `beat` counts sixteenths as a float — 4.5 is halfway between the fifth and
+   * sixth step of the bar — and `pulse` is 1 on the quarter falling to 0 by the
+   * next one. Read by the renderer, written by nobody: this is a clock you look
+   * at, not one you set. It is deliberately derived from `ctx.currentTime`
+   * rather than from the frame, because the *audio* clock is the one the player
+   * is hearing and a frame-derived copy would drift against it within seconds.
+   */
+  get beat(): { beat: number; pulse: number; bpm: number } | null {
+    if (!this.ctx || !this.clock || this.silenced) return null;
+    const step = this.clock.stepDuration;
+    // `nextStepTime` is up to a lookahead window ahead of the sound you are
+    // hearing, so this measures against the context clock directly.
+    const sixteenths = this.ctx.currentTime / step;
+    const inBar = ((sixteenths % 16) + 16) % 16;
+    const sinceQuarter = inBar % 4;
+    return {
+      beat: inBar,
+      // Sharp attack, quick decay — a pulse that lingered would smear the four
+      // quarters into one wobble.
+      pulse: Math.pow(1 - sinceQuarter / 4, 2.6),
+      bpm: this.clock.bpm,
+    };
   }
 
   /**
@@ -496,12 +554,22 @@ export class Audio {
   }
 
   /**
-   * A new run is starting. Only tells the arranger to stop waiting for a phrase
-   * boundary — the music itself keeps running, because cutting it dead between
-   * the menu and the arena is worse than one abrupt change of bed.
+   * A new run is starting.
+   *
+   * Two jobs. It tells the arranger to stop waiting for a phrase boundary — the
+   * music itself keeps running, because cutting it dead between the menu and the
+   * arena is worse than one abrupt change of bed.
+   *
+   * And it undoes `silence()`, which nothing else did. STOP on the Music screen
+   * zeroes the punch, music and engine busses, and only `preview` and
+   * `auditArrangement` ever put them back — so pressing STOP and then starting a
+   * run gave you a completely silent run, music *and* engine, until you happened
+   * to wander back into the Music screen and play something. That is exactly the
+   * "it stopped, then weirdly came back" this was reported as.
    */
   beginRun(): void {
     this.freshRun = true;
+    this.resumeBusses();
   }
 
   private adopt(plan: Arrangement): void {
@@ -632,7 +700,14 @@ export class Audio {
    * crosses a list, and without a floor the mix turns into a hiss.
    */
   chrome(sound: UiSound): void {
-    if (!this.ctx || this.muted) return;
+    if (this.muted) return;
+    // Builds the context if this is the first thing the player has touched.
+    // Chrome fires from clicks, which are exactly the gesture browsers want, and
+    // the menu used to stay silent until something else happened to call start()
+    // — so the first few hovers and clicks of a session made no sound at all,
+    // which reads as the sounds being broken rather than as not yet existing.
+    this.start();
+    if (!this.ctx) return;
     const now = this.ctx.currentTime;
     if (sound === 'hover') {
       if (now - this.lastHover < 0.045) return;

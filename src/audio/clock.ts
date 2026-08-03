@@ -60,9 +60,16 @@ export class Clock {
 
   /**
    * The next sixteenth boundary at or after `when`. This is the whole §18.2
-   * trick: an engine event asks for its note here, gets pushed forward by up to
-   * ~34ms, and lands on the grid. Below ~40ms nobody perceives the delay in this
-   * genre, so the game feels immediate and sounds composed.
+   * trick: an engine event asks for its note here, gets pushed forward onto the
+   * grid, and forty simultaneous kills become four chords instead of forty
+   * arbitrary moments.
+   *
+   * The delay is up to one sixteenth — 134ms at 112 BPM, not the "~34ms" this
+   * comment used to claim. That is a lot for a sound, and it works anyway
+   * because a *sound* arriving late still reads as part of the music, while the
+   * hit it describes already happened on screen and sold the impact. The picture
+   * gets no such forgiveness, which is why the renderer's equivalent is a 45ms
+   * snap window rather than this.
    */
   quantize(when: number): number {
     const step = this.stepDuration;

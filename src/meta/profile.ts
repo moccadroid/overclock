@@ -97,6 +97,12 @@ export interface LibraryData {
      * no-numbers guard stays honest by construction rather than by exception.
      */
     fx: string[];
+    /**
+     * §18.2 — hold a detonation's picture for the next sixteenth, up to ~34ms.
+     * Its own flag rather than one of `fx`, because the quality presets sweep
+     * that list and this is a feel decision, not a fidelity one.
+     */
+    beatSync: boolean;
   };
 }
 
@@ -109,7 +115,7 @@ function emptyData(): LibraryData {
     bestScore: 0,
     bestDepth: 0,
     bestTime: 0,
-    settings: { muted: false, volume: 0.7, music: 0.85, effects: 0.9, fx: ['lighting', 'bloom'] },
+    settings: { muted: false, volume: 0.7, music: 0.85, effects: 0.9, fx: ['lighting', 'bloom'], beatSync: true },
   };
 }
 
@@ -145,6 +151,7 @@ export class Library {
           music: number(parsed.settings?.music) ?? base.settings.music,
           effects: number(parsed.settings?.effects) ?? base.settings.effects,
           fx: array(parsed.settings?.fx) ?? base.settings.fx,
+          beatSync: parsed.settings?.beatSync !== false,
         },
       };
     } catch {
@@ -235,6 +242,11 @@ export class Library {
     const on = this.data.settings.fx;
     const fx = on.includes(id) ? on.filter((e) => e !== id) : [...on, id];
     this.data.settings = { ...this.data.settings, fx };
+    this.save();
+  }
+
+  setBeatSync(beatSync: boolean): void {
+    this.data.settings = { ...this.data.settings, beatSync };
     this.save();
   }
 

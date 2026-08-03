@@ -271,6 +271,10 @@ export class TitleScreen {
         this.render();
       });
     }
+    panel.querySelector('[data-beatsync]')?.addEventListener('click', () => {
+      this.library.setBeatSync(!this.library.snapshot.settings.beatSync);
+      this.render();
+    });
     for (const seg of panel.querySelectorAll<HTMLElement>('[data-preset]')) {
       seg.addEventListener('click', () => {
         const preset = VIEW_PRESETS.find((p) => p.id === seg.dataset.preset);
@@ -492,6 +496,15 @@ export class TitleScreen {
       `<span class="opt-note">${preset === null ? 'custom — your own set' : 'a starting point; change anything below'}</span>` +
       `</div>` +
       effects +
+
+      `<div class="k">feel</div>` +
+      `<div class="opt" data-beatsync>` +
+      `<span class="opt-label">On the beat</span>` +
+      `<span class="opt-control"><span class="toggle${set.beatSync ? ' on' : ''}">` +
+      `${set.beatSync ? 'ON' : 'OFF'}</span></span>` +
+      `<span class="opt-note">a detonation that nearly lands on the beat waits ` +
+      `for it, up to 45ms. Damage still lands when it lands</span>` +
+      `</div>` +
       `<div class="set-foot">None of this touches the simulation. Heat and ` +
       `Meltdown push whatever you pick further.</div>` +
       `</div>`

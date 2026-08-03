@@ -51,6 +51,17 @@ const VIEW_WIDTH_MAX = 1900;
 /** Most lights one Arc contributes, however many times it actually bounced. */
 const CHAIN_LIGHT_HOPS = 6;
 
+/**
+ * How long a detonation's picture will wait for the grid. See `waitingForBeat`.
+ *
+ * 45ms is roughly where a visual delay stops being invisible and starts being
+ * felt, and it is a third of a sixteenth at this tempo — so about a third of all
+ * detonations get pulled onto the beat and the rest are untouched. Raising it
+ * catches more of them and starts costing responsiveness; this is the trade, and
+ * it is the reason the whole thing is a toggle.
+ */
+const BEAT_SNAP = 0.045;
+
 export class Renderer {
   readonly app = new Application();
   camera!: Camera;
@@ -108,6 +119,30 @@ export class Renderer {
   private jitterSeed = 1;
   /** Shared phase for the loot pulse — see drawPickups. Presentation only. */
   private lootPhase = 0;
+  /**
+   * Where the soundtrack is, this frame. Null when nothing is playing, which is
+   * what makes every use of it degrade to "no pulse" rather than to a guess.
+   */
+  private beat: { beat: number; pulse: number; bpm: number } | null = null;
+  /**
+   * §18.2 — nudge a detonation's *picture* onto the next sixteenth.
+   *
+   * The sim resolves on time; only the flash waits. Presentation-only by
+   * construction: nothing here reaches the sim, the world is not mutated, and
+   * turning it off changes nothing but when a ring appears.
+   *
+   * It is a **snap window, not a quantizer**, and that distinction is the whole
+   * design. A sixteenth at 112 BPM is 134ms — quantizing every detonation to the
+   * grid would delay half of them by more than a tenth of a second, which is not
+   * "feels musical", it is "feels broken". So: if a burst lands within
+   * `BEAT_SNAP` of the next sixteenth it waits for it, and otherwise it draws
+   * immediately. Near-misses get pulled into line, everything else is untouched,
+   * and the worst case anyone ever waits is the window itself.
+   */
+  private beatSync = true;
+  private readonly held = new Map<number, number>();
+  /** Renderer-local seconds. Only ever compared against itself. */
+  private clock = 0;
 
   async init(mount: HTMLElement, world: World): Promise<void> {
     this.world = world;
@@ -189,6 +224,46 @@ export class Renderer {
 
   // ------------------------------------------------------------------- frame
 
+  /**
+   * Hand the renderer the audio clock. Presentation reading presentation — the
+   * sim never learns any of this exists, which is the same wall §18 already has.
+   */
+  setBeat(beat: { beat: number; pulse: number; bpm: number } | null): void {
+    this.beat = beat;
+  }
+
+  setBeatSync(on: boolean): void {
+    this.beatSync = on;
+    if (!on) this.held.clear();
+  }
+
+  /**
+   * Is this detonation's picture still waiting for the grid?
+   *
+   * First sighting registers a release time; every frame after that compares
+   * against it. With nothing playing there is no grid to wait for, so it returns
+   * false immediately and the effect is exactly as it was before this existed.
+   */
+  private waitingForBeat(id: number): boolean {
+    if (!this.beatSync || !this.beat) return false;
+    let release = this.held.get(id);
+    if (release === undefined) {
+      const step = 60 / this.beat.bpm / 4;
+      const toNext = (1 - (this.beat.beat % 1)) * step;
+      release = this.clock + (toNext <= BEAT_SNAP ? toNext : 0);
+      this.held.set(id, release);
+    }
+    return this.clock < release;
+  }
+
+  /** Ids whose moment has long passed. Bounded without touching the sim. */
+  private pruneHeld(): void {
+    if (this.held.size < 256) return;
+    for (const [id, release] of this.held) {
+      if (this.clock - release > 2) this.held.delete(id);
+    }
+  }
+
   render(world: World, frameDt: number, cameraActive: boolean): void {
     if (cameraActive) {
       this.camera.follow(
@@ -200,6 +275,8 @@ export class Renderer {
       );
     }
 
+    this.clock += frameDt;
+    this.pruneHeld();
     this.drainDeaths(world);
     this.drainHurts(world, frameDt);
     this.trackDash(world);
@@ -279,7 +356,18 @@ export class Renderer {
     //
     // The player is wide and dim: it is on screen every frame in the same place,
     // so a hot core would be a permanent hole in the middle of the picture.
-    lights.point(world.player.x, world.player.y, 340, PALETTE.player, 0.2 + heat * 0.12);
+    //
+    // Its halo is the one light on the beat. Small — a tenth on the quarter —
+    // but it is the light you are always looking at, so it is where an entrained
+    // pulse is felt rather than noticed.
+    const pulse = this.beat ? this.beat.pulse : 0;
+    lights.point(
+      world.player.x,
+      world.player.y,
+      340 * (1 + pulse * 0.06),
+      PALETTE.player,
+      (0.2 + heat * 0.12) * (1 + pulse * 0.28),
+    );
 
     // Detonations and impacts. Short-lived and huge — a Nova should visibly
     // flood the room it went off in, which is most of what "excitement" means.
@@ -311,6 +399,9 @@ export class Renderer {
       }
 
       if (!this.camera.isVisible(fx.x, fx.y, fx.radius * 2 + 160)) continue;
+      // Held with its ring, or the room would light up before the thing lighting
+      // it appeared.
+      if ((fx.kind === 'burst' || fx.kind === 'rupture') && this.waitingForBeat(fx.id)) continue;
       // Big and brief. A detonation's light should be gone before the next one
       // lands, or a fast engine simply holds the whole arena at maximum.
       //
@@ -566,16 +657,29 @@ export class Renderer {
     for (let y = y0; y <= y1; y += step) {
       this.warpedLine(g, Math.max(0, view.x - step), y, Math.min(arena.width, x1), y, sources, warping);
     }
+    // §18.2, read backwards. The grid breathes on the quarter note.
+    //
+    // This is the cheapest possible version of "the picture is on the beat" and
+    // by far the highest-value: nothing new is drawn, an existing alpha just
+    // takes its ripple from the audio clock instead of from nothing. Play with
+    // the sound off and this is invisible; play with it on and the whole arena
+    // is entrained before a single detonation lands.
+    //
+    // It lives on the grid specifically because §16.2 reserves the bright bands
+    // for things that matter. Structure is the one layer that can pulse without
+    // ever competing with a threat, and the amount is small enough that it reads
+    // as the room having a pulse rather than as the grid flashing at you.
+    const pulse = this.beat ? this.beat.pulse : 0;
     g.stroke({
       width: 1,
       color: PALETTE.structure,
-      alpha: BAND.structure * (0.75 + load * 0.9),
+      alpha: BAND.structure * (0.75 + load * 0.9) * (1 + pulse * 0.34),
     });
 
     g.rect(0, 0, arena.width, arena.height).stroke({
       width: 2,
       color: PALETTE.structure,
-      alpha: BAND.structure * 1.6,
+      alpha: BAND.structure * 1.6 * (1 + pulse * 0.22),
     });
   }
 
@@ -1227,6 +1331,9 @@ export class Renderer {
     g.clear();
     for (const f of world.fx) {
       if (!this.camera.isVisible(f.x, f.y, f.radius + 60)) continue;
+      // Detonations only. A chain is a path between two things that already
+      // happened, and holding it would disconnect it from them.
+      if ((f.kind === 'burst' || f.kind === 'rupture') && this.waitingForBeat(f.id)) continue;
       const t = Math.max(0, f.life / f.maxLife);
       const color = HUE_COLOR[f.hue];
 

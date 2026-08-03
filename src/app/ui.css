@@ -1664,10 +1664,12 @@
   border-bottom: 1px solid rgba(42, 58, 82, 0.4);
   line-height: 1.9;
 }
-.opt[data-effect] {
+.opt[data-effect],
+.opt[data-beatsync] {
   cursor: pointer;
 }
-.opt[data-effect]:hover .opt-label {
+.opt[data-effect]:hover .opt-label,
+.opt[data-beatsync]:hover .opt-label {
   color: var(--white);
 }
 .opt.off {

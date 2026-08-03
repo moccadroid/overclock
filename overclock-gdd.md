@@ -837,6 +837,31 @@ Left open intentionally — resolve with design, not silently:
 5. Online leaderboards + replay/ghost format (v1.1 candidate; EPS trace makes replays cheap to consider).
 6. Audio-reactive spawning (waves quantized to bars) — prototype flag, could be magic or noise.
 7. A seventh "wildcard" hue for Meltdown-only drops — parked.
+8. **Rhythm as an input, not only as a readout.** Parked deliberately; the
+   biggest open idea in the audio direction and the one that changes the game
+   rather than dressing it.
+
+   Built already, and one-way: the Engine writes the soundtrack (18.1) and the
+   picture is entrained to it (grid pulse, snapped detonations). The player hears
+   and sees the beat but cannot *use* it.
+
+   The idea is to close the loop — reward acting on the grid. Candidates, roughly
+   in order of how invasive they are:
+
+   - Dash on a downbeat extends the i-frame window.
+   - A Clock row that fires on the beat crits, so tempo becomes a build axis.
+   - Fuel pickups on the beat are worth more.
+
+   Why it is parked rather than scheduled: it makes rhythm a **skill**, and
+   nothing else in this design asks for one. 17.1 promises every threat is
+   readable and actable; a timing window the deaf or the arrhythmic cannot hit
+   would break that, so any version of this needs a non-rhythmic path to the same
+   power or it is an accessibility regression (21). It also fights 8.2 — the
+   draft is where power comes from, and a second source of it dilutes the one
+   decision the game is about.
+
+   If it is ever built, build it as a *bonus* and never as a requirement, and
+   test it with the music muted before anything else.
 
 ---
 

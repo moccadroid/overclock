@@ -896,9 +896,9 @@ export function ui(v: VoiceCtx, at: number, sound: UiSound): void {
     // at the same gain, so this softens the character without undoing the "a bit
     // louder please" from earlier.
     case 'hover':
-      return tick(v, at, 0.085, 1400, 0.024);
+      return tick(v, at, 0.07, 950, 0.03);
     case 'click':
-      return tick(v, at, 0.28, 1100, 0.04);
+      return tick(v, at, 0.24, 780, 0.05);
 
     case 'draft': {
       // A Draft arriving. Two notes up, quiet: an offer, not an announcement.
@@ -914,7 +914,7 @@ export function ui(v: VoiceCtx, at: number, sound: UiSound): void {
     case 'confirm': {
       // A Draft taken. The same interval, landing rather than rising, plus the
       // tick you get from every other button so it still feels like a press.
-      tick(v, at, 0.28, 1100, 0.04);
+      tick(v, at, 0.24, 780, 0.05);
       for (const [i, degree] of [14, 12].entries()) {
         const t = at + i * 0.06;
         const g = env(ctx, t, 0.003, 0.2, 0.18);
@@ -970,11 +970,11 @@ export function ui(v: VoiceCtx, at: number, sound: UiSound): void {
 /** The whole UI vocabulary: a short filtered tick. Weight is the only variable. */
 function tick(v: VoiceCtx, at: number, gain: number, hz: number, dur: number): void {
   const { ctx } = v;
-  // 4ms rather than 0.8. An attack that fast is a step, and a step is broadband
+  // 6ms rather than 0.8. An attack that fast is a step, and a step is broadband
   // by definition — the bite people call "harsh" was the transient, not the
-  // level. 4ms is still far below the ~20ms where a press starts to feel late,
+  // level. 6ms is still well below the ~20ms where a press starts to feel late,
   // so nothing about the response changes.
-  const g = env(ctx, at, 0.004, dur, gain);
+  const g = env(ctx, at, 0.006, dur, gain);
   const bp = ctx.createBiquadFilter();
   bp.type = 'bandpass';
   bp.frequency.value = hz;
