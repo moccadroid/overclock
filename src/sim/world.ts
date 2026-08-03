@@ -1897,11 +1897,11 @@ export class World {
   outputShareOf(indices: readonly number[]): number {
     const live = this.engine.programs.filter((_, i) => this.engine.compiled[i]?.live);
     if (live.length === 0) return 0;
-    const total = live.reduce((s, p) => s + p.recentEvents, 0);
+    const total = live.reduce((s, p) => s + p.recentDamage, 0);
     const chosen = indices.filter((i) => this.engine.compiled[i]?.live);
     if (chosen.length === 0) return 0;
     if (total <= 0.01) return chosen.length / live.length;
-    return chosen.reduce((s, i) => s + this.engine.programs[i]!.recentEvents, 0) / total;
+    return chosen.reduce((s, i) => s + this.engine.programs[i]!.recentDamage, 0) / total;
   }
 
   /** What Kernel a given sacrifice would forge, for the selection UI. */
@@ -1948,6 +1948,8 @@ export class World {
       p.actionId = null;
       p.modifierIds.fill(null);
       p.recentEvents = 0;
+      p.recentDamage = 0;
+      p.tickDamage = 0;
       p.tickEvents = 0;
     }
     this.engine.recompile();
@@ -2372,6 +2374,12 @@ export class World {
     // the class stats now exist to reward. A tax nobody can see is not a
     // decision, it is a worse number.
     let resisted = damage;
+
+    // What actually landed, for the per-row DPS readout: an overkill counts only
+    // for what the target had left.
+    const landed = Math.min(resisted, Math.max(0, enemy.hp));
+    const source = this.engine.programs[programIndex];
+    if (source) source.tickDamage += landed;
 
     enemy.hp -= resisted;
     enemy.flash = 0.04;
@@ -3832,6 +3840,8 @@ export class World {
     const decay = ppow(0.5, dt / 2);
     for (const p of this.engine.programs) {
       p.recentEvents = p.recentEvents * decay + (p.tickEvents / dt) * (1 - decay);
+      p.recentDamage = p.recentDamage * decay + (p.tickDamage / dt) * (1 - decay);
+      p.tickDamage = 0;
       p.tickEvents = 0;
     }
   }

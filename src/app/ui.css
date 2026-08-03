@@ -337,6 +337,11 @@
 .t-lingers {
   color: #9d7bff;
 }
+/* Chain — Arc's tag, and the fourth neon. Amber-gold: the one warm colour the
+   hues do not already own at full saturation. */
+.t-chains {
+  color: #ffd63d;
+}
 /* Cards echo the chips: colour plus form. */
 .card.kind-trigger {
   border-left: 4px solid var(--k-trigger);
@@ -812,7 +817,13 @@
 .row .stats .share .off {
   color: #22303f;
 }
-.row .stats .pct {
+.row /* The row's DPS — the number the editor exists to show. */
+.stats .dps {
+  color: var(--ink-bright);
+  margin-left: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.stats .pct {
   display: inline-block;
   width: 34px;
   text-align: right;

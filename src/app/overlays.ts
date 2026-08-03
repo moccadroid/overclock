@@ -383,7 +383,7 @@ export class EditorOverlay extends Overlay {
       return;
     }
 
-    const totalEps = world.engine.programs.reduce((s, p) => s + p.recentEvents, 0);
+    const totalDps = world.engine.programs.reduce((s, p) => s + p.recentDamage, 0);
 
     const head = document.createElement('div');
     head.className = 'head';
@@ -402,7 +402,7 @@ export class EditorOverlay extends Overlay {
     legend.className = 'legend';
     legend.innerHTML =
       `<span class="idx"></span><span class="chains">TRIGGER · MODIFIERS (left to right) · ACTION</span>` +
-      `<span class="stats">share of output · cycles · damage · copies</span>` +
+      `<span class="stats">damage/sec · share · cycles · damage per hit</span>` +
       `<span class="ops"></span>`;
     panel.appendChild(legend);
 
@@ -447,7 +447,10 @@ export class EditorOverlay extends Overlay {
 
       const stats = document.createElement('div');
       stats.className = 'stats';
-      const share = totalEps > 0 ? (program.recentEvents / totalEps) * 100 : 0;
+      // §19.6 — the row's share of the Engine's *damage*, not of its event
+      // count. A row firing forty times a second for one damage was reading as
+      // four times more important than one firing ten times for a hundred.
+      const share = totalDps > 0 ? (program.recentDamage / totalDps) * 100 : 0;
       if (compiled.live) {
         // One line, not four. The share bar carries the comparison between rows,
         // which is the thing you actually scan for; the numbers are detail.
@@ -465,9 +468,12 @@ export class EditorOverlay extends Overlay {
           (1 + world.bonuses.power);
         const volley = perHit * shots;
 
+        // DPS first, because it is the question. Everything else is detail.
+        const dps = program.recentDamage;
         stats.innerHTML =
           `<span class="share"><span class="on">${'▮'.repeat(filled)}</span>` +
           `<span class="off">${'▮'.repeat(8 - filled)}</span></span>` +
+          `<span class="dps">${fmt(dps)} dps</span>` +
           `<span class="pct">${share.toFixed(0)}%</span>` +
           `<span class="detail">${compiled.staticCost.toFixed(0)}c · ` +
           (perHit > 0
@@ -475,12 +481,13 @@ export class EditorOverlay extends Overlay {
             : `no damage`) +
           `</span>`;
         stats.dataset.detail =
+          `${fmt(dps)} damage a second, measured over the last few seconds — ` +
+          `${share.toFixed(0)}% of this Engine's total. Overkill does not count.  ` +
           (perHit > 0
-            ? `${fmt(perHit)} damage per hit` +
-              (shots > 1 ? `, ${shots} hits per trigger = ${fmt(volley)} per fire.  ` : '.  ')
+            ? `One hit lands ${fmt(perHit)}` +
+              (shots > 1 ? `, and a fire is ${shots} of them = ${fmt(volley)}.  ` : '.  ')
             : `${def?.name ?? 'This Action'} deals no damage — it changes the run some other way.  `) +
-          `Reserves ${compiled.staticCost.toFixed(1)} Cycles/s while live. ` +
-          `Producing ${share.toFixed(0)}% of your engine's events.`;
+          `Reserves ${compiled.staticCost.toFixed(1)} Cycles/s while live.`;
       } else {
         stats.innerHTML = `<span class="needs">needs a ${
           !program.triggerId && !program.actionId

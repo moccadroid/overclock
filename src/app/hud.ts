@@ -206,7 +206,7 @@ export class Hud {
 
   /** One line per Program: the chain as written, and its live share of EPS. */
   private renderEngineStrip(world: World): void {
-    const total = world.engine.programs.reduce((s, p) => s + p.recentEvents, 0);
+    const total = world.engine.programs.reduce((s, p) => s + p.recentDamage, 0);
     const lines = world.engine.programs.map((program, i) => {
       const compiled = world.engine.compiled[i]!;
       if (!compiled.live && !program.triggerId && !program.actionId) {
@@ -228,13 +228,18 @@ export class Hud {
         return `<div class="prog dead">${i + 1}  ${chain}   <span class="warn">not live</span></div>`;
       }
 
-      const share = total > 0 ? (program.recentEvents / total) * 100 : 0;
+      // §19.4 — DPS per row, on the always-visible strip. The share bar answers
+      // "which row is carrying this build"; the number answers "by how much".
+      const share = total > 0 ? (program.recentDamage / total) * 100 : 0;
       const meter = '▏'.repeat(Math.max(0, Math.round(share / 10)));
+      const dps = program.recentDamage;
+      const dpsText =
+        dps >= 1000 ? `${(dps / 1000).toFixed(1)}k` : dps >= 1 ? dps.toFixed(0) : '—';
       return (
         `<div class="prog">${i + 1}  ${chain}` +
         `   <span class="num">${compiled.staticCost.toFixed(0)}c</span>` +
         `<span class="meter">${meter}</span>` +
-        `<span class="pct">${share.toFixed(0)}%</span></div>`
+        `<span class="pct">${dpsText} dps</span></div>`
       );
     });
 

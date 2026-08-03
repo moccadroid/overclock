@@ -408,6 +408,21 @@ export interface Program {
   tickEvents: number;
   /** Smoothed events/sec for this row — its share of total EPS. */
   recentEvents: number;
+  /**
+   * Damage this row landed during the current tick, and the smoothed
+   * damage-per-second it works out to.
+   *
+   * Events per second was the only per-row number the game had, and it answers
+   * the wrong question: a row that fires forty times a second for one damage
+   * looks four times as important as one that fires ten times for a hundred.
+   * What a player wants from a row is DPS, so the row measures DPS.
+   *
+   * Counted as damage that *landed* — capped at what the target had left — so
+   * an eight-thousand-damage overkill on a 12 HP Mote counts twelve. Otherwise
+   * the readout rewards overkill, which is the one thing a build never wants.
+   */
+  tickDamage: number;
+  recentDamage: number;
 }
 
 export function emptyProgram(id: number): Program {
@@ -417,6 +432,8 @@ export function emptyProgram(id: number): Program {
     modifierIds: new Array<string | null>(LOADBEARING.modifierSlotsPerProgram).fill(null),
     actionId: null,
     fireCount: 0,
+    tickDamage: 0,
+    recentDamage: 0,
     eventCount: 0,
     tickEvents: 0,
     recentEvents: 0,
