@@ -7,7 +7,7 @@ import { hashWorld } from '../sim/hash';
 import { SIM_DT } from '../sim/tunables';
 import { noteHz } from './voices';
 import { derivePart } from './parts';
-import { CELLS, parseMelodic, parsePerc, validate } from './cells';
+import { CELLS, GROUPS, parseMelodic, parsePerc, validate } from './cells';
 import { arrange, openingArrangement } from './arrange';
 import { explain } from './explain';
 import { emptyLibrary, setUserCells } from './cells';
@@ -550,4 +550,92 @@ describe('the arranger (GDD §18.1)', () => {
     expect(opening.kick.pattern).toMatch(/[xX]/);
     expect(opening.harmony.chords.length).toBeGreaterThan(0);
   });
+
+  it('every cell in the library can actually be selected', () => {
+    // The failure this catches is invisible from every other angle: a cell that
+    // is written, tagged, validated, listed in the Desk's dropdown — and never
+    // once chosen, because nothing the arranger asks for can reach it. Four of
+    // them were, and the only reason anyone noticed is that a spread was
+    // measured by hand.
+    //
+    // Three ways it happened, all worth naming:
+    //   · an energy of 5, when the request is `1 + intensity * 3` and intensity
+    //     is capped at 1, so nothing ever asked above 4;
+    //   · a `space` of busy, when the request only ever said sparse or mid;
+    //   · a `feel` of broken, when no Axiom bias is broken and no modifier asked
+    //     for it, so every cross-rhythm in the pool was decorative.
+    //
+    // Scoring makes all three silent. A filter that matched nothing would fall
+    // back loudly; a score that matches nothing just always loses.
+    // Strided rather than consecutive, and with enough quiet Triggers to build
+    // an Engine that never loops. Walking the list in order meant every
+    // three-row Engine contained a cascade Trigger or a Convert, so the whole
+    // `lifting` mood was missing from the sweep and not from the game.
+    const triggers = [
+      'clock',
+      'on_hit',
+      'on_kill',
+      'on_pickup',
+      'on_crit',
+      'on_convert',
+      'on_wave',
+      'on_dash',
+    ];
+    const primitives = ['projectile', 'burst', 'chain', 'zone', 'orbital', 'beam', 'convert'];
+    const hues = ['thermal', 'voltaic', 'void'] as const;
+    const mods = [[], ['echo'], ['accelerate'], ['overdrive'], ['ground'], ['ricochet']];
+
+    const seen: Record<string, Set<string>> = {
+      kicks: new Set(),
+      backbeats: new Set(),
+      hats: new Set(),
+      basslines: new Set(),
+      motifs: new Set(),
+      stabs: new Set(),
+      harmonies: new Set(),
+    };
+
+    for (const axiomId of ['ignition', 'circuit', 'feedback']) {
+      // Size 0 is run one, and it is the only request that ever asks for the
+      // quietest cell in a pool.
+      for (let size = 0; size <= 5; size++) {
+        for (let variant = 0; variant < 14; variant++) {
+          // Finely enough to hit every integer energy the requests can round to.
+          // Intensity is continuous in a real run, so a coarse sample here would
+          // invent unreachable cells that are reachable in play — which is a
+          // worse failure than the one this test exists to catch, because it
+          // would send someone editing a cell that was never broken.
+          for (const intensity of [0, 0.2, 0.35, 0.5, 0.65, 0.8, 1]) {
+            const plan = arrange({
+              axiomId,
+              rows: Array.from({ length: size }, (_, i) => ({
+                triggerId: triggers[(i * 3 + variant) % triggers.length]!,
+                primitive: primitives[(i * 2 + variant) % primitives.length]!,
+                hue: hues[(i + variant) % 3]!,
+                modifiers: mods[(i + variant) % mods.length]!,
+              })),
+              intensity,
+            });
+            seen.kicks!.add(plan.kick.id);
+            seen.backbeats!.add(plan.backbeat.id);
+            seen.hats!.add(plan.hats.id);
+            seen.basslines!.add(plan.bass.id);
+            seen.motifs!.add(plan.motif.id);
+            seen.stabs!.add(plan.stab.id);
+            seen.harmonies!.add(plan.harmony.id);
+          }
+        }
+      }
+    }
+
+    for (const group of GROUPS) {
+      for (const cell of CELLS[group]) {
+        expect(
+          seen[group]!.has(cell.id),
+          `"${cell.id}" is in ${group} but no Engine can reach it`,
+        ).toBe(true);
+      }
+    }
+  });
 });
+

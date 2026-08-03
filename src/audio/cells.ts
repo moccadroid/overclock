@@ -281,6 +281,12 @@ export const CELLS: CellLibrary = {
     { id: 'halftime', pattern: 'X.......x.......', energy: 1, feel: 'straight', space: 'sparse' },
     { id: 'swung', pattern: 'x...x..ox...x..o', energy: 3, feel: 'swung', space: 'mid' },
     { id: 'stutter', pattern: 'x..xx...x...x.x.', energy: 5, feel: 'broken', space: 'busy' },
+    // Three against four: a hit every third sixteenth, which does not divide
+    // sixteen and so drifts against the bar before resolving on the last beat.
+    // The ear hears triplets even though nothing here is a triplet — you cannot
+    // put real ones on a sixteenth grid, and this is the move that has stood in
+    // for them since drum machines had sixteen buttons.
+    { id: 'triplet-push', pattern: 'x..x..x...x.x...', energy: 4, feel: 'broken', space: 'mid' },
   ],
 
   backbeats: [
@@ -290,15 +296,28 @@ export const CELLS: CellLibrary = {
     { id: 'clave', pattern: '..x.x......x.x..', energy: 3, feel: 'broken', space: 'mid' },
     { id: 'doubled', pattern: '....x..o....X..x', energy: 5, feel: 'rolling', space: 'busy' },
     { id: 'late', pattern: '.....x.......x..', energy: 2, feel: 'swung', space: 'sparse' },
+    // Five in a row into the four. The run is ghosted so it arrives *under* the
+    // bar rather than on top of it, and only the note it lands on is a real hit
+    // — a roll that is as loud as its destination is a fill, not a lead-in.
+    { id: 'roll-in', pattern: '....x...ooooX...', energy: 5, feel: 'rolling', space: 'busy' },
+    // The same three-against-four drift as the kick, but ghosted, so it reads as
+    // a shuffle underneath rather than as a second rhythm arguing with the first.
+    { id: 'triplet-ghost', pattern: '....x..o..o.x...', energy: 4, feel: 'broken', space: 'mid' },
   ],
 
   hats: [
     { id: 'offbeat', pattern: '..x...x...x...x.', energy: 2, feel: 'straight', space: 'sparse' },
     { id: 'offbeat-open', pattern: '..x...-...x...-.', energy: 3, feel: 'straight', space: 'mid' },
-    { id: 'eighths', pattern: '..x...x...x...x.', energy: 2, feel: 'straight', space: 'sparse' },
+    // Was a byte-for-byte copy of `offbeat`, which quietly made the pool five
+    // cells wide instead of six. Eighth notes are every *second* sixteenth.
+    { id: 'eighths', pattern: 'x.x.x.x.x.x.x.x.', energy: 3, feel: 'straight', space: 'mid' },
     { id: 'sixteenths', pattern: '.o.x.o.x.o.x.o.x', energy: 4, feel: 'straight', space: 'busy' },
     { id: 'shuffle', pattern: '..x..o..x..o..x.', energy: 3, feel: 'swung', space: 'mid' },
     { id: 'driving', pattern: 'oxoxoxoxoxoxox-x', energy: 5, feel: 'rolling', space: 'busy' },
+    { id: 'triplet-cross', pattern: 'x..x..x..x..x..x', energy: 4, feel: 'broken', space: 'mid' },
+    // A bar that behaves, then a run of five to end it. The variance lands in
+    // one place rather than everywhere, which is what keeps it subtle.
+    { id: 'burst-run', pattern: '..x...x...xxxxx.', energy: 4, feel: 'broken', space: 'busy' },
   ],
 
   basslines: [
@@ -338,7 +357,10 @@ export const CELLS: CellLibrary = {
       steps: '0.3.0.2.a...0.1.',
       accent: 'x...x.......x...',
       slide: '..~.........~...',
-      energy: 5,
+      // 4, not 5. The bass asks for `1 + intensity * 3`, and intensity is capped
+      // at 1 — so nothing ever asked for a 5 and this cell had never once been
+      // heard. An energy no request can reach is a cell that is not in the game.
+      energy: 4,
       register: 'low',
       space: 'busy',
       needsSeventh: true,
@@ -409,6 +431,76 @@ export const CELLS: CellLibrary = {
       register: 'mid',
       space: 'mid',
     },
+
+    // ---- shapes, rather than runs -------------------------------------------
+    //
+    // The cells above are mostly ascending: a, then b, then c. That is a scale,
+    // and a scale is not a tune — it has no destination, so nothing about it is
+    // memorable. What makes four notes stick is *shape*: leaving and coming
+    // back, rising and falling, or saying a thing twice with a different ending.
+    //
+    // None of these use more notes than what is already here. They use the same
+    // three chord tones and arrange them into a gesture.
+
+    {
+      // Away and back. The oldest melodic figure there is — go up to a
+      // neighbour, return home — stated twice with a higher peak the second
+      // time, which is the whole sentence: question, then the same question
+      // asked harder.
+      id: 'neighbour',
+      steps: '..a...b.a.......' + '..a...c.a.......',
+      energy: 2,
+      register: 'high',
+      space: 'mid',
+    },
+    {
+      // An arch. Up over the first bar, down over the second, landing where it
+      // started. A contour you can hum after one pass because you can feel where
+      // it is going before it gets there.
+      id: 'arch',
+      steps: 'a...b...c...b...' + 'c...b...a.......',
+      energy: 3,
+      register: 'high',
+      space: 'sparse',
+    },
+    {
+      // A pickup — the phrase starts *before* the beat and lands on it. This is
+      // most of the difference between a line that sounds played and one that
+      // sounds sequenced, and it costs one sixteenth.
+      id: 'pickup',
+      steps: '...ab...a...b...' + '...ac...b...a...',
+      energy: 4,
+      register: 'high',
+      space: 'mid',
+    },
+    {
+      // Leap, then walk back down. A big interval is the most attention a melody
+      // can ask for, and stepwise motion afterwards is how it pays that back —
+      // do either alone and it is a jump or a scale, do both and it is a hook.
+      id: 'leap-step',
+      steps: 'a.......c.b.a...' + 'b.......c.b.a...',
+      energy: 4,
+      register: 'high',
+      space: 'sparse',
+    },
+    {
+      // Two notes, falling. The sigh figure: almost nothing, and unmistakable.
+      // For builds so full that anything else would be in the way.
+      id: 'sigh',
+      steps: '....b.a.........',
+      energy: 1,
+      register: 'high',
+      space: 'sparse',
+    },
+    {
+      // Held notes are melody too, and the mid register only had one cell — so
+      // half the builds in the game were hearing the same line.
+      id: 'mid-song',
+      steps: '..1~..2~..1...0~',
+      energy: 2,
+      register: 'mid',
+      space: 'mid',
+    },
   ],
 
   stabs: [
@@ -417,6 +509,10 @@ export const CELLS: CellLibrary = {
     { id: 'sparse', pattern: '......x.........', energy: 1, space: 'sparse' },
     { id: 'downbeat', pattern: 'x.......x.......', energy: 2, space: 'sparse' },
     { id: 'syncopated', pattern: '...x....x..x....', energy: 3, space: 'mid' },
+    // One three-against-four in here too, but stopping halfway through the bar
+    // so the second half stays open. The stab is the loudest melodic thing in
+    // the mix and a cross-rhythm that ran the whole bar would take it over.
+    { id: 'triplet', pattern: 'x..x..x..x......', energy: 4, space: 'busy' },
   ],
 
   harmonies: [

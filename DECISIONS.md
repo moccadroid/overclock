@@ -2165,6 +2165,65 @@ shortcut.
 
 ---
 
+## D-101 · BUG · Four cells were in the library and not in the game
+
+Playtest note: "the melody seems to roughly always be the same", and separately
+"the snare is too harsh — jarring", on two unrelated presets.
+
+**The snare** ran its noise through a highpass at 1800 Hz and nothing else. A
+highpass passes everything from its corner to Nyquist at full level, so this was
+white noise with the bottom removed and no ceiling at all — bright, flat and
+fatiguing. Every other percussive voice in the file has a top rolloff; this was
+the one that did not, which is also why it was worst on sparse patterns where
+nothing else covered it. Now highpassed at 1500 into a lowpass at 6200, decaying
+faster, and 20% quieter. A real snare has almost nothing above 8k.
+
+**The melody** was the same for a different reason. The motifs were mostly
+ascending — `a`, then `b`, then `c` — and a rising run is a scale, not a tune: no
+destination, so nothing to remember. Six new ones, none using more notes than
+what was already there, arranged into *gestures* instead: away-and-back
+(`neighbour`), rise-and-fall (`arch`), a phrase that starts before the beat
+(`pickup`), a leap answered by stepwise descent (`leap-step`), a two-note fall
+(`sigh`), and one held-note line for the mid register, which had exactly one cell
+and was therefore identical across half the builds in the game.
+
+Also six rhythm cells, since triplets were asked for. You cannot put real ones on
+a sixteenth grid, so these are the thing that has stood in for them since drum
+machines had sixteen buttons: a hit every third sixteenth, which does not divide
+sixteen and drifts against the bar before resolving. Plus two five-in-a-row runs
+— one ghosted into the backbeat, one ending a hat bar.
+
+**But the real finding was underneath all of it.** Measuring which cells actually
+got selected across ~800 Engines turned up four that could never be chosen at
+all:
+
+- `acid-seventh` had `energy: 5`, and the bass asks for `1 + intensity * 3` with
+  intensity capped at 1 — nothing ever asked above 4.
+- `two-bar-line` had `space: busy`, and the motif request only ever said sparse
+  or mid.
+- `triplet-push` and `triplet-cross` have `feel: broken`, which no Axiom bias is
+  and no modifier asked for. Every cross-rhythm in the pool was decorative.
+- `eighths` was a byte-for-byte copy of `offbeat`, quietly making that pool five
+  cells wide instead of six.
+
+Scoring is what makes this silent. A filter that matched nothing would fall back
+loudly; a score that matches nothing just always loses, and the cell sits there
+written, tagged, validated, listed in the Desk's dropdown, and never once heard.
+
+Fixed by giving the requests somewhere to reach: the motif now uses the same
+sparse/mid/busy ladder as the bass, and **Ricochet asks for `broken`** — a bounce
+that lands somewhere other than where it was aimed is the one thing in the
+grammar that already means "off the grid", so it is what gets to break it. Draft
+Ricochet and the hats stop sitting on the grid, which is exactly the kind of
+mapping §18.1 is held to.
+
+A test now sweeps ~1300 Engines and asserts every cell in every pool is reachable
+by at least one of them. It has to sample intensity finely, because a coarse
+sample invents unreachable cells that are reachable in play — which would be the
+worse failure, sending somebody to edit a cell that was never broken.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

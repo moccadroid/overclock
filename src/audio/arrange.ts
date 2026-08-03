@@ -231,7 +231,14 @@ export function arrange(input: ArrangeInput): Arrangement {
   //
   // Accelerate makes a row fire more often, so it makes the kick roll. That is
   // the most direct build-to-beat mapping in here and the easiest to hear.
-  const feel: Feel = count('accelerate') > 0 ? 'rolling' : bias.feel;
+  //
+  // Ricochet asks for `broken`, and it has to ask for something: no Axiom bias
+  // is broken, so before this every cross-rhythm in the library was unreachable
+  // — present in the pool, tagged, validated, and never once selected. A bounce
+  // that lands somewhere other than where it was aimed is the one thing in the
+  // grammar that already means "off the grid", so it is what gets to break it.
+  const feel: Feel =
+    count('accelerate') > 0 ? 'rolling' : count('ricochet') > 0 ? 'broken' : bias.feel;
 
   const kick = pick(CELLS.kicks, { energy: 1 + Math.min(4, size), feel, space: 'sparse' }, seed);
   const backbeat = pick(
@@ -282,7 +289,10 @@ export function arrange(input: ArrangeInput): Arrangement {
     {
       energy: Math.max(1, Math.round(1 + i * 3)),
       register: highest === 2 ? 'high' : 'mid',
-      space: size >= 4 ? 'sparse' : 'mid',
+      // Same ladder the bass uses, for the same reason — and because asking only
+      // ever for sparse or mid made every busy motif in the library unreachable.
+      // A one-row Engine has room for a two-bar line; a five-row one does not.
+      space: size >= 4 ? 'sparse' : size >= 2 ? 'mid' : 'busy',
       seventhAvailable,
     },
     seed + 4,

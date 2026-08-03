@@ -173,17 +173,29 @@ function snare(v: VoiceCtx, at: number, gain: number): void {
   const frames = Math.ceil(ctx.sampleRate * (dur + 0.02));
   const buf = ctx.createBuffer(1, frames, ctx.sampleRate);
   const data = buf.getChannelData(0);
+  // Decays faster than it used to. A long noise tail on a sound that lands twice
+  // a bar is the difference between a snare and a hiss.
   for (let i = 0; i < frames; i++) {
-    data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / frames, 2.2);
+    data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / frames, 2.9);
   }
   const src = ctx.createBufferSource();
   src.buffer = buf;
   const hp = ctx.createBiquadFilter();
   hp.type = 'highpass';
-  hp.frequency.value = 1800;
+  hp.frequency.value = 1500;
+  // The fix for "jarring". A highpass alone passes everything from its corner to
+  // Nyquist at full level, so this was white noise with the bottom removed and
+  // no ceiling at all — bright, flat and fatiguing, and worst on the sparse
+  // patterns where nothing else is covering it. Every other voice in here has a
+  // top rolloff; the snare was the one that did not. A real snare has almost
+  // nothing above 8k.
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 6200;
+  lp.Q.value = 0.5;
   const ng = ctx.createGain();
-  ng.gain.value = gain * 0.26;
-  src.connect(hp).connect(ng).connect(v.out);
+  ng.gain.value = gain * 0.2;
+  src.connect(hp).connect(lp).connect(ng).connect(v.out);
   src.start(at);
   src.stop(at + dur + 0.02);
 
