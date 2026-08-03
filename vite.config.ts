@@ -49,5 +49,11 @@ export default defineConfig({
   test: {
     include: ['src/**/*.test.ts'],
     environment: 'node',
+    // The sim tests simulate — replays and horde-density checks run thousands
+    // of real ticks, and the slowest sit at ~2.4s on a dev machine. Vitest's
+    // 5s default leaves no room on a two-core CI runner, where the same test
+    // takes three times as long and fails for being slow rather than wrong.
+    // 30s still catches a genuine hang; it just stops timing the hardware.
+    testTimeout: 30_000,
   },
 });
