@@ -1713,27 +1713,52 @@ export class Renderer {
   private drawFx(world: World): void {
     const g = this.gFx;
     g.clear();
+
+    // Bursts first, batched by hue. Each one used to issue two strokes of its
+    // own — a ring and twelve ticks — so a cascade was thousands of separate
+    // tessellations, and the bill arrived in the bloom composite (measured:
+    // 57.8ms of a 65ms frame). Same lesson the projectile and enemy passes
+    // already learned: group by paint, path everything, stroke once.
+    for (const hue of HUE_ORDER) {
+      const color = HUE_COLOR[hue];
+      // Two alpha bands rather than one per effect: a detonation's ring fades
+      // over its life, and four steps of that is indistinguishable from smooth.
+      for (let band = 0; band < 4; band++) {
+        let any = false;
+        for (const f of world.fx) {
+          if (f.kind !== 'burst' || f.hue !== hue) continue;
+          if (!this.camera.isVisible(f.x, f.y, f.radius + 60)) continue;
+          if (this.waitingForBeat(f.id)) continue;
+          const t = Math.max(0, f.life / f.maxLife);
+          if (Math.min(3, Math.floor(t * 4)) !== band) continue;
+          const radius = f.radius * (1.08 - t * 0.28);
+          g.circle(f.x, f.y, radius);
+          for (let i = 0; i < 12; i++) {
+            const a = (i / 12) * Math.PI * 2;
+            g.moveTo(f.x + Math.cos(a) * radius * 0.82, f.y + Math.sin(a) * radius * 0.82).lineTo(
+              f.x + Math.cos(a) * radius,
+              f.y + Math.sin(a) * radius,
+            );
+          }
+          any = true;
+        }
+        if (any) {
+          const t = (band + 0.5) / 4;
+          g.stroke({ width: 2 + 2 * t, color, alpha: BAND.entity * t });
+        }
+      }
+    }
+
     for (const f of world.fx) {
+      if (f.kind === 'burst') continue;
       if (!this.camera.isVisible(f.x, f.y, f.radius + 60)) continue;
       // Detonations only. A chain is a path between two things that already
       // happened, and holding it would disconnect it from them.
-      if ((f.kind === 'burst' || f.kind === 'rupture') && this.waitingForBeat(f.id)) continue;
+      if (f.kind === 'rupture' && this.waitingForBeat(f.id)) continue;
       const t = Math.max(0, f.life / f.maxLife);
       const color = HUE_COLOR[f.hue];
 
-      if (f.kind === 'burst') {
-        // Expanding ring plus radial ticks — a detonation drawn as a schematic.
-        const radius = f.radius * (1.08 - t * 0.28);
-        g.circle(f.x, f.y, radius).stroke({ width: 2 + 2 * t, color, alpha: BAND.entity * t });
-        for (let i = 0; i < 12; i++) {
-          const a = (i / 12) * Math.PI * 2;
-          g.moveTo(f.x + Math.cos(a) * radius * 0.82, f.y + Math.sin(a) * radius * 0.82).lineTo(
-            f.x + Math.cos(a) * radius,
-            f.y + Math.sin(a) * radius,
-          );
-        }
-        g.stroke({ width: 1, color, alpha: BAND.inFlight * t });
-      } else if (f.kind === 'chain') {
+      if (f.kind === 'chain') {
         // Chain lightning: a bright core with a wider, dimmer halo so it reads
         // as an arc rather than a stray line.
         for (const [width, alpha] of [
