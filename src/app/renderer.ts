@@ -23,6 +23,7 @@ import { BAND, PALETTE, VIEW, VISUAL } from './visual';
 import { PostPass } from './gfx/post';
 import { LightField } from './gfx/lights';
 import { BloomPipeline } from './gfx/bloom';
+import { GpuTimer } from './gfx/gputimer';
 import { ParticleField } from './gfx/particles';
 import { shapeCoreRadius, shapeOutline } from './gfx/shapes';
 
@@ -134,6 +135,11 @@ export class Renderer {
   private jitterSeed = 1;
   /** Ruins drawn last time. A gate opening changes it; nothing else does. */
   private ruinCount = -1;
+  /**
+   * What the GPU actually costs. CPU timing around a draw call measures queuing,
+   * not work — see gfx/gputimer.ts for the mistake that made this necessary.
+   */
+  gpu!: GpuTimer;
   /** §21b.4 — the background colour, easing toward the current biome's. */
   private tint: number = PALETTE.background;
   /** §16.6 — how far the camera has pulled back. See updateZoom. */
@@ -189,10 +195,18 @@ export class Renderer {
       antialias: true,
       autoDensity: true,
       resolution: Math.min(2, window.devicePixelRatio || 1),
+      // We present the frame ourselves, from the game loop, so the GPU timer can
+      // bracket exactly one screen render. Pixi's own ticker would also fire
+      // between our passes — bloom and the light field each call `render()` into
+      // a texture — and a timer query cannot nest.
+      autoStart: false,
     });
+    this.app.ticker.stop();
     mount.appendChild(this.app.canvas);
 
     this.bloom = new BloomPipeline(this.app);
+    this.gpu = new GpuTimer(this.app);
+
     this.lights = new LightField(this.app);
     this.post.setLightTexture(this.lights.source);
 
@@ -2108,6 +2122,19 @@ export class Renderer {
       g.stroke({ width: 2, color: PALETTE.voltaic, alpha: BAND.telegraph });
       g.circle(ix, iy, 3.5).fill({ color: HOT_CORE.voltaic, alpha: BAND.telegraph * beat });
     }
+  }
+
+  /**
+   * Draw the frame to the screen, timed.
+   *
+   * Called by the game loop after `render()` has built the scene. Everything
+   * inside the bracket is one screen present; the bloom and light passes have
+   * already happened, so what this measures is the composite and the post stack.
+   */
+  present(): void {
+    this.gpu.begin();
+    this.app.render();
+    this.gpu.end();
   }
 
   /** Diagnostics for the HUD. */

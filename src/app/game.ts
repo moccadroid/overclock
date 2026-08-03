@@ -376,6 +376,8 @@ export class Game {
     // The camera only tracks while time is running — a frozen draft or editor
     // should not drift the view out from under the player.
     this.renderer.render(this.world, elapsed, this.mode === 'running');
+    // Pixi does not present on its own ticker any more — see Renderer.present.
+    this.renderer.present();
 
     this.bankDiscoveries();
     this.syncArrangement();
@@ -383,7 +385,7 @@ export class Game {
     this.stinger.update(elapsed);
 
     // The HUD is text-heavy; 20Hz is plenty and keeps DOM work off the frame.
-    this.hud.sample(elapsed);
+    this.hud.sample(elapsed, this.renderer.gpu.lastMs);
     this.uiTimer += elapsed;
     if (this.uiTimer > 0.05) {
       this.uiTimer = 0;
@@ -632,6 +634,7 @@ export class Game {
     }
     this.hud.update(this.world);
     this.renderer.render(this.world, SIM_DT, true);
+    this.renderer.present();
     const w = this.world;
     return {
       time: Number(w.time.toFixed(2)),

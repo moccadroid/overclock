@@ -55,6 +55,7 @@ export class Hud {
   private readonly fps: HTMLElement;
   /** Smoothed, because a per-frame number is unreadable and always looks worse. */
   private fpsAverage = 60;
+  private gpuMs = 0;
 
   constructor(root: HTMLElement) {
     const make = (id: string): HTMLElement => {
@@ -99,14 +100,21 @@ export class Hud {
   }
 
   /** Called every frame; the display only refreshes with the rest of the HUD. */
-  sample(frameDt: number): void {
+  sample(frameDt: number, gpuMs = 0): void {
     if (frameDt <= 0) return;
     this.fpsAverage += (1 / frameDt - this.fpsAverage) * 0.08;
+    this.gpuMs = gpuMs;
   }
 
   update(world: World): void {
     const p = world.player;
-    this.fps.textContent = `${Math.round(this.fpsAverage)} fps`;
+    // GPU milliseconds beside the frame rate, when the driver will tell us.
+    // Frame rate alone hides a GPU that is working far too hard for what is on
+    // screen — which is exactly the failure that made this readout necessary.
+    this.fps.textContent =
+      this.gpuMs > 0
+        ? `${Math.round(this.fpsAverage)} fps · ${this.gpuMs.toFixed(1)}ms gpu`
+        : `${Math.round(this.fpsAverage)} fps`;
 
     this.xpbar.style.width = `${(world.xp / world.xpToNext) * 100}%`;
 
