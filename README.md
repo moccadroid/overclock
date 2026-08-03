@@ -56,6 +56,13 @@ measurement rather than a guess — it reports draft cadence, EPS, cascade depth
 overheats and survival against the design targets. It found every balance problem
 fixed so far.
 
+## Where it runs
+
+The build is live at **https://overclock-game.web.app**. A push to `main`
+deploys there through GitHub Actions once the suite passes; a pull request gets
+its own preview URL instead. The hosting config, the one-time setup and the
+caching rule that is easy to get wrong are in [`DEPLOYMENT.md`](DEPLOYMENT.md).
+
 ## What works
 
 - **The Engine** — ordered Programs of `Trigger → Modifier ×3 → Action`, evaluated
