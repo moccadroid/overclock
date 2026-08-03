@@ -82,8 +82,8 @@
     "radius": 12,
     "contactDamage": 7,
     "xp": 4,
-    "growthPerMeal": 0.1,
-    "description": "Fast. Hunts your projectiles, eats them, and grows. The counter to mindless spray.",
+    "growthPerMeal": 0.12,
+    "description": "Fast. Hunts your projectiles, eats them, and grows — anything of yours that touches it feeds it. The counter to mindless spray.",
     "hue": "voltaic"
   },
   {
@@ -91,13 +91,13 @@
     "name": "Suppressor",
     "shape": "ring",
     "behavior": "suppress",
-    "hp": 22,
-    "speed": 96,
-    "radius": 16,
+    "hp": 160,
+    "speed": 78,
+    "radius": 30,
     "contactDamage": 0,
-    "xp": 5,
-    "zoneRadius": 250,
-    "description": "Never attacks. Projects a zone where your Triggers do not fire. Attacks the build.",
+    "xp": 22,
+    "zoneRadius": 300,
+    "description": "Never attacks. Projects a wide field where your Triggers do not fire, and it takes real work to remove. Attacks the build.",
     "hue": "voltaic"
   },
   {

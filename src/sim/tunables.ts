@@ -93,12 +93,19 @@ export const TUNABLE = {
    * still fits on the screen twice over. Past that it stops eating and becomes a
    * Glutton, which is a bomb rather than a wall.
    */
-  interceptorMaxMeals: 17,
+  interceptorMaxMeals: 18,
   /**
    * How much of the radius growth the HP growth gets. Half: a Glutton is
    * enormous and killable, where matching them made it neither.
    */
   interceptorHpGrowthShare: 0.5,
+  /**
+   * How much of a meal a non-projectile hit is worth. A third: a Nova build
+   * still grows Gluttons, three times slower than a build that feeds them whole
+   * bolts, which is the right ordering — spraying projectiles should still be
+   * the fastest way to build the thing that punishes spraying projectiles.
+   */
+  interceptorAreaMealShare: 0.34,
   /** A Glutton's death radius, as a multiple of its own body. */
   interceptorBlastScale: 2.2,
   interceptorBlastDamage: 34,
@@ -155,6 +162,34 @@ export const TUNABLE = {
    * watch climb. Same throttle, but the player can see the bill.
    */
   cascadeOutputFalloff: 0.78,
+  /**
+   * And how far it reaches, per link.
+   *
+   * Measured on a recorded cascade build: hits at depth 0 landed 308 units from
+   * the player on average, hits at depth 8+ landed 685 with a maximum of 1,600 —
+   * and 95% of all hits were deep ones. A cascade did not spread, it *walked*,
+   * because every link starts where the last one landed and then travels its own
+   * full range again. The result is a screen where everything dies everywhere,
+   * most of it off the top and bottom of the view.
+   *
+   * So reach decays with depth exactly as output does. A depth-12 bolt travels
+   * 22% as far as a depth-0 one: the chain still crosses ground, but it converges
+   * on where it started instead of migrating off the map.
+   */
+  cascadeReachFalloff: 0.88,
+  /**
+   * §12 — enemies get tougher as Threat climbs.
+   *
+   * They did not, at all: `hp: def.hp` with nothing applied, so a Drifter at
+   * minute eleven was the Drifter from minute one while player output had gone up
+   * a hundredfold. Measured on an 11:23 run: 142 damage taken, total, across the
+   * whole run. Threat reaches ~24 by the Meltdown line, so these put a late
+   * Drifter at roughly 2.2x health and 1.7x bite — enough to be a threat without
+   * pretending the horde can out-scale an exponential Engine, which is a race
+   * §23.1 says never to run.
+   */
+  enemyHpPerThreat: 0.05,
+  enemyDamagePerThreat: 0.03,
   cascadeCostGrowth: 0.5,
   /** Orbitals stack, so they need a ceiling and a per-enemy hit cadence. */
   maxOrbitals: 14,

@@ -145,6 +145,9 @@ export class Renderer {
   private bank = 0;
   private thrust = 0;
   private pulsePhase = 0;
+  /** Visible enemies this frame, and their outlines. Reused; see drawEnemies. */
+  private readonly enemyScratch: World['enemies'] = [];
+  private readonly outlineScratch: [number, number][][] = [];
   /** §11.2 — suppression fields, in screen pixels. Reused; see emitGlitchFields. */
   private readonly glitchFields: { x: number; y: number; radius: number; strength: number }[] = [];
   /**
@@ -1281,8 +1284,79 @@ export class Renderer {
   private drawEnemies(world: World): void {
     const g = this.gEnemies;
     g.clear();
+
+    // ---- the common case, batched -----------------------------------------
+    //
+    // Measured: at 620 enemies, drawing them cost 2.29ms of a 2.83ms frame —
+    // 81% of it, and 3.7µs per enemy. The cause was one `stroke()` per enemy:
+    // every stroke is a separate tessellation and upload, so a screen full of
+    // Drifters was six hundred of them. The projectile pass learned this a while
+    // ago and batches by hue; this is the same fix.
+    //
+    // Grouping is by colour and by a quantised health step, because those are
+    // the only two things that change the paint. Everything unusual — a
+    // half-drawn spawn, a damage flash, a phase, an elite's rings — falls
+    // through to the per-enemy pass below, and there are never many of those.
+    const visible = this.enemyScratch;
+    const outlines = this.outlineScratch;
+    visible.length = 0;
+    outlines.length = 0;
     for (const e of world.enemies) {
       if (!this.camera.isVisible(e.x, e.y, e.radius + 24)) continue;
+      visible.push(e);
+      // Built once and reused by the stroke, the fill and the per-enemy pass.
+      // shapeOutline allocates, and building the same polygon three times per
+      // enemy per frame was 1,900 throwaway arrays a frame at this density.
+      const def = getEnemy(e.defId);
+      outlines.push(shapeOutline(def.shape, e.x, e.y, e.radius, facingOf(world, e, def)));
+    }
+
+    const STEPS = 4;
+    for (const hue of HUE_ORDER) {
+      const color = HUE_COLOR[hue];
+      // Outlines: one stroke for every ordinary enemy of this hue.
+      let any = false;
+      for (let i = 0; i < visible.length; i++) {
+        const e = visible[i]!;
+        if (e.hue !== hue || e.flash > 0 || e.phased) continue;
+        if (e.spawnAge < VISUAL.drawInTime) continue;
+        polygonPath(g, outlines[i]!);
+        any = true;
+      }
+      if (any) g.stroke({ width: 2.2, color, alpha: BAND.entity });
+
+      // Interior fills, one per health step. §17.1 — an enemy sheds its interior
+      // as it takes damage, which is the HP bar the game does not draw.
+      for (let step = 0; step < STEPS; step++) {
+        let filled = false;
+        for (let i = 0; i < visible.length; i++) {
+          const e = visible[i]!;
+          if (e.hue !== hue || e.flash > 0 || e.phased) continue;
+          if (e.spawnAge < VISUAL.drawInTime) continue;
+          const health = e.maxHp > 0 ? e.hp / e.maxHp : 1;
+          if (Math.min(STEPS - 1, Math.floor(health * STEPS)) !== step) continue;
+          polygonPath(g, outlines[i]!);
+          filled = true;
+        }
+        if (filled) g.fill({ color, alpha: 0.08 * ((step + 0.5) / STEPS) });
+      }
+
+      // Cores.
+      let cored = false;
+      for (const e of visible) {
+        if (e.hue !== hue || e.flash > 0 || e.phased) continue;
+        if (e.spawnAge < VISUAL.drawInTime) continue;
+        const core = shapeCoreRadius(getEnemy(e.defId).shape, e.radius);
+        if (core <= 0) continue;
+        g.circle(e.x, e.y, core);
+        cored = true;
+      }
+      if (cored) g.stroke({ width: 1.5, color, alpha: BAND.inFlight });
+    }
+
+    // ---- everything else, one at a time ------------------------------------
+    for (let vi = 0; vi < visible.length; vi++) {
+      const e = visible[vi]!;
       const def = getEnemy(e.defId);
       const born = Math.min(1, e.spawnAge / VISUAL.drawInTime);
       const flashing = e.flash > 0;
@@ -1291,37 +1365,35 @@ export class Renderer {
       // adaptive resistance, which is retired.
       const color = flashing ? PALETTE.player : HUE_COLOR[e.hue];
       const r = e.radius;
-      const health = e.hp / e.maxHp;
+      const health = e.maxHp > 0 ? e.hp / e.maxHp : 1;
+      const ordinary = born >= 1 && !flashing && !e.phased;
       // §10.3 Phasing — untargetable, and it has to look it.
       if (e.phased && !flashing) {
         g.circle(e.x, e.y, r + 3).stroke({ width: 1, color, alpha: BAND.structure * born });
         continue;
       }
 
-      const facing =
-        def.behavior === 'lance' || def.shieldArc
-          ? e.beamActive > 0 || def.shieldArc
-            ? Math.atan2(world.player.y - e.y, world.player.x - e.x)
-            : e.facing
-          : Math.atan2(e.aimY, e.aimX);
-      const verts = shapeOutline(def.shape, e.x, e.y, r, facing);
-      // Draw-in: only trace `born` of the perimeter, so it writes itself on.
-      tracePolyline(g, verts, born);
-      g.stroke({
-        width: flashing ? 3 : 2.2,
-        color,
-        alpha: (flashing ? BAND.player : BAND.entity) * born,
-      });
+      const facing = facingOf(world, e, def);
+      if (!ordinary) {
+        const verts = outlines[vi]!;
+        // Draw-in: only trace `born` of the perimeter, so it writes itself on.
+        tracePolyline(g, verts, born);
+        g.stroke({
+          width: flashing ? 3 : 2.2,
+          color,
+          alpha: (flashing ? BAND.player : BAND.entity) * born,
+        });
 
-      if (born >= 1) {
-        g.beginPath();
-        polygonPath(g, verts);
-        g.fill({ color, alpha: 0.08 * health });
-      }
+        if (born >= 1) {
+          g.beginPath();
+          polygonPath(g, verts);
+          g.fill({ color, alpha: 0.08 * health });
+        }
 
-      const core = shapeCoreRadius(def.shape, r);
-      if (core > 0) {
-        g.circle(e.x, e.y, core).stroke({ width: 1.5, color, alpha: BAND.inFlight * born });
+        const core = shapeCoreRadius(def.shape, r);
+        if (core > 0) {
+          g.circle(e.x, e.y, core).stroke({ width: 1.5, color, alpha: BAND.inFlight * born });
+        }
       }
 
       if (e.enriched) {
@@ -1913,6 +1985,27 @@ const TERMINAL_COLOR: Record<TerminalKind, number> = {
   recompile: PALETTE.void,
   extract: PALETTE.thermal,
 };
+
+/**
+ * Which way an enemy is pointing.
+ *
+ * A Lancer and a Bulwark face what they are aimed at; everything else faces the
+ * way it is travelling. Lifted out of drawEnemies so the batched pass and the
+ * per-enemy pass cannot disagree about it.
+ */
+function facingOf(
+  world: World,
+  e: World['enemies'][number],
+  def: { behavior?: string; shieldArc?: number },
+): number {
+  if (def.behavior === 'lance' || def.shieldArc) {
+    if (e.beamActive > 0 || def.shieldArc) {
+      return Math.atan2(world.player.y - e.y, world.player.x - e.x);
+    }
+    return e.facing;
+  }
+  return Math.atan2(e.aimY, e.aimX);
+}
 
 /** Shortest signed distance between two angles. */
 function angleDiff(a: number, b: number): number {

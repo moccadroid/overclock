@@ -72,6 +72,8 @@ export interface Enemy extends SpatialItem {
   phased: boolean;
   /** Facing, for the Bulwark's shield arc and the Lancer's beam. */
   facing: number;
+  /** Interceptor: fractional progress toward the next meal (area hits). */
+  mealProgress?: number;
   /** Interceptor: how many projectiles it has eaten. */
   meals: number;
   /** Lancer: beam state timer. */
@@ -1141,7 +1143,7 @@ export class World {
       y,
       vx: dx * speed,
       vy: dy * speed,
-      life: (def.lifetime ?? 2) * this.reachMul * ctx.range,
+      life: (def.lifetime ?? 2) * this.reachMul * ctx.range * ppow(TUNABLE.cascadeReachFalloff, depth),
       damage,
       pierce: (def.pierce ?? 0) + Math.round(ctx.pierce) + this.bonuses.travels,
       hue,
@@ -1212,7 +1214,7 @@ export class World {
     const leech = ctx.leech;
     const def = ACTION_BY_ID.get(actionId)!;
     const jumps = (def.jumps ?? 3) + Math.round(ctx.jumps);
-    const range = (def.range ?? 200) * this.reachMul * ctx.range;
+    const range = (def.range ?? 200) * this.reachMul * ctx.range * ppow(TUNABLE.cascadeReachFalloff, depth);
     const hit: number[] = [];
     const points: number[] = [x, y];
     let cx = x;
@@ -1402,7 +1404,7 @@ export class World {
     ctx: FireContext,
     hue: Hue,
   ): void {
-    const range = (def.range ?? 800) * this.reachMul * ctx.range;
+    const range = (def.range ?? 800) * this.reachMul * ctx.range * ppow(TUNABLE.cascadeReachFalloff, depth);
     // Farthest, not nearest: the point of a beam is everything on the way.
     let far: Enemy | null = null;
     let farD2 = 0;
@@ -2149,6 +2151,22 @@ export class World {
     return n;
   }
 
+  /**
+   * §12 — how much tougher the horde is right now.
+   *
+   * Density was the only thing Threat scaled, and against an Engine that gains a
+   * hundredfold over a run, more copies of a 12 HP Drifter is not pressure. Both
+   * of these are deliberately gentle: the horde is *not* supposed to keep up
+   * (§23.1 — never race the player's own exponent), only to stop being furniture.
+   */
+  get threatHpScale(): number {
+    return 1 + this.threat * TUNABLE.enemyHpPerThreat;
+  }
+
+  get threatDamageScale(): number {
+    return 1 + this.threat * TUNABLE.enemyDamagePerThreat;
+  }
+
   /** §11.2 — is the player inside a Suppressor's zone? Triggers do not fire there. */
   get suppressed(): boolean {
     for (const e of this.enemies) {
@@ -2178,6 +2196,17 @@ export class World {
     if (!enemy.alive || damage <= 0) return;
     // §10.3 Phasing — periodically untargetable, which breaks lock-on cadence.
     if (enemy.phased) return;
+
+    // §10.2 Interceptor — it eats *everything* of yours, not only bolts.
+    //
+    // "Hunts your projectiles and grows" was implemented literally, so a Nova or
+    // a Field build never grew one past its birth size and never met the enemy
+    // that exists to answer output. A hit from an area effect is a smaller meal
+    // than swallowing a bolt whole — a third — but it is a meal, and it means the
+    // counter to spray answers *every* kind of spray.
+    if (enemy.meals < TUNABLE.interceptorMaxMeals && getEnemy(enemy.defId).growthPerMeal) {
+      this.feedInterceptor(enemy, TUNABLE.interceptorAreaMealShare);
+    }
 
     // §5.3 On Crit — a crit both hits harder and emits its own event, so crit
     // investment is a build axis rather than a stat.
@@ -2636,7 +2665,7 @@ export class World {
       return;
     }
     if (def.contactDamage > 0) {
-      this.hurtPlayer(def.contactDamage, {
+      this.hurtPlayer(def.contactDamage * this.threatDamageScale, {
         id: def.id,
         label: def.name,
         enemyId: def.id,
@@ -2683,7 +2712,7 @@ export class World {
     e.x = clamp(e.x, e.radius, this.arena.width - e.radius);
     e.y = clamp(e.y, e.radius, this.arena.height - e.radius);
 
-    // Eat anything it reaches — up to a point.
+    // Eat anything it reaches — up to a point. See feedInterceptor for the rule.
     //
     // §23.1: the growth is the design ("+10% per meal", the answer to projectile
     // spam), the *unboundedness* was an oversight. Compounding 10% has no shape:
@@ -2701,24 +2730,38 @@ export class World {
     const eat = e.radius + 10;
     if (target && !gorged && bestD2 < eat * eat) {
       target.alive = false;
-      e.meals++;
-      const growth = 1 + (def.growthPerMeal ?? 0.1);
-      e.radius *= growth;
-      // HP grows more slowly than the body. A Glutton should be enormous and
-      // *killable*; matching the radius made it neither.
-      const hpGrowth = 1 + (def.growthPerMeal ?? 0.1) * TUNABLE.interceptorHpGrowthShare;
-      e.maxHp *= hpGrowth;
-      e.hp *= hpGrowth;
-      this.pushFx('burst', e.hue, e.x, e.y, e.radius + 8, [], 0.12);
-      if (e.meals >= TUNABLE.interceptorMaxMeals) {
-        // Full. Announced once, loudly.
-        this.pushFx('rupture', e.hue, e.x, e.y, e.radius * 1.6, [], 0.5);
-        this.cue('fire', e.hue, 0, 1);
-      }
+      this.feedInterceptor(e, 1);
     }
 
     const pd = hypot(this.player.x - e.x, this.player.y - e.y);
     if (pd < e.radius + TUNABLE.playerRadius) this.touchPlayer(e, def);
+  }
+
+  /**
+   * Feed an Interceptor. `share` is how much of a meal it was: one for a
+   * swallowed projectile, a fraction for being clipped by something with area.
+   */
+  private feedInterceptor(e: Enemy, share: number): void {
+    const def = getEnemy(e.defId);
+    if (!def.growthPerMeal) return;
+    if (e.meals >= TUNABLE.interceptorMaxMeals) return;
+    e.mealProgress = (e.mealProgress ?? 0) + share;
+    if (e.mealProgress < 1) return;
+    e.mealProgress -= 1;
+    e.meals++;
+    const growth = 1 + def.growthPerMeal;
+    e.radius *= growth;
+    // HP grows more slowly than the body. A Glutton should be enormous and
+    // *killable*; matching the radius made it neither.
+    const hpGrowth = 1 + def.growthPerMeal * TUNABLE.interceptorHpGrowthShare;
+    e.maxHp *= hpGrowth;
+    e.hp *= hpGrowth;
+    this.pushFx('burst', e.hue, e.x, e.y, e.radius + 8, [], 0.12);
+    if (e.meals >= TUNABLE.interceptorMaxMeals) {
+      // Full. Announced once, loudly.
+      this.pushFx('rupture', e.hue, e.x, e.y, e.radius * 1.6, [], 0.5);
+      this.cue('fire', e.hue, 0, 1);
+    }
   }
 
   /**
@@ -3404,8 +3447,10 @@ export class World {
       y,
       vx: 0,
       vy: 0,
-      hp: def.hp,
-      maxHp: def.hp,
+      // §12 — Threat makes them tougher as well as more numerous. Baked at
+      // spawn so an enemy's health cannot change under it while it is alive.
+      hp: def.hp * this.threatHpScale,
+      maxHp: def.hp * this.threatHpScale,
       radius: def.radius,
       state: 'seek',
       timer: def.windup !== undefined ? 0.5 : 0,
