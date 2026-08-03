@@ -59,6 +59,17 @@ export const TUNABLE = {
   // and a probe run went from 6 overheats to 34 — one every ten seconds, which
   // is not a dial any more, it is weather.
   heatPerDepthEvent: 0.06,
+  /**
+   * §6.2 — the volume charge. See CycleBudget.chargeVolume for the curve and for
+   * why it saturates instead of scaling.
+   *
+   * Free allowance first: 150 events/sec is a busy three-row Engine at minute
+   * four, and it pays nothing. Everything above it is priced on a curve that
+   * reaches half of `heatVolumeMax` at `heatVolumeHalf` events over the line.
+   */
+  heatFreeEventRate: 200,
+  heatVolumeMax: 16,
+  heatVolumeHalf: 1200,
   heatGainMaxPerSec: 45,
   heatDecayPerSec: 8,
   overheatStallSeconds: 3,

@@ -901,6 +901,9 @@ export class World {
       this.drainEvents();
     }
 
+    // §6.2 — the tick's event volume, priced before the gauge is closed.
+    this.budget.chargeVolume(this.eventsThisTick, dt);
+
     if (this.budget.endTick(dt)) {
       this.stats.overheats++;
       this.cue('overheat', 'thermal', 0, 1);

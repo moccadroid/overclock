@@ -297,6 +297,26 @@ When dynamic demand exceeds available headroom, the deficit converts to **Heat**
 | 70–99 | Instability II | 15% misfire; 10% of your projectiles spawn **corrupted** (damage enemies *and* you); chromatic aberration |
 | 100 | **OVERHEAT** | All Programs stall for 3s [T]; screen tears; Heat resets to 50. Emits the On Overheat event — builds that catch it turn the stall into a detonation. |
 
+### 6.2b Heat has two causes
+
+**Depth** — each event past the free links charges, so a chain's total cost is quadratic in how deep it ran.
+
+**Volume** — every event per second past a free allowance charges as well, on a saturating curve.
+
+The second one exists because the first had a hole the size of the game in it. Split, Echo and Resonate all multiply events at the *same* cascade depth, so the widest Engines paid nothing at all; three recorded runs converged on `on_hit > echo > bolt`, which peaked at **3,375 events a second with six Overheats in nine minutes** while a genuinely deep chain cooks itself in seconds. The dominant strategy was partly dominant because it was the one shape the meter could not see.
+
+The curve **saturates** rather than scaling linearly, and that is load-bearing. A linear price against an Engine that grows a hundredfold over a run is either nothing at minute two or a permanent stall at minute nine — there is no coefficient that is both. Saturating puts the pressure where it is a *decision* and then flattens, so a monstrous Engine runs permanently hot and occasionally melts instead of being switched off:
+
+```
+ 200 events/sec   free
+ 400              ~2.3 Heat/sec   (base venting is 8/sec)
+ 700              ~4.7
+1500              ~8.3            break-even
+3000             ~11.2            Overheat roughly every 16s
+```
+
+Insulate spares a row its *depth* charge and not this one, deliberately: a wide loop is precisely what volume pricing exists to catch, and a card that switched it off would put the hole straight back. Coolant, Governor and Convert: Coolant are the answers, and they are answers you *draft*.
+
 ### 6.3 Design intent
 
 Overclock is a **dial, not a line**. Running at Instability I permanently is a legitimate high-skill strategy (more throughput, occasional misfires). Overdrive + On Overheat builds that surf the 100 boundary are an intended archetype. The punishment for greed is instability the player *authored*, not a designer's cap. All Heat effects must be readable on screen (the world tells you; no number-checking required).

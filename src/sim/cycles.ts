@@ -29,10 +29,16 @@
  *   what fits. It changes only when *you* change the Engine, which makes it a
  *   number you can plan against instead of one you discover.
  *
- *   **Heat** — accrues from cascade *depth*. Shallow play never heats. A chain
- *   running ten deep heats hard. This prices the thing the game is named after,
- *   and unlike a hidden per-second integral it has a cause you can see: the
- *   chain is drawn on screen and the depth is on the HUD.
+ *   **Heat** — accrues from cascade *depth* and from sheer *volume*. Shallow,
+ *   quiet play never heats. A chain running ten deep heats hard, and so does an
+ *   Engine resolving two thousand events a second however flat it is. Both have
+ *   a cause you can see: the chain is drawn on screen, the depth is on the HUD,
+ *   and the event rate is the number in the corner.
+ *
+ *   Depth alone was the first version, and it left the widest builds in the game
+ *   paying nothing — Split, Echo and Resonate all multiply at the *same* depth.
+ *   Three recorded runs converged on the same flat loop; it was the one shape
+ *   the meter could not see. See chargeVolume.
  *
  * Bounding cascades is still handled where it always was — §5.6's depth pricing
  * decays output geometrically with depth. Heat is the second half of that: the
@@ -61,6 +67,15 @@ export class CycleBudget {
   heatThisTick = 0;
   /** Deepest cascade seen this tick — the HUD shows it beside the gauge. */
   depthThisTick = 0;
+  /**
+   * Smoothed events per second, for the volume charge below.
+   *
+   * Smoothed rather than per-tick because a single frame of a cascade is not a
+   * *rate*, and the gauge has to move at a speed a player can read.
+   */
+  eventRate = 0;
+  /** Heat/sec currently coming from volume. Diagnostics and the HUD. */
+  volumeRate = 0;
 
   constructor(capacity: number = TUNABLE.cycleCapacityBase) {
     this.capacity = capacity;
@@ -131,6 +146,46 @@ export class CycleBudget {
   }
 
   /**
+   * §6.2 — Heat from sheer *volume*, on top of Heat from depth.
+   *
+   * Depth alone was the whole model, and it had a hole the size of the game in
+   * it: Split, Echo and Resonate multiply events at the *same* cascade depth, so
+   * the widest engines in the game paid nothing at all. Measured across three
+   * recorded runs, every one of them converged on `on_hit > echo > bolt`, which
+   * ran at a peak of 3,375 events a second with six Overheats in nine minutes —
+   * while a genuinely deep chain cooks itself in seconds. The dominant strategy
+   * was dominant partly because it was the one shape Heat could not see.
+   *
+   * The curve saturates rather than scaling linearly, and that is the important
+   * part. A linear price against an engine that grows a hundredfold over a run
+   * is either nothing at minute two or a permanent stall at minute nine; there
+   * is no coefficient that is both. Saturating means the pressure arrives early,
+   * where it is a *decision* (Insulate this row? draft Coolant? take Governor?),
+   * and then flattens, so a monstrous Engine runs permanently hot and
+   * occasionally melts instead of being switched off.
+   *
+   *   200/s   free — ordinary play never sees this
+   *   400/s   ~2.3 Heat/sec, against 8/s of base venting
+   *   700/s   ~4.7
+   *   1500/s  ~8.3, roughly break-even with venting
+   *   3000/s  ~11.2, net positive: hot, with an Overheat every ~16s
+   *
+   * Insulate spares a row its *depth* charge and not this one, deliberately: a
+   * wide loop is exactly what this exists to price, and a card that switched it
+   * off would put the hole straight back.
+   */
+  chargeVolume(events: number, dt: number): void {
+    if (dt <= 0) return;
+    const instant = events / dt;
+    // A third of a second of smoothing. One frame of a cascade is not a rate,
+    // and the first pass at this was charging the spikes rather than the load.
+    this.eventRate += (instant - this.eventRate) * Math.min(1, dt * 3);
+    const over = Math.max(0, this.eventRate - TUNABLE.heatFreeEventRate);
+    this.volumeRate =
+      over <= 0 ? 0 : (TUNABLE.heatVolumeMax * over) / (over + TUNABLE.heatVolumeHalf);
+  }
+
+  /**
    * Close the tick. Returns true if an Overheat just triggered, in which case the
    * caller must emit the On Overheat event (§5.3) — builds catch it deliberately.
    */
@@ -143,7 +198,8 @@ export class CycleBudget {
     // Capped per second so one enormous frame cannot jump the gauge from cold to
     // Overheat with nothing in between. The cap is what keeps this a *rate* the
     // player can watch rather than an event that happens to them.
-    const gain = Math.min(TUNABLE.heatGainMaxPerSec, dt > 0 ? this.heatThisTick / dt : 0);
+    const fromDepth = dt > 0 ? this.heatThisTick / dt : 0;
+    const gain = Math.min(TUNABLE.heatGainMaxPerSec, fromDepth + this.volumeRate);
     const decay = TUNABLE.heatDecayPerSec + this.extraVenting;
     this.heatRate = gain - decay;
     this.heat = Math.max(0, this.heat + (gain - decay) * dt);
