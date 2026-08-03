@@ -131,7 +131,7 @@ export class Game {
         const url = new URL(location.href);
         url.searchParams.set('seed', `run-${Math.floor(Math.random() * 1e9).toString(36)}`);
         // RUN AGAIN means again, not "back to the menu" — this is the one path
-        // that asks boot() to skip Run Setup.
+        // that asks boot() to skip the menu.
         url.searchParams.set('start', '1');
         location.href = url.toString();
       } else if (cmd === 'library' || cmd === 'pause') {

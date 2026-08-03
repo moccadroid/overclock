@@ -262,7 +262,7 @@ export class Audio {
   /**
    * Must be called from a user gesture — browsers refuse to start an
    * AudioContext otherwise, and a silent game with no error is a miserable bug
-   * to chase. Run Setup's START RUN is that gesture.
+   * to chase. The menu's START RUN is that gesture.
    */
   start(): void {
     if (this.ctx) return;
@@ -502,7 +502,7 @@ export class Audio {
   /**
    * Play an arrangement that was handed over rather than selected.
    *
-   * Only the Lab uses this. It exists because an editor has to be able to put a
+   * Only the Music screen uses this. It exists because an editor has to put a
    * cell somewhere the arranger would never have chosen it — that is the entire
    * point of an editor — and because a dial you turn has to be audible *now*
    * rather than at the next sixteen-bar boundary. Nothing in a run reaches this.

@@ -1,9 +1,10 @@
 /**
- * Boot. §19.1–19.3 — Run Setup, the Library and the Codex sit in front of a run.
+ * Boot. §19.1–19.3 — the menu sits in front of a run: PLAY, and the Codex,
+ * Music, Settings and Credits behind it.
  *
  * Deep-linking survives: `?seed=abc&axiom=circuit` goes straight in without the
  * title, because reproducing a reported run must never require clicking through
- * a menu. Anything less than a full pair shows Run Setup with whatever was given
+ * a menu. Anything less than a full pair opens the menu with whatever was given
  * as the default.
  */
 import { Game } from './app/game';
@@ -60,7 +61,7 @@ const linkedSeed = params.get('seed');
 const linkedAxiom = params.get('axiom');
 
 /**
- * Loading the page lands on Run Setup. Always.
+ * Loading the page lands on the menu. Always.
  *
  * `?seed=&axiom=` *pre-fills* the menu rather than skipping it — writing the
  * seed into the URL when a run starts is what makes it shareable, and if those

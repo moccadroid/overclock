@@ -19,7 +19,7 @@ const SECTIONS: Section[] = [
   {
     title: 'AXIOM — where the run starts',
     body:
-      'The Axiom you pick at Run Setup is one thing: the first row of your Engine, already written for you. ' +
+      'The Axiom you pick before a run is one thing: the first row of your Engine, already written for you. ' +
       'Ignition hands you Clock -> Bolt — fire a bolt every 1.2 seconds — and that is what you are running ' +
       'until your first draft arrives.\n\n' +
       'It also leans the draft slightly. Ignition offers Thermal Actions a little more often, Circuit offers ' +

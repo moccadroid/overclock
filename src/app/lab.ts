@@ -3,15 +3,16 @@
  *
  * Three surfaces behind the Music pane, in the order you would use them:
  *
- *   **Studio**  build an Engine by hand and hear what it plays, with the reason
- *               for every slot spelled out. This is the only place §18.1 is
- *               *demonstrable* rather than merely asserted — you add a fourth
- *               row and watch the bassline get out of its way.
- *   **Lab**     every dial the arranger has, turned by hand. Nineteen controls,
- *               which is the whole engine. For finding out what a cell sounds
- *               like somewhere the arranger would never have put it.
- *   **Cells**   write your own fragments. They join the pool; the Engine still
- *               chooses. You did not pick the song, you widened the vocabulary.
+ *   **Engine**       build one by hand and hear what it plays, with the reason
+ *                    for every slot spelled out. The only place §18.1 is
+ *                    *demonstrable* rather than merely asserted — add a fourth
+ *                    row and watch the bassline get out of its way.
+ *   **Arrangement**  what that Engine chose, every slot of it, and every one
+ *                    overridable. Nineteen controls, which is the whole engine.
+ *                    For hearing a cell somewhere it would never have landed.
+ *   **Your Cells**   write your own fragments. They join the pool; the Engine
+ *                    still chooses. You did not pick the song, you widened the
+ *                    vocabulary it is written in.
  *
  * None of this changes how the music is generated. The arranger is untouched;
  * the Lab hands a finished `Arrangement` straight to `audio.auditArrangement`,
@@ -40,9 +41,24 @@ import {
   summarise,
 } from '../meta/cellstore';
 
-export type LabTab = 'studio' | 'lab' | 'cells';
+export type LabTab = 'engine' | 'arrangement' | 'cells';
 
-interface StudioRow {
+/**
+ * The three tabs are the pipeline, coarse to fine, and they are named after what
+ * they show rather than after a room in a recording studio.
+ *
+ * An Engine chooses an Arrangement; an Arrangement is made of Cells. So each tab
+ * is one level further into the same object, and the order tells you that. The
+ * first two are windows onto something the game is already doing. The third is
+ * the only one where you own anything, which is why it says so.
+ */
+const TABS: { id: LabTab; label: string }[] = [
+  { id: 'engine', label: 'ENGINE' },
+  { id: 'arrangement', label: 'ARRANGEMENT' },
+  { id: 'cells', label: 'YOUR CELLS' },
+];
+
+interface EngineRowDraft {
   trigger: string;
   modifiers: (string | null)[];
   action: string;
@@ -89,15 +105,15 @@ const EXAMPLE = `{
 }`;
 
 export class MusicLab {
-  tab: LabTab = 'studio';
+  tab: LabTab = 'engine';
 
   private axiomId = 'ignition';
-  private rows: StudioRow[] = [
+  private rows: EngineRowDraft[] = [
     { trigger: 'clock', modifiers: [null, null, null], action: 'bolt' },
   ];
   private intensity = 0.72;
 
-  /** Lab overrides, applied on top of whatever the Studio's Engine selected. */
+  /** Hand overrides, applied on top of whatever the Engine selected. */
   private overrides: Partial<Arrangement> = {};
 
   private user: CellLibrary = loadUserCells();
@@ -157,25 +173,23 @@ export class MusicLab {
   // ----------------------------------------------------------------- render
 
   render(): string {
-    const tabs = (['studio', 'lab', 'cells'] as const)
-      .map(
-        (t) =>
-          `<span class="subtab${t === this.tab ? ' on' : ''}" data-lab="${t}">` +
-          `${t === 'lab' ? 'THE DESK' : t.toUpperCase()}</span>`,
-      )
-      .join('');
+    const tabs = TABS.map(
+      (t) =>
+        `<span class="subtab${t.id === this.tab ? ' on' : ''}" data-lab="${t.id}">` +
+        `${t.label}</span>`,
+    ).join('');
 
     const body =
-      this.tab === 'studio'
-        ? this.renderStudio()
-        : this.tab === 'lab'
-          ? this.renderDesk()
+      this.tab === 'engine'
+        ? this.renderEngine()
+        : this.tab === 'arrangement'
+          ? this.renderArrangement()
           : this.renderCells();
 
     return `<div class="lab"><div class="subtabs">${tabs}</div>${body}</div>`;
   }
 
-  private renderStudio(): string {
+  private renderEngine(): string {
     const plan = this.plan();
     const reasons = explain(this.input(), plan)
       .map(
@@ -222,7 +236,7 @@ export class MusicLab {
     );
   }
 
-  private renderDesk(): string {
+  private renderArrangement(): string {
     const plan = this.plan();
     const chosen = this.selected();
     const library = pool();
@@ -271,7 +285,7 @@ export class MusicLab {
       `<div class="mu-lead">Every dial the arranger has — nineteen of them, which ` +
       `is all of it. Changes are audible immediately rather than at the next ` +
       `phrase, which is the one way this differs from a run. Anything you have ` +
-      `not touched still comes from the Studio's Engine.</div>` +
+      `not touched still comes from the Engine on the previous tab.</div>` +
       `<div class="desk"><div class="desk-col"><div class="k">cells</div>${cells}</div>` +
       `<div class="desk-col"><div class="k">voices</div>${voices}` +
       `<div class="k">tone</div>${numbers}</div></div>` +
@@ -330,7 +344,7 @@ export class MusicLab {
       });
     }
 
-    // ---- Studio
+    // ---- Engine
     for (const sel of panel.querySelectorAll<HTMLSelectElement>('[data-sel^="row-"]')) {
       sel.addEventListener('change', () => {
         const [, index, kind, slot] = sel.dataset.sel!.split('-');
@@ -370,7 +384,7 @@ export class MusicLab {
       this.audition();
     });
 
-    // ---- The Desk
+    // ---- Arrangement
     for (const sel of panel.querySelectorAll<HTMLSelectElement>('[data-sel^="dial-"]')) {
       sel.addEventListener('change', () => {
         const slot = sel.dataset.sel!.slice(5);

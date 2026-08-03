@@ -1040,7 +1040,7 @@
   margin-bottom: 16px;
   overflow-x: auto;
 }
-/* ---- §19.1-19.3 title: Run Setup, Library, Codex ---- */
+/* ---- §19.1-19.5 the menu: Play, Codex, Music, Settings, Credits ---- */
 
 #menu-ui {
   position: absolute;
@@ -1055,53 +1055,131 @@
 #title {
   background: var(--bg);
 }
+/* The frame is fixed and only its contents move.
+   It used to size itself to whichever pane was open, so every click jumped the
+   border, the nav and the footer — which reads as a page reload rather than as
+   a section changing. Now the panel is one height, the header and footer are
+   pinned, and the body is the only thing that scrolls. */
 .title-panel {
+  display: flex;
+  flex-direction: column;
   width: min(1180px, 95vw);
-  max-height: 92vh;
-  overflow-y: auto;
+  height: min(860px, 88vh);
   border: 1px solid var(--structure);
   background: rgba(6, 10, 18, 0.98);
   padding: 20px 24px 16px;
 }
 .title-head {
+  flex: none;
   display: flex;
   align-items: baseline;
-  gap: 28px;
+  gap: 22px;
   border-bottom: 1px solid var(--structure);
   padding-bottom: 12px;
-  margin-bottom: 18px;
 }
 .title-head .brand {
   color: var(--white);
   font-size: 15px;
   letter-spacing: 0.42em;
 }
-.title-head .tabs {
-  display: flex;
-  gap: 20px;
-}
-.title-head .tab {
-  color: #3f5570;
-  letter-spacing: 0.2em;
-  cursor: pointer;
-}
-.title-head .tab:hover {
-  color: var(--ink);
-}
-.title-head .tab.on {
-  color: var(--voltaic);
-  border-bottom: 1px solid var(--voltaic);
+.title-head .tagline {
+  color: #2f4258;
+  letter-spacing: 0.16em;
 }
 .title-head .lifetime {
   margin-left: auto;
   color: #46586e;
 }
+
+/* Nav left, content right. A vertical list is what a game menu looks like, and
+   it happens to be the layout that keeps the frame still: adding a section
+   makes the rail longer, not the panel wider. */
+.title-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  gap: 26px;
+}
+.title-nav {
+  flex: 0 0 138px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-right: 1px solid var(--structure);
+  padding: 18px 0 0;
+}
+.navitem {
+  padding: 7px 14px 7px 0;
+  color: #3f5570;
+  letter-spacing: 0.24em;
+  cursor: pointer;
+  border-right: 2px solid transparent;
+  margin-right: -1px;
+  text-align: right;
+}
+.navitem:hover {
+  color: var(--ink);
+}
+.navitem.on {
+  color: var(--voltaic);
+  border-right-color: var(--voltaic);
+}
+.title-content {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 18px 4px 4px 0;
+}
+
+.title-panel > .inspector {
+  flex: none;
+}
 .title-foot {
-  margin-top: 18px;
+  flex: none;
+  margin-top: 14px;
   padding-top: 12px;
   border-top: 1px solid var(--structure);
   color: #3f5570;
   letter-spacing: 0.18em;
+}
+
+/* §19.5 credits. */
+.credits {
+  max-width: 82ch;
+}
+.cr-title {
+  color: var(--white);
+  font-size: 15px;
+  letter-spacing: 0.42em;
+}
+.cr-tag {
+  color: #46586e;
+  letter-spacing: 0.16em;
+  margin: 4px 0 26px;
+}
+.cr-row {
+  display: flex;
+  gap: 16px;
+  padding: 5px 0;
+  line-height: 1.6;
+}
+.cr-k {
+  flex: 0 0 18ch;
+  color: #3f5570;
+  letter-spacing: 0.14em;
+  white-space: nowrap;
+}
+.cr-v {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--ink);
+}
+.cr-note {
+  margin-top: 26px;
+  padding-top: 16px;
+  border-top: 1px solid var(--structure);
+  color: #56708c;
+  line-height: 1.7;
 }
 .title-panel .k {
   color: #3f5570;
@@ -1112,7 +1190,7 @@
   margin-top: 0;
 }
 
-/* Run Setup. An Axiom is a Program, so it is shown as one — the same chain
+/* Play. An Axiom is a Program, so it is shown as one — the same chain
    grammar the editor and the Engine strip use, not a paragraph about it. */
 .ax-lead {
   max-width: 76ch;
@@ -1332,9 +1410,7 @@
    document as the rest of the menu — a control that looked like a DAW would be
    a hole in §16 the size of a mixing desk. */
 .lab {
-  margin-top: 26px;
-  border-top: 1px solid var(--structure);
-  padding-top: 16px;
+  margin-top: 18px;
 }
 .subtabs {
   display: flex;

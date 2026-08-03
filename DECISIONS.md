@@ -2224,6 +2224,54 @@ worse failure, sending somebody to edit a cell that was never broken.
 
 ---
 
+## D-102 · SETTLED · A menu with a front door, and a frame that holds still
+
+Two complaints, one cause. "There's a lot" — six top-level tabs, three of them
+reference material and one of them the way into the game, all rendered as peers.
+And "when I click any of the menu points, the chrome drastically changes height."
+
+**The frame.** `.title-panel` sized itself to whichever pane was open, so every
+click moved the border, the nav and the footer at once. That does not read as a
+section changing, it reads as the page reloading. The panel is now one fixed
+height with the header and footer pinned and only the content scrolling —
+measured at 898px on all five sections at 1382×1270, and 584px on all five at
+1000×620. A section that overflows scrolls; the frame never moves.
+
+**The structure.** Five sections in a vertical rail:
+
+    PLAY        seed · Axiom · start
+    CODEX       how it works · library · enemies
+    MUSIC       engine · arrangement · your cells
+    SETTINGS
+    CREDITS
+
+A game menu has a front door, and PLAY is it — which also disposes of "Run
+Setup", a name that described the screen's mechanism rather than what you came
+there to do. Library and Codex are both "what exists and how much of it have I
+met", so they are one section with sub-tabs rather than two headings competing
+for the same shelf. No EXIT: this is a browser game and the tab close button
+already exists.
+
+A vertical rail is not only what a game menu looks like — it is the layout that
+keeps the frame still, because adding a section makes the rail longer rather than
+the panel wider.
+
+Escape now means "back to PLAY" from anywhere in the menu. In a menu with a front
+door, "back" finally has somewhere to point.
+
+**The Music tabs** were called Studio, The Desk and Cells, which named rooms in a
+recording studio rather than anything in this game. They are now Engine,
+Arrangement and Your Cells — which is the pipeline, coarse to fine: an Engine
+chooses an Arrangement, an Arrangement is made of Cells. Each tab is one level
+further into the same object, and the order says so. "Your" is doing work on the
+third one: it is the only tab where anything belongs to the player, and the only
+one whose contents survive a reload.
+
+Nothing about the visual language changed. Same palette, same rules, same
+schematic. This is UX, not art.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

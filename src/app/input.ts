@@ -40,7 +40,7 @@ const COMMAND_KEYS: Record<string, Command> = {
   Enter: 'confirm',
   KeyH: 'help',
   Slash: 'help',
-  // Results only: back out to Run Setup rather than straight into another run.
+  // Results only: back out to the menu rather than straight into another run.
   KeyL: 'library',
   KeyM: 'mute',
 };

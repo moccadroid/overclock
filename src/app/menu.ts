@@ -1,8 +1,10 @@
 /**
- * Run Setup and the Library. GDD §19.1–19.3 and §15.2.
+ * The menu. GDD §19.1–19.5 and §15.2.
  *
- * Three panes behind one frame, because they answer three halves of the same
- * question: what am I about to do, what have I learned, and what have I met.
+ * Five sections behind one frame that never changes size. The frame is the whole
+ * point: it grew a tab at a time into a row of peers, so every click resized the
+ * panel and moved the border, the nav and the footer at once — which reads as
+ * the page reloading rather than as a section changing.
  *
  * The Library exists to make §15.1 visible. Meta-progression that grants breadth
  * rather than power has a presentation problem — there is no number going up, so
@@ -22,7 +24,32 @@ import { applyEffects, VIEW_EFFECTS } from './visual';
 import type { Audio } from '../audio/audio';
 import { MusicLab } from './lab';
 
-type Pane = 'setup' | 'library' | 'codex' | 'music' | 'settings' | 'primer';
+/**
+ * §19.1–19.3 — five sections, not six tabs.
+ *
+ * It grew one tab at a time and ended up as a row of peers where three of them
+ * were reference material and one was the front door. A game menu has a front
+ * door: PLAY is first, everything else is a place you go and come back from.
+ *
+ * Library and Codex are both "what exists and what I have met", so they are one
+ * section with sub-tabs rather than two headings competing for the same shelf.
+ */
+type Pane = 'play' | 'codex' | 'music' | 'settings' | 'credits';
+type CodexTab = 'primer' | 'library' | 'enemies';
+
+const PANES: { id: Pane; label: string }[] = [
+  { id: 'play', label: 'PLAY' },
+  { id: 'codex', label: 'CODEX' },
+  { id: 'music', label: 'MUSIC' },
+  { id: 'settings', label: 'SETTINGS' },
+  { id: 'credits', label: 'CREDITS' },
+];
+
+const CODEX_TABS: { id: CodexTab; label: string }[] = [
+  { id: 'primer', label: 'HOW IT WORKS' },
+  { id: 'library', label: 'LIBRARY' },
+  { id: 'enemies', label: 'ENEMIES' },
+];
 
 export interface SetupResult {
   seed: string;
@@ -41,7 +68,8 @@ function clockLabel(seconds: number): string {
 
 export class TitleScreen {
   private readonly el: HTMLElement;
-  private pane: Pane = 'setup';
+  private pane: Pane = 'play';
+  private codexTab: CodexTab = 'primer';
   private seed = randomSeed();
   private axiomId = 'ignition';
   private resolve: ((r: SetupResult) => void) | null = null;
@@ -73,12 +101,16 @@ export class TitleScreen {
     // §18.4 — the chrome answers when you touch it. Delegated, because the menu
     // rebuilds its whole DOM on every pane change.
     this.el.addEventListener('mouseover', (ev) => {
-      if ((ev.target as HTMLElement).closest('button, .tab, .demo, .axiom, .node, .lib-row')) {
+      if (
+        (ev.target as HTMLElement).closest(
+          'button, .navitem, .subtab, .axiom, .node, .lib-row, .lab-sel',
+        )
+      ) {
         this.audio.chrome('hover');
       }
     });
     this.el.addEventListener('click', (ev) => {
-      if ((ev.target as HTMLElement).closest('button, .tab, .demo, .axiom')) {
+      if ((ev.target as HTMLElement).closest('button, .navitem, .subtab, .axiom')) {
         this.audio.chrome('click');
       }
     });
@@ -104,13 +136,22 @@ export class TitleScreen {
       this.start();
     } else if (ev.key === 'Tab') {
       ev.preventDefault();
-      const order: Pane[] = ['setup', 'library', 'codex', 'music', 'settings', 'primer'];
+      const order = PANES.map((p) => p.id);
       this.pane = order[(order.indexOf(this.pane) + 1) % order.length]!;
       this.render();
+    } else if (ev.key === 'Escape') {
+      // Anywhere but the front door, Escape is the way back to it. In a menu
+      // with a front door, "back" has somewhere to mean.
+      if (this.pane === 'play') return;
+      this.pane = 'play';
+      this.render();
     } else if (ev.key === 'h' || ev.key === 'H' || ev.key === '?') {
-      // H opens the primer in-run, so it does the same here. The tab is the real
-      // affordance though: a key you have to already know about is not a way in.
-      this.pane = this.pane === 'primer' ? 'setup' : 'primer';
+      // H opens the primer in-run, so it does the same here. The section is the
+      // real affordance though: a key you have to already know about is not a
+      // way in.
+      const showing = this.pane === 'codex' && this.codexTab === 'primer';
+      this.pane = showing ? 'play' : 'codex';
+      this.codexTab = 'primer';
       this.render();
     }
   }
@@ -133,41 +174,54 @@ export class TitleScreen {
     const panel = document.createElement('div');
     panel.className = 'panel title-panel';
 
-    const tabs = (['setup', 'library', 'codex', 'music', 'settings', 'primer'] as const)
-      .map(
-        (p) =>
-          `<span class="tab${p === this.pane ? ' on' : ''}" data-pane="${p}">` +
-          `${p === 'setup' ? 'RUN SETUP' : p === 'primer' ? 'HOW IT WORKS' : p.toUpperCase()}</span>`,
-      )
-      .join('');
+    const nav = PANES.map(
+      (p) =>
+        `<span class="navitem${p.id === this.pane ? ' on' : ''}" data-pane="${p.id}">` +
+        `${p.label}</span>`,
+    ).join('');
 
     panel.innerHTML =
       `<div class="title-head">` +
       `<span class="brand">${BRANDING.title}</span>` +
-      `<span class="tabs">${tabs}</span>` +
+      `<span class="tagline">${BRANDING.tagline}</span>` +
       `<span class="lifetime">${lib.runs} runs · best ${lib.bestScore.toLocaleString()} · ` +
       `${clockLabel(lib.bestTime)} · depth ${lib.bestDepth}</span>` +
       `</div>` +
-      (this.pane === 'setup'
+      // The body is the only thing that changes size, and it is the only thing
+      // that scrolls. Before this the whole panel grew and shrank to fit its
+      // pane, so every click moved the frame, the nav and the footer — which
+      // reads as the page reloading rather than as a section changing.
+      `<div class="title-body">` +
+      `<nav class="title-nav">${nav}</nav>` +
+      `<div class="title-content">` +
+      (this.pane === 'play'
         ? this.renderSetup()
-        : this.pane === 'library'
-          ? this.renderLibrary()
-          : this.pane === 'codex'
-            ? this.renderCodex()
-            : this.pane === 'music'
-              ? this.renderMusic()
-              : this.pane === 'settings'
-                ? this.renderSettings()
-                : `<div class="primer-pane">${renderPrimer(false)}</div>`) +
-      `<div class="title-foot">TAB switch · H how it works · ENTER start run</div>`;
+        : this.pane === 'codex'
+          ? this.renderCodexPane()
+          : this.pane === 'music'
+            ? this.renderMusic()
+            : this.pane === 'settings'
+              ? this.renderSettings()
+              : this.renderCredits()) +
+      `</div></div>` +
+      `<div class="title-foot">` +
+      `<span>${this.pane === 'play' ? 'ENTER play' : 'ENTER play · ESC back to PLAY'} · ` +
+      `TAB section · H how it works</span>` +
+      `</div>`;
 
     // Hover reading, in-world, in a fixed place. See `inspector`.
     panel.insertBefore(inspector(panel), panel.querySelector('.title-foot'));
     this.el.replaceChildren(panel);
 
-    for (const tab of panel.querySelectorAll<HTMLElement>('.tab')) {
+    for (const item of panel.querySelectorAll<HTMLElement>('[data-pane]')) {
+      item.addEventListener('click', () => {
+        this.pane = item.dataset.pane as Pane;
+        this.render();
+      });
+    }
+    for (const tab of panel.querySelectorAll<HTMLElement>('[data-codex]')) {
       tab.addEventListener('click', () => {
-        this.pane = tab.dataset.pane as Pane;
+        this.codexTab = tab.dataset.codex as CodexTab;
         this.render();
       });
     }
@@ -411,7 +465,66 @@ export class TitleScreen {
     );
   }
 
-  private renderCodex(): string {
+  /**
+   * §15.2, §19.3 — everything the game knows, behind one heading.
+   *
+   * The primer, the node Library and the enemy Codex answer one question each,
+   * and all three are versions of "what is out there and how much of it have I
+   * met". As sibling top-level tabs they read as three unrelated screens; as
+   * sub-tabs they read as one reference section, which is what they are.
+   */
+  private renderCodexPane(): string {
+    const tabs = CODEX_TABS.map(
+      (t) =>
+        `<span class="subtab${t.id === this.codexTab ? ' on' : ''}" data-codex="${t.id}">` +
+        `${t.label}</span>`,
+    ).join('');
+
+    const body =
+      this.codexTab === 'primer'
+        ? `<div class="primer-pane">${renderPrimer(false)}</div>`
+        : this.codexTab === 'library'
+          ? this.renderLibrary()
+          : this.renderEnemies();
+
+    return `<div class="subtabs">${tabs}</div>${body}`;
+  }
+
+  /**
+   * §19.5 — credits.
+   *
+   * Short, and it names the parts that are actually load-bearing rather than a
+   * list of dependencies. Everything here is either synthesised or drawn at
+   * runtime; there is no asset pipeline to thank.
+   */
+  private renderCredits(): string {
+    const lines: [string, string][] = [
+      ['design & code', 'built with Claude'],
+      ['sound', 'synthesised in the browser — no samples, no audio files'],
+      ['music', 'written by your Engine, out of cells a person wrote'],
+      ['art', 'drawn every frame as vectors and light — no textures'],
+      ['runtime', 'TypeScript · PixiJS · Web Audio · Vite'],
+    ];
+
+    return (
+      `<div class="credits">` +
+      `<div class="cr-title">${BRANDING.title}</div>` +
+      `<div class="cr-tag">${BRANDING.tagline}</div>` +
+      lines
+        .map(
+          ([k, v]) =>
+            `<div class="cr-row"><span class="cr-k">${k}</span>` +
+            `<span class="cr-v">${v}</span></div>`,
+        )
+        .join('') +
+      `<div class="cr-note">A run is one Engine, built out of rows that read ` +
+      `left to right, from a draft you did not choose. Everything you hear is ` +
+      `that Engine. Everything you see is it firing.</div>` +
+      `</div>`
+    );
+  }
+
+  private renderEnemies(): string {
     const seen = new Set(this.library.snapshot.codex);
     const rows = ENEMIES.map((e) => {
       const known = seen.has(e.id);
