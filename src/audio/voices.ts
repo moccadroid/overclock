@@ -229,13 +229,24 @@ function rim(v: VoiceCtx, at: number, gain: number): void {
 function clap(v: VoiceCtx, at: number, gain: number): void {
   const { ctx } = v;
   const bus = ctx.createGain();
-  bus.gain.value = gain * 0.3;
+  // Quieter than it was. This is the first thing anyone hears — it plays under
+  // the title screen — and it was landing on top of an arrangement built to be
+  // heard *behind* a game.
+  bus.gain.value = gain * 0.22;
 
   const filter = ctx.createBiquadFilter();
   filter.type = 'bandpass';
   filter.frequency.value = 1500;
   filter.Q.value = 0.9;
-  bus.connect(filter).connect(v.out);
+  // The snare's fault, again: a Q of 0.9 is barely a filter, so this was noise
+  // with a gentle tilt and no ceiling, and the 3-8k band it left through is
+  // exactly where "jarring" lives. Measured: harsh-band energy down 2.2x against
+  // 2.0x overall, so it is duller *relative to itself*, not merely quieter.
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 4200;
+  lp.Q.value = 0.5;
+  bus.connect(filter).connect(lp).connect(v.out);
 
   for (const [offset, level, dur] of [
     [0, 1, 0.02],
@@ -245,8 +256,13 @@ function clap(v: VoiceCtx, at: number, gain: number): void {
     const frames = Math.ceil(ctx.sampleRate * (dur + 0.02));
     const buf = ctx.createBuffer(1, frames, ctx.sampleRate);
     const data = buf.getChannelData(0);
+    // A 2 ms rise on each burst. An instantaneous noise onset is a broadband
+    // step — the same thing that made the UI ticks pierce — and two thousandths
+    // of a second is inaudible as softness but audible as *not a click*.
+    const rise = Math.max(1, Math.round(ctx.sampleRate * 0.002));
     for (let i = 0; i < frames; i++) {
-      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / frames, 3);
+      data[i] =
+        (Math.random() * 2 - 1) * Math.pow(1 - i / frames, 3) * Math.min(1, i / rise);
     }
     const src = ctx.createBufferSource();
     src.buffer = buf;

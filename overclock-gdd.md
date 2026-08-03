@@ -919,6 +919,26 @@ Left open intentionally — resolve with design, not silently:
    If it is ever built, build it as a *bonus* and never as a requirement, and
    test it with the music muted before anything else.
 
+9. **Chassis — more than one character, combinable with Axioms.** The avatar is
+   now a machine with parts rather than a triangle (16.4), which is the
+   groundwork for this rather than the thing itself.
+
+   The idea: pick a chassis at Run Setup alongside the Axiom. The Axiom decides
+   what you are *building*; the chassis decides what you are *flying*. Sketched
+   differences, all of them single numbers that already exist as tunables —
+   faster, more Heat headroom, less headroom but a hotter opening, faster fire,
+   one more Program row from the start.
+
+   Two things to resolve before it is scheduled. First, it multiplies the run
+   space by the number of chassis, and 15.1's iron rule says none of them may be
+   a *permanent* upgrade — every chassis must be available from the first run or
+   it is meta progression wearing a hat. Second, a chassis that grants a row is
+   not a sidegrade, it is the strongest card in the game handed out for free at
+   setup; that one probably has to pay elsewhere, hard.
+
+   Visually the work is small and mostly done: hull silhouette, thruster shape
+   and core geometry are already drawn from parameters in one function.
+
 ---
 
 ## 26. Glossary
@@ -930,10 +950,10 @@ Left open intentionally — resolve with design, not silently:
 | Node | Any draftable unit: Trigger, Action, or Modifier |
 | Event | Any engine occurrence (fire, hit, kill…); the atom of the cascade system |
 | Cascade | Chain of events spawning events; carries depth |
-| Cycles | Budget resource: capacity, static load (reserved), dynamic load (spent per event) |
-| Heat | Overdraw penalty meter; drives Instability tiers and Overheat |
-| Overclock | Deliberately running dynamic load past capacity |
-| Fuel | Hue-typed resource dropped by enemies; +50% output when an Action fires fueled |
+| Cycles | Static reservation: capacity vs. what your live nodes cost. Changes only when you change the Engine |
+| Heat | Accrues from cascade depth past the free links; drives Instability tiers and Overheat |
+| Overclock | Deliberately running chains deeper than you can cool |
+| Fuel | **REMOVED (D-106).** Was a hue-typed drop; see the §7 note |
 | Hue | One of Thermal/Voltaic/Void; types damage, fuel, enemies, and audio |
 | EPS | Events per second; the score metric and the game's honesty about output |
 | Recompile | Mid-run prestige: delete the Engine, forge a Kernel |

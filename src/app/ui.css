@@ -301,6 +301,32 @@
   letter-spacing: 0.25em;
   color: #56708c;
 }
+
+/* §5.5 behaviour tags — words, not symbols.
+
+   They shipped as ▸ ◍ ⧗ and were unreadable: an hourglass at eleven pixels is a
+   loading spinner, and all three were things you had to be taught. A word needs
+   no legend; the colour does the grouping so matching an Action to a modifier is
+   a glance. Three tints that belong to nothing else in the palette — hue is
+   spoken for by enemy threat class, and node kind already owns the card border. */
+.tagmark {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 0 5px;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  border: 1px solid currentColor;
+  opacity: 0.9;
+}
+.t-travels {
+  color: #6fd08c;
+}
+.t-area {
+  color: #e08a5c;
+}
+.t-lingers {
+  color: #8f8ce0;
+}
 /* Cards echo the chips: colour plus form. */
 .card.kind-trigger {
   border-left: 4px solid var(--k-trigger);

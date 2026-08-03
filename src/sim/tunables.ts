@@ -47,14 +47,14 @@ export const TUNABLE = {
    * quadratic in its depth — spectacular and brief rather than free and
    * permanent.
    */
-  heatFreeDepth: 3,
+  heatFreeDepth: 2,
   // Calibrated against real event rates rather than guessed. A cascade runs
   // 50-500 events a second; at 100/s and two links past free that is 10 Heat a
   // second, which the 8/s decay very nearly cancels. Six past free is 30/s and
   // climbs. Twelve past free saturates the cap. The point is that the whole
   // band between "free" and "on fire" is reachable, which is exactly what the
   // overdraw model never managed.
-  heatPerDepthEvent: 0.05,
+  heatPerDepthEvent: 0.1,
   heatGainMaxPerSec: 45,
   heatDecayPerSec: 8,
   overheatStallSeconds: 3,
@@ -81,6 +81,15 @@ export const TUNABLE = {
   affixPhaseInterval: 3.5,
   affixPhaseDuration: 1,
   affixAnchoredZone: 190,
+  /**
+   * §11.2 — how many suppression fields may exist at once, queued included.
+   *
+   * Two, because a Suppressor does not add damage, it *subtracts the game*: with
+   * three or more the arena grows regions where nothing you own does anything,
+   * and "my engine stopped" is indistinguishable from "the engine is broken".
+   * Two still forces you to move; a wall of them just forces you to wait.
+   */
+  suppressorsAlive: 2,
 
   // ---- §5.3 / §5.5 node behaviour ----
   /** §8.2 — base crit chance. Crits hit harder and emit their own event. */

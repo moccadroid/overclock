@@ -1920,6 +1920,29 @@ export class World {
     });
   }
 
+  /** Does this enemy definition carry a suppression field of its own? */
+  private projectsZone(defId: string): boolean {
+    return (getEnemy(defId).zoneRadius ?? 0) > 0;
+  }
+
+  /**
+   * How many suppression fields exist right now, live and queued.
+   *
+   * Pending spawns count: they are already committed and will arrive within a
+   * couple of seconds, so leaving them out lets a single burst queue six at once
+   * and walk straight past the cap.
+   */
+  private suppressorCount(): number {
+    let n = 0;
+    for (const e of this.enemies) {
+      if (e.alive && this.projectsZone(e.defId)) n++;
+    }
+    for (const s of this.pendingSpawns) {
+      if (s.alive && this.projectsZone(s.enemy)) n++;
+    }
+    return n;
+  }
+
   /** §11.2 — is the player inside a Suppressor's zone? Triggers do not fire there. */
   get suppressed(): boolean {
     for (const e of this.enemies) {
@@ -2964,6 +2987,15 @@ export class World {
     enriched: boolean,
   ): void {
     if (this.pendingSpawns.length >= SAFETY.maxEntities) return;
+
+    // §11.2 — a hard ceiling on live suppression, counted in *fields* rather
+    // than in enemies. A Suppressor switches your Engine off; three of them
+    // drifting through the same quarter of the arena is not three times the
+    // pressure, it is a region of the map where the game stops. The template
+    // rolls are free to keep asking; past the cap the ask is dropped and the
+    // director makes the density up with something that can be shot at.
+    if (this.suppressorCount() >= TUNABLE.suppressorsAlive && this.projectsZone(enemy)) return;
+
     const rx = ox + this.rng.range(-spread, spread);
     const ry = oy + this.rng.range(-spread, spread);
     // Spread can drag a cluster member back into view; push it out again before

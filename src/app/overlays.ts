@@ -135,6 +135,15 @@ export class DraftOverlay extends Overlay {
       const tag = document.createElement('div');
       tag.className = 'tag';
       tag.textContent = info.tag;
+      // §5.5 — the behaviour tags, as coloured words rather than symbols. An
+      // Action says what it is; a conditional modifier says what it needs. Same
+      // word, same colour, so matching them is a glance rather than a lookup.
+      for (const t of info.tags ?? []) {
+        const chip = document.createElement('span');
+        chip.className = `tagmark t-${t}`;
+        chip.textContent = t;
+        tag.appendChild(chip);
+      }
 
       const name = document.createElement('div');
       name.className = 'title';

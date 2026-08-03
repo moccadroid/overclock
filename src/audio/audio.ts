@@ -778,7 +778,12 @@ export class Audio {
     // land.
     const percStep = step(cells.backbeat, count);
     if (percStep && this.bar % PHRASE_BARS !== PHRASE_BARS - 1) {
-      perc(punch, at, 0.75 * percStep.gain, plan.percVoice);
+      // Scaled by intensity, unlike before. The backbeat was the one loud voice
+      // that ignored how much was happening, so the menu — an arrangement at
+      // near-zero intensity with almost nothing else playing — got the same clap
+      // as a full run, with no wall of engine to sit behind. It now opens up with
+      // everything else instead of arriving fully grown.
+      perc(punch, at, (0.5 + 0.3 * i) * percStep.gain, plan.percVoice);
     }
 
     const hatStep = step(cells.hats, count);

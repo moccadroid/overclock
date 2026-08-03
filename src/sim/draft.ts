@@ -9,7 +9,7 @@
 import { ACTIONS, MODIFIERS, TRIGGERS, NODE_BY_ID } from '../content/index';
 import type { NodeDef } from './types';
 import { LOADBEARING, TUNABLE } from './tunables';
-import { TAG_GLYPH, TAG_LABEL, tagRequiredBy, tagsOf, type Tag } from './engine';
+import { TAG_GLYPH, tagRequiredBy, tagsOf, type Tag } from './engine';
 import type { World } from './world';
 import { axiom as getAxiom } from '../content/index';
 
@@ -92,21 +92,21 @@ export const STAT_CARDS: Record<StatKind, { title: string; body: string; apply: 
 
     // ---- the class stats. Worthless to a build that is not focused. --------
     travels: {
-      title: `Ballistics ${TAG_GLYPH.travels}`,
+      title: 'Ballistics',
       body: '+1 Pierce and +20% projectile speed on everything that travels.',
       apply: (w) => {
         w.bonuses.travels += 1;
       },
     },
     area: {
-      title: `Yield ${TAG_GLYPH.area}`,
+      title: 'Yield',
       body: '+22% radius on every burst, field, mine and shove.',
       apply: (w) => {
         w.bonuses.area += 0.22;
       },
     },
     lingers: {
-      title: `Half-Life ${TAG_GLYPH.lingers}`,
+      title: 'Half-Life',
       body: '+30% duration on everything that lingers.',
       apply: (w) => {
         w.bonuses.lingers += 0.3;
@@ -185,16 +185,20 @@ function weightFor(world: World, node: NodeDef): number {
   const byId = bias[node.id];
   const byHue = hue ? bias[hue] : undefined;
 
-  // Intended frequency: modifiers > stats > actions > triggers.
+  // Intended frequency: modifiers > (triggers == actions).
   //
-  // You need perhaps six triggers and six actions across a whole run, but you
-  // can absorb modifiers forever — they are what makes an existing row better,
-  // and they are the scaling that lets a build become monstrous late. Weighting
-  // actions highest (an earlier correction, when the pool was starving you of
-  // weapons) overshot into the opposite problem: a pile of triggers and weapons
-  // with nothing to sharpen them. This is the steady-state ratio; the hunger
-  // multiplier below is what gets you *to* the steady state.
-  let base = node.kind === 'modifier' ? 26 : node.kind === 'trigger' ? 7 : 13;
+  // Triggers used to sit at 7 against Actions' 13, on the theory that a run
+  // needs "perhaps six triggers and six actions" and Triggers are the cheaper
+  // half. Both halves of that were wrong. A row needs *one of each*, so across a
+  // four-row Engine you need exactly as many Triggers as Actions — and the
+  // asymmetry meant the hunger multiplier below, which fires when you are short
+  // of either, still handed you Actions. Measured on a fourteen-minute run: the
+  // player drew their second Trigger at 8:29 and spent seven minutes with the
+  // one their Axiom gave them.
+  //
+  // Modifiers stay ahead of both, because you can absorb those forever and they
+  // are the scaling that lets a build become monstrous late.
+  let base = node.kind === 'modifier' ? 26 : 13;
 
   if (node.kind !== 'modifier') {
     base *= HUNGER[Math.min(HUNGER.length - 1, ownedCount(world, node.kind))]!;
@@ -259,13 +263,24 @@ export function rollDraft(world: World): DraftOffer {
         // §8.2 — a small, deliberately boring stat pool.
         // Weighted by hand rather than uniformly: Gain is the scaling curve, so
         // it shows up roughly twice as often as the utility stats.
+        // The class stats were added to the type and to STAT_CARDS and never
+        // to this array, so for one whole release they existed, were documented,
+        // and could not be drawn. Measured: 63 cards offered across a run, eight
+        // of them stats, not one a class stat.
         const stats: StatKind[] = [
-          'power',
           'power',
           'crit',
           'magnet',
           'speed',
           'integrity',
+          // Weighted up, because these only pay a focused Engine and a card that
+          // only sometimes matters has to show up often enough to be planned for.
+          'travels',
+          'travels',
+          'area',
+          'area',
+          'lingers',
+          'lingers',
         ];
         cards.push({ kind: 'stat', stat: world.rng.pick(stats) });
       } else {
@@ -285,7 +300,13 @@ export function rollDraft(world: World): DraftOffer {
   return { cards, rerolls: world.rerolls, purges: world.purges };
 }
 
-export function describeCard(card: DraftCard): { title: string; body: string; tag: string } {
+export function describeCard(card: DraftCard): {
+  title: string;
+  body: string;
+  tag: string;
+  /** §5.5 behaviour tags, for the card to render as coloured words. */
+  tags?: Tag[];
+} {
   if (card.kind === 'capacity') {
     return {
       title: 'Capacity',
@@ -330,20 +351,20 @@ export function describeCard(card: DraftCard): { title: string; body: string; ta
   // what it *needs*. Match the glyph and it works.
   const marks =
     node.kind === 'action'
-      ? tagsOf(node.id).map((t) => TAG_GLYPH[t])
+      ? tagsOf(node.id)
       : node.kind === 'modifier'
-        ? [tagRequiredBy(node.id)].filter((t): t is Tag => t !== null).map((t) => TAG_GLYPH[t])
+        ? [tagRequiredBy(node.id)].filter((t): t is Tag => t !== null)
         : [];
-  const glyphs = marks.length > 0 ? ` ${marks.join('')}` : '';
   const needs =
-    node.kind === 'modifier' && marks.length > 0
-      ? `  Needs ${TAG_LABEL[tagRequiredBy(node.id)!].split(' — ')[0]}.`
+    node.kind === 'modifier' && marks[0]
+      ? `  Needs ${TAG_GLYPH[marks[0]]}.`
       : '';
 
   return {
-    title: `${node.name}${glyphs}`,
+    title: node.name,
     body: `${node.description}${needs}  [${cost}]`,
     tag: node.kind.toUpperCase(),
+    tags: marks,
   };
 }
 
@@ -384,4 +405,5 @@ export function useReroll(world: World): boolean {
   world.rerolls--;
   return true;
 }
+
 

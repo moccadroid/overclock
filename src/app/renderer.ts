@@ -33,6 +33,21 @@ const HUE_COLOR: Record<Hue, number> = {
 };
 
 /**
+ * The filament colour of a shot: its hue, most of the way to white.
+ *
+ * Not white itself. A pure white core reads as "a white dot with a coloured
+ * glow" and loses the hue exactly where the eye is looking — which matters here,
+ * because §16.3 makes hue mean *damage class*. Keeping a quarter of the hue in
+ * the core is enough to tell a thermal bolt from a voltaic one at a glance while
+ * still blowing past the tonemap's knee, which is what "hot" means optically.
+ */
+const HOT_CORE: Record<Hue, number> = {
+  thermal: 0xffe6b0,
+  voltaic: 0xd0fbff,
+  void: 0xf0daff,
+};
+
+/**
  * Something that bends the grid. `pull` is a radial displacement in world units,
  * negative to push outward; `swirl` is a tangential rotation in radians at the
  * centre. Both fall off to nothing at `radius`.
@@ -119,6 +134,17 @@ export class Renderer {
   private jitterSeed = 1;
   /** Shared phase for the loot pulse — see drawPickups. Presentation only. */
   private lootPhase = 0;
+  /**
+   * The avatar's animation state (§16.4). Presentation only, and deliberately
+   * *not* in the sim: a smoothed heading that fed back into movement would make
+   * the run depend on frame timing, which is the one thing determinism forbids.
+   */
+  private facing = 0;
+  private bank = 0;
+  private thrust = 0;
+  private pulsePhase = 0;
+  /** §11.2 — suppression fields, in screen pixels. Reused; see emitGlitchFields. */
+  private readonly glitchFields: { x: number; y: number; radius: number; strength: number }[] = [];
   /**
    * Where the soundtrack is, this frame. Null when nothing is playing, which is
    * what makes every use of it degrade to "no pulse" rather than to a guess.
@@ -298,7 +324,7 @@ export class Renderer {
     this.drawEnemies(world);
     this.drawProjectiles(world, tier);
     this.drawFx(world);
-    this.drawPlayer(world, heat);
+    this.drawPlayer(world, heat, frameDt);
     this.drawIndicators(world);
 
     // §16.7 — one ordered ladder serves both Heat (temporary, local) and
@@ -318,6 +344,7 @@ export class Renderer {
     // §16.7 — the degradation ladder pushes whatever preset the player chose
     // further than they asked, which is how Heat and Meltdown stay legible as
     // *damage to the picture* rather than as a separate effect.
+    this.emitGlitchFields(world);
     this.emitLights(world, heat, melt, frameDt);
     this.post.update(
       VIEW,
@@ -326,7 +353,11 @@ export class Renderer {
       this.app.screen.width,
       this.app.screen.height,
     );
-    const off = PostPass.isOff(VIEW) && heat < 0.02 && melt < 0.02;
+    // A suppression field lives entirely in this pass, so the pass has to run
+    // even for a player who turned every effect off — otherwise Suppressors
+    // become invisible on a Schematic preset, which is worse than the ring was.
+    const off =
+      PostPass.isOff(VIEW) && heat < 0.02 && melt < 0.02 && this.glitchFields.length === 0;
     this.app.stage.filters = off ? [] : [this.post.filter];
 
     this.bloom.compose();
@@ -417,22 +448,39 @@ export class Renderer {
     // Every shot is a lamp, and a lamp moving at 1400 units/s covers twenty-odd
     // units between frames. Lighting the disc it stopped in gives a dotted line
     // of glows; lighting the streak gives a shot that draws light behind it.
+    //
+    // Two lights per shot, not one, and that is the whole difference between a
+    // glowing pellet and something *hot*. A wide, dim, hue-coloured halo is what
+    // the air around a bolt does; a narrow, fierce, near-white core is the bolt
+    // itself. One light can be either but never both — widen it and the shot
+    // turns into a soft cloud, brighten it and the cloud turns into a flat disc.
+    // Real emitters read as hot because their centre is *out of range* of the
+    // film while their surroundings are not, and stacking these two gives the
+    // tonemap exactly that: a core that clips to white over a halo that keeps
+    // its colour.
     for (const proj of world.projectiles) {
       if (!proj.alive || !this.camera.isVisible(proj.x, proj.y, 200)) continue;
       const speed = Math.sqrt(proj.vx * proj.vx + proj.vy * proj.vy);
       const trail = Math.min(190, speed * 0.055);
+      const hue = HUE_COLOR[proj.hue];
       if (trail < 24) {
-        lights.point(proj.x, proj.y, 95, HUE_COLOR[proj.hue], 0.16);
+        lights.point(proj.x, proj.y, 95, hue, 0.16);
+        lights.point(proj.x, proj.y, 26, HOT_CORE[proj.hue], 0.85);
       } else {
         const k = trail / Math.max(1, speed);
+        const tx = proj.x - proj.vx * k;
+        const ty = proj.y - proj.vy * k;
+        lights.beam(tx, ty, proj.x, proj.y, 150, hue, 0.13);
+        // The core is shorter than the halo as well as thinner: the filament is
+        // at the head, and the streak behind it is what the filament left.
         lights.beam(
-          proj.x - proj.vx * k,
-          proj.y - proj.vy * k,
+          proj.x - proj.vx * k * 0.45,
+          proj.y - proj.vy * k * 0.45,
           proj.x,
           proj.y,
-          150,
-          HUE_COLOR[proj.hue],
-          0.13,
+          22,
+          HOT_CORE[proj.hue],
+          0.8,
         );
       }
     }
@@ -497,6 +545,49 @@ export class Renderer {
     const worldX = this.viewWidth / 2 - this.camera.x;
     const worldY = VIEW_HEIGHT / 2 - this.camera.y;
     lights.render(scale, offsetX + worldX * scale, offsetY + worldY * scale, dt);
+  }
+
+  /**
+   * §11.2 — hand the post pass this frame's suppression fields.
+   *
+   * A Suppressor's zone is the one hostile region in the game that does nothing
+   * you can see: it switches your Triggers off, and an engine that has stopped
+   * firing looks exactly like an engine with nothing in range. It used to be
+   * announced with a filled disc and a rotating hatch, which worked for one and
+   * whited the arena out at twenty.
+   *
+   * So the field is a fault in the *signal* instead of a thing in the world.
+   * Nothing is drawn; the picture inside the zone comes apart. That reads as
+   * "don't go in there" at any count, and it costs one shader branch.
+   */
+  private emitGlitchFields(world: World): void {
+    this.glitchFields.length = 0;
+    const scale = this.scale;
+    const offsetX = (this.app.screen.width - this.viewWidth * scale) / 2 + this.shakeX;
+    const offsetY = (this.app.screen.height - VIEW_HEIGHT * scale) / 2 + this.shakeY;
+    const worldX = this.viewWidth / 2 - this.camera.x;
+    const worldY = VIEW_HEIGHT / 2 - this.camera.y;
+
+    for (const e of world.enemies) {
+      if (!e.alive) continue;
+      const def = getEnemy(e.defId);
+      const zone = e.affixes.includes('anchored')
+        ? TUNABLE.affixAnchoredZone
+        : (def.zoneRadius ?? 0);
+      if (zone <= 0) continue;
+      if (!this.camera.isVisible(e.x, e.y, zone)) continue;
+      // Fades up with the spawn, like every other §17.1 arrival — a field that
+      // snaps on full strength reads as a rendering bug.
+      const born = Math.min(1, e.spawnAge / VISUAL.drawInTime);
+      this.glitchFields.push({
+        x: offsetX + (worldX + e.x) * scale,
+        y: offsetY + (worldY + e.y) * scale,
+        radius: zone * scale,
+        strength: 0.85 * born,
+      });
+      if (this.glitchFields.length >= 8) break;
+    }
+    this.post.setGlitchFields(this.glitchFields);
   }
 
   /** Turn the sim's death list into decomposing line segments (§17.1). */
@@ -1179,18 +1270,21 @@ export class Renderer {
       }
 
       // §10.2 Suppressor / §10.3 Anchored — the zone where your triggers die.
+      //
+      // The field itself is a *signal fault* now, drawn by the post pass — see
+      // PostPass.setGlitchFields. What stays here is a thin boundary, because
+      // the fault has to have a findable edge and a broken region with no rim is
+      // just a broken screen. The filled disc and the rotating dashes are gone:
+      // twenty of those on screen at once was the arena whiting out.
       const zone = e.affixes.includes('anchored')
         ? TUNABLE.affixAnchoredZone
         : (def.zoneRadius ?? 0);
       if (zone > 0) {
-        const segments = 40;
-        for (let i = 0; i < segments; i += 2) {
-          const a0 = (i / segments) * Math.PI * 2 - e.spawnAge * 0.4;
-          const a1 = ((i + 1) / segments) * Math.PI * 2 - e.spawnAge * 0.4;
-          arcSegment(g, e.x, e.y, zone, a0, a1);
-        }
-        g.stroke({ width: 2, color: 0x6d7b8c, alpha: BAND.inFlight * born });
-        g.circle(e.x, e.y, zone).fill({ color: 0x2a3138, alpha: 0.22 * born });
+        g.circle(e.x, e.y, zone).stroke({
+          width: 1,
+          color: 0x6d7b8c,
+          alpha: BAND.structure * 1.4 * born,
+        });
       }
 
       // §10.3 — elites wear their affixes.
@@ -1302,10 +1396,37 @@ export class Renderer {
       for (const p of world.projectiles) {
         if (p.corrupted || p.hue !== hue) continue;
         if (!this.camera.isVisible(p.x, p.y, 40)) continue;
-        g.circle(p.x, p.y, 1.7);
+        g.circle(p.x, p.y, 2.3);
         heads = true;
       }
       if (heads) g.fill({ color, alpha: BAND.entity });
+
+      // The filament: a hot near-white core at the head, and a short hot streak
+      // trailing it. Two more draw calls per hue, total, and they are what make a
+      // shot read as something burning rather than as a coloured dot — the head
+      // is the brightest part of the bolt, and before this the head and its trail
+      // were the same colour at the same width.
+      //
+      // Still under BAND.player: §16.2's floor is that nothing outrank the
+      // player, and HOT_CORE is a tinted white rather than the real thing.
+      if (heads) {
+        const hot = HOT_CORE[hue];
+        for (const p of world.projectiles) {
+          if (p.corrupted || p.hue !== hue) continue;
+          if (!this.camera.isVisible(p.x, p.y, 40)) continue;
+          g.circle(p.x, p.y, 1.05);
+        }
+        g.fill({ color: hot, alpha: BAND.telegraph });
+
+        for (const p of world.projectiles) {
+          if (p.corrupted || p.hue !== hue) continue;
+          if (!this.camera.isVisible(p.x, p.y, 40)) continue;
+          const speed = Math.hypot(p.vx, p.vy) || 1;
+          const length = speed * VISUAL.trailSeconds * 0.3;
+          g.moveTo(p.x, p.y).lineTo(p.x - (p.vx / speed) * length, p.y - (p.vy / speed) * length);
+        }
+        g.stroke({ width: 0.9, color: hot, alpha: BAND.inFlight * 0.8 });
+      }
     }
 
     // §16.7 step 3 — corrupted projectiles render glitch-dashed in signal red.
@@ -1403,43 +1524,115 @@ export class Renderer {
     }
   }
 
-  /** §16.2 — the player is the only full-brightness object in the universe. */
-  private drawPlayer(world: World, heat: number): void {
+  /**
+   * §16.2 — the player is the only full-brightness object in the universe.
+   *
+   * The chassis, and what the rings around it mean. Both were wrong.
+   *
+   * **The hull** was a triangle pointed along `dirX/dirY`, which is a *digital*
+   * direction — eight values, straight from the keyboard — so the avatar snapped
+   * through 45° steps while everything else in the game moved smoothly. And it
+   * was the only thing on screen that never animated: enemies trace themselves
+   * in, projectiles trail, debris decomposes, and the player was a static
+   * outline. Facing is now smoothed here in the renderer (never in the sim — a
+   * presentation angle must not feed back into a deterministic run), the hull
+   * banks into its turns, and it burns a thruster whose length follows speed.
+   *
+   * **The rings** were two arcs that both drew `staticFraction` — the same
+   * number twice, one of them by mistake — and static Cycle reservation is the
+   * one quantity on the HUD that *cannot change while you play*. A dial that
+   * never moves is decoration. So the ring is Heat now: the number that can end
+   * the run, that changes every second, and that the player would otherwise have
+   * to look away from their character to read. Tier thresholds are marked, so
+   * "how close am I" is answerable at a glance rather than by arithmetic.
+   */
+  private drawPlayer(world: World, heat: number, dt: number): void {
     const g = this.gPlayer;
     g.clear();
     const p = world.player;
     if (!p.alive) return;
 
+    // ---- animation state -------------------------------------------------
+    //
+    // All of it derived from sim state and wall-clock, none of it fed back.
+    const speed = Math.hypot(p.vx, p.vy);
+    const moving = speed > 1;
+    const target = moving ? Math.atan2(p.vy, p.vx) : this.facing;
+    // Exponential approach, framerate-independent. Fast enough that the ship
+    // still feels responsive (the turn completes in about 90 ms), slow enough
+    // that a diagonal tap sweeps instead of teleporting.
+    const turn = angleDiff(target, this.facing);
+    const k = 1 - Math.exp(-dt * 26);
+    this.facing += turn * k;
+    // Wrapped rather than left to accumulate: turning is unbounded and the angle
+    // is only ever consumed as a sine and a cosine, so there is no reason for it
+    // to grow all run.
+    if (this.facing > Math.PI) this.facing -= Math.PI * 2;
+    else if (this.facing < -Math.PI) this.facing += Math.PI * 2;
+    // Banking: how hard it is turning right now, smoothed and clamped. This is
+    // the cue that makes a turn *readable* — the silhouette changes shape, so
+    // you see the manoeuvre and not just the new heading.
+    const rate = dt > 0 ? (turn * k) / dt : 0;
+    this.bank += (Math.max(-1, Math.min(1, rate / 9)) - this.bank) * Math.min(1, dt * 12);
+    const thrustTarget = moving ? Math.min(1, speed / (TUNABLE.playerMoveSpeed * 1.05)) : 0;
+    this.thrust += (thrustTarget - this.thrust) * Math.min(1, dt * 14);
+    this.pulsePhase += dt;
+
     this.particles.drawAfterimages(g, TUNABLE.playerRadius, (gg, x, y, r, angle) => {
       polygonPath(gg, shapeOutline('triangle', x, y, r, angle));
     });
 
-    // The Ring (§19.4): static reserve, dynamic load, Heat reddening and
-    // jittering it. The player's most important instrument lives on the player.
+    // ---- the Heat ring (§19.4) -------------------------------------------
     const ringR = TUNABLE.playerRadius + 12;
     const ringColor = heat > 0.01 ? mix(PALETTE.structure, PALETTE.signal, heat) : PALETTE.structure;
     const wobble = heat > 0.3 ? this.jitter(heat * 1.6 * VISUAL.degradationIntensity) : 0;
 
     g.circle(p.x + wobble, p.y, ringR).stroke({
-      width: 3,
-      color: ringColor,
-      alpha: BAND.structure * 2.2,
+      width: 2,
+      color: PALETTE.structure,
+      alpha: BAND.structure * 1.8,
     });
 
-    const staticArc = world.budget.staticFraction * Math.PI * 2;
-    if (staticArc > 0.001) {
-      arcSegment(g, p.x + wobble, p.y, ringR, -Math.PI / 2, -Math.PI / 2 + staticArc);
-      g.stroke({ width: 3, color: 0x7f98bb, alpha: BAND.inFlight });
+    // Tier thresholds, as two gaps in the track. Heat tiers are step changes —
+    // misfires at 40, corruption at 70 — and a smooth gauge hides steps.
+    for (const mark of [0.4, 0.7]) {
+      const a = -Math.PI / 2 + mark * Math.PI * 2;
+      g.moveTo(p.x + wobble + Math.cos(a) * (ringR - 4), p.y + Math.sin(a) * (ringR - 4)).lineTo(
+        p.x + wobble + Math.cos(a) * (ringR + 4),
+        p.y + Math.sin(a) * (ringR + 4),
+      );
     }
-    const dynArc = world.budget.staticFraction * Math.PI * 2;
-    if (dynArc > 0.001) {
-      arcSegment(g, p.x + wobble, p.y, ringR + 4, -Math.PI / 2, -Math.PI / 2 + dynArc);
+    g.stroke({ width: 1, color: PALETTE.structure, alpha: BAND.structure * 2.4 });
+
+    const heatArc = heat * Math.PI * 2;
+    if (heatArc > 0.001) {
+      arcSegment(g, p.x + wobble, p.y, ringR, -Math.PI / 2, -Math.PI / 2 + heatArc);
+      g.stroke({ width: 3, color: ringColor, alpha: BAND.entity });
+    }
+
+    // Dash: a short arc across the bottom, never a second full ring.
+    //
+    // Two concentric rings around the avatar is what made the old version
+    // unreadable — a ring is a *shape*, and two of them read as one ornament
+    // rather than as two instruments. A 120° arc pinned to the bottom of the
+    // screen (it does not rotate with the hull) cannot be mistaken for the Heat
+    // ring above it, and it fills from the middle out, so "ready" is a symmetric
+    // bar and anything else is visibly partial.
+    const dashSpan = Math.PI * 0.66;
+    const dashMid = Math.PI / 2;
+    const ready = p.dashCooldown > 0 ? 1 - p.dashCooldown / TUNABLE.dashCooldown : 1;
+    arcSegment(g, p.x, p.y, ringR + 6, dashMid - dashSpan / 2, dashMid + dashSpan / 2);
+    g.stroke({ width: 1, color: PALETTE.structure, alpha: BAND.structure * 1.6 });
+    if (ready > 0.001) {
+      const half = (dashSpan / 2) * ready;
+      arcSegment(g, p.x, p.y, ringR + 6, dashMid - half, dashMid + half);
       g.stroke({
         width: 2,
-        color: heat > 0.4 ? PALETTE.signal : PALETTE.voltaic,
-        alpha: BAND.entity,
+        color: ready >= 1 ? 0x9fd0ff : 0x7f98bb,
+        alpha: ready >= 1 ? BAND.inFlight : BAND.structure * 2.2,
       });
     }
+
     if (world.budget.stalled) {
       g.circle(p.x, p.y, ringR + 10).stroke({
         width: 2,
@@ -1479,17 +1672,80 @@ export class Renderer {
       }
     }
 
-    // Compass-needle avatar: triangle in a circle, pure white, band 1.
-    const angle = Math.atan2(p.dirY, p.dirX);
-    polygonPath(g, shapeOutline('triangle', p.x, p.y, TUNABLE.playerRadius, angle));
-    g.stroke({ width: 3, color: PALETTE.player, alpha: BAND.player });
-    g.circle(p.x, p.y, TUNABLE.playerRadius).stroke({
-      width: 1,
-      color: PALETTE.player,
-      alpha: BAND.inFlight,
-    });
+    // ---- the chassis -----------------------------------------------------
+    //
+    // Drawn in the hull's own frame and rotated once, rather than as a triangle
+    // primitive, because every part of it needs to move independently: the
+    // wings sweep with the bank, the intake breathes, the thruster burns. The
+    // silhouette is still an arrowhead — it has to read as "you, pointing that
+    // way" in a screenshot full of chaos (§23.3) — but it is now a *machine*
+    // with a front, a spine and an exhaust, which is what gives later chassis
+    // somewhere to differ.
+    const r = TUNABLE.playerRadius;
+    const a = this.facing;
+    const cos = Math.cos(a);
+    const sin = Math.sin(a);
+    // Local x is forward, local y is right.
+    const at = (fx: number, fy: number): [number, number] => [
+      p.x + fx * cos - fy * sin,
+      p.y + fx * sin + fy * cos,
+    ];
+    const bank = this.bank;
+
+    // The exhaust, behind everything. Its length is thrust plus a fast flicker,
+    // which is the cheapest possible thing that reads as *combustion* rather
+    // than as a shape that got longer.
+    if (this.thrust > 0.02) {
+      const flicker = 0.82 + 0.18 * Math.sin(this.pulsePhase * 47);
+      // Kept inside the Heat ring: an exhaust that pokes through the player's
+      // own instrument turns the avatar into a two-part shape at a glance.
+      const len = r * (0.3 + this.thrust * 0.8) * flicker;
+      const [tx, ty] = at(-r * 0.72, 0);
+      const [ex, ey] = at(-r * 0.72 - len, 0);
+      const [l1x, l1y] = at(-r * 0.72, -r * 0.3);
+      const [l2x, l2y] = at(-r * 0.72, r * 0.3);
+      g.moveTo(l1x, l1y).lineTo(ex, ey).lineTo(l2x, l2y);
+      g.stroke({ width: 2, color: HOT_CORE.thermal, alpha: BAND.inFlight * this.thrust });
+      g.moveTo(tx, ty).lineTo(ex, ey);
+      g.stroke({ width: 1, color: PALETTE.player, alpha: BAND.entity * this.thrust });
+    }
+
+    // Hull: a swept arrowhead. The trailing corners move opposite the bank, so
+    // the ship visibly leans through a turn.
+    const nose = at(r * 1.18, 0);
+    const right = at(-r * 0.62, r * (0.86 + bank * 0.22));
+    const tail = at(-r * 0.34, 0);
+    const left = at(-r * 0.62, -r * (0.86 - bank * 0.22));
+    g.moveTo(nose[0], nose[1])
+      .lineTo(right[0], right[1])
+      .lineTo(tail[0], tail[1])
+      .lineTo(left[0], left[1])
+      .lineTo(nose[0], nose[1]);
+    g.stroke({ width: 2.5, color: PALETTE.player, alpha: BAND.player });
+
+    // The core: the Engine, seen through the hull. It breathes when idle and
+    // spins up with Heat, so the thing that kills you is legible on the avatar
+    // itself and not only on the ring around it.
+    const spin = this.pulsePhase * (1.1 + heat * 7);
+    const coreR = r * (0.3 + 0.05 * Math.sin(this.pulsePhase * 2.2) + heat * 0.1);
+    const coreColour = heat > 0.01 ? mix(PALETTE.player, PALETTE.signal, heat * 0.8) : PALETTE.player;
+    for (let i = 0; i < 3; i++) {
+      const t0 = spin + (i / 3) * Math.PI * 2;
+      const [x0, y0] = at(Math.cos(t0) * coreR, Math.sin(t0) * coreR);
+      const t1 = spin + ((i + 1) / 3) * Math.PI * 2;
+      const [x1, y1] = at(Math.cos(t1) * coreR, Math.sin(t1) * coreR);
+      g.moveTo(x0, y0).lineTo(x1, y1);
+    }
+    g.stroke({ width: 1.5, color: coreColour, alpha: BAND.entity });
+
+    if (p.dashTimer > 0) {
+      // Mid-dash: the hull streaks. Reads as speed, and marks the i-frames.
+      const [bx, by] = at(-r * 2.2, 0);
+      g.moveTo(nose[0], nose[1]).lineTo(bx, by);
+      g.stroke({ width: 1, color: PALETTE.player, alpha: BAND.inFlight });
+    }
     if (p.iframes > 0) {
-      g.circle(p.x, p.y, TUNABLE.playerRadius + 5).stroke({
+      g.circle(p.x, p.y, r + 5).stroke({
         width: 1,
         color: PALETTE.player,
         alpha: BAND.entity,

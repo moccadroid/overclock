@@ -1107,6 +1107,27 @@ describe('pressure attacks the build, not the health bar (GDD §11)', () => {
     expect(w.stats.fires).toBeGreaterThan(baseline);
   });
 
+  it('§11.2 — the director cannot field more than two suppression fields', () => {
+    // A Suppressor does not add damage, it subtracts the game. Without a cap the
+    // wave templates will happily queue six, and six overlapping dead zones is a
+    // region of the arena where nothing the player owns does anything.
+    const w = quietWorld('suppress');
+    // Straight at the director's own queue: that is where the ceiling lives, and
+    // spawnEnemy deliberately has no ceiling (a Splitter's children must always
+    // arrive).
+    const queue = (w as unknown as {
+      queueSpawn(e: string, x: number, y: number, s: number, d: number, en: boolean): void;
+    }).queueSpawn.bind(w);
+    for (let i = 0; i < 40; i++) {
+      queue('suppressor', w.player.x + 900, w.player.y + 900, 40, i * 0.05, false);
+      w.advance(NO_INPUT);
+    }
+    for (let i = 0; i < 300; i++) w.advance(NO_INPUT);
+    const live = w.enemies.filter((e) => e.alive && e.defId === 'suppressor').length;
+    expect(live).toBeGreaterThan(0);
+    expect(live).toBeLessThanOrEqual(TUNABLE.suppressorsAlive);
+  });
+
   it('§10.2 — a Bulwark blocks projectiles from the front but not the flank', () => {
     const w = quietWorld('bulwark');
     w.engine.programs.forEach((p) => {

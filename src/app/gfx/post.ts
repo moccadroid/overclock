@@ -15,6 +15,9 @@
  */
 import { Filter, GlProgram, Texture } from 'pixi.js';
 
+/** Keep in step with MAX_GLITCH in the fragment shader. */
+const MAX_GLITCH = 8;
+
 const vertex = `
 in vec2 aPosition;
 out vec2 vTextureCoord;
@@ -52,6 +55,25 @@ uniform vec4 uInputSize;
 uniform vec4 uOutputFrame;
 uniform vec2 uScreen;
 
+/**
+ * §11.2 — Suppressor fields, as a signal fault rather than a drawn ring.
+ *
+ * Up to eight, packed as (screen x, screen y, radius px, strength). A Suppressor
+ * used to announce itself with a wide circle and a hatch — the only way to say
+ * "your Triggers are off in here", because the effect is otherwise invisible
+ * until you notice nothing is happening. Twenty of them on screen was twenty
+ * overlapping circles and the arena whited out.
+ *
+ * This costs no picture at all. The image inside the field *breaks*: channels
+ * separate, scanlines tear sideways in blocks, and the whole thing loses its
+ * grip. It reads as "do not go in there" without drawing anything, and eight
+ * overlapping ones cannot stack into a white wall because the worst any pixel
+ * gets is the strongest single field over it.
+ */
+#define MAX_GLITCH 8
+uniform vec4 uGlitch[MAX_GLITCH];
+uniform int uGlitchCount;
+
 uniform float uBarrel;
 uniform float uAberration;
 uniform float uScan;
@@ -70,6 +92,45 @@ void main(void) {
   vec2 uv = vTextureCoord;
   vec2 centred = uv - 0.5;
 
+  // ---- suppression fields ---------------------------------------------
+  //
+  // Resolved before anything else reads the texture, because this is a
+  // *sampling* fault: the pixel you get is not the pixel that was there. Taking
+  // the strongest field rather than summing them is what keeps a crowd of
+  // Suppressors legible — three overlapping fields are one broken region, not
+  // three times as broken.
+  float glitch = 0.0;
+  vec2 tear = vec2(0.0);
+  if (uGlitchCount > 0) {
+    vec2 px = uv * uInputSize.xy + uOutputFrame.xy;
+    for (int i = 0; i < MAX_GLITCH; i++) {
+      if (i >= uGlitchCount) break;
+      vec4 g = uGlitch[i];
+      float d = distance(px, g.xy);
+      if (d >= g.z) continue;
+      // Flat across the interior, ramping only over the outer fifth.
+      //
+      // A radial falloff was the obvious first shape and the wrong one: it put
+      // all the damage on the Suppressor itself and left the rest of the zone —
+      // the part you actually have to stay out of — looking fine. The zone is a
+      // *region with a border*, not a source, so it is lit like one.
+      float t = smoothstep(0.0, 0.2, 1.0 - d / g.z) * g.w;
+      glitch = max(glitch, t);
+    }
+    if (glitch > 0.001) {
+      // Horizontal block tear. Bands are quantised in *screen* pixels so they
+      // stay the same size wherever the field is, and reseeded on a coarse time
+      // step so it stutters rather than flows — flowing reads as water.
+      float band = floor(px.y / 9.0);
+      float jump = floor(uTime * 14.0);
+      float slip = hash(vec2(band, jump)) - 0.5;
+      // Only some bands move. A field where every line slips is mush.
+      float active = step(0.55, hash(vec2(band * 1.7, jump * 0.9)));
+      tear = vec2(slip * active * glitch * 0.055, 0.0);
+      uv += tear;
+    }
+  }
+
   // Barrel: the frame bulges as if it were a tube. Applied first, so everything
   // after it inherits the curve rather than fighting it.
   if (uBarrel > 0.0) {
@@ -80,9 +141,13 @@ void main(void) {
   // Per-channel displacement along the radius. Real aberration grows toward the
   // edge of the lens; the old two-tinted-sprites version was uniform, which is
   // why it read as a colour wash rather than as glass.
+  //
+  // A suppression field splits channels hard and horizontally, on top of
+  // whatever the lens is already doing radially. Horizontal because that is what
+  // a broken signal looks like — radial is glass, lateral is electronics.
   vec4 colour;
-  if (uAberration > 0.0) {
-    vec2 dir = centred * uAberration * 0.02;
+  vec2 dir = centred * uAberration * 0.02 + vec2(glitch * 0.009, 0.0);
+  if (uAberration > 0.0 || glitch > 0.001) {
     colour.r = texture(uTexture, uv + dir).r;
     colour.g = texture(uTexture, uv).g;
     colour.b = texture(uTexture, uv - dir).b;
@@ -168,6 +233,21 @@ void main(void) {
     colour.rgb *= 1.0 - uVignette * smoothstep(0.55, 1.15, d);
   }
 
+  // The rest of the fault: dropped scanlines and a dead, desaturated cast. This
+  // sits after everything else so it degrades the *finished* picture — a fault
+  // in the signal, not a thing in the world casting light.
+  if (glitch > 0.001) {
+    float lum = dot(colour.rgb, vec3(0.299, 0.587, 0.114));
+    colour.rgb = mix(colour.rgb, vec3(lum) * 0.82, glitch * 0.5);
+    // Every third scanline drops out, hard.
+    float drop = step(0.66, fract(uv.y * uInputSize.y * 0.5));
+    colour.rgb *= 1.0 - drop * glitch * 0.45;
+    // And a sparse white speckle, so the region reads as *live* interference
+    // rather than as a dirty lens.
+    float sparkle = step(0.997, hash(uv * uInputSize.xy + floor(uTime * 20.0)));
+    colour.rgb += sparkle * glitch * 0.35;
+  }
+
   // Anything the barrel pushed off the edge is outside the frame, not black
   // pixels to be sampled.
   if (uBarrel > 0.0 && (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0)) {
@@ -221,10 +301,34 @@ export class PostPass {
           uHaze: { value: 0, type: 'f32' },
           uTime: { value: 0, type: 'f32' },
           uScreen: { value: new Float32Array([1, 1]), type: 'vec2<f32>' },
+          uGlitchCount: { value: 0, type: 'i32' },
+          uGlitch: { value: new Float32Array(MAX_GLITCH * 4), type: 'vec4<f32>', size: MAX_GLITCH },
         },
         uLight: Texture.WHITE.source,
       },
     });
+  }
+
+  /**
+   * §11.2 — hand over this frame's suppression fields, in screen pixels.
+   *
+   * Screen space rather than world, because the shader has no camera. Anything
+   * past the eighth is dropped: eight overlapping broken regions is already an
+   * unreadable screen, and the ninth cannot make it worse in a way anyone would
+   * thank us for.
+   */
+  setGlitchFields(fields: readonly { x: number; y: number; radius: number; strength: number }[]): void {
+    const uniforms = this.filter.resources.postUniforms.uniforms as Record<string, unknown>;
+    const data = uniforms.uGlitch as Float32Array;
+    const n = Math.min(MAX_GLITCH, fields.length);
+    for (let i = 0; i < n; i++) {
+      const f = fields[i]!;
+      data[i * 4] = f.x;
+      data[i * 4 + 1] = f.y;
+      data[i * 4 + 2] = f.radius;
+      data[i * 4 + 3] = f.strength;
+    }
+    (uniforms as Record<string, number>).uGlitchCount = n;
   }
 
   /** Point the shader at this frame's light buffer. */

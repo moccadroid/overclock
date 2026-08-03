@@ -191,10 +191,19 @@ export function inertFields(modifierId: string, actionId: string | null): FireFi
  */
 export type Tag = 'travels' | 'area' | 'lingers';
 
+/**
+ * Words, not symbols.
+ *
+ * This shipped as ▸ ◍ ⧗ and they were terrible: an hourglass at eleven pixels
+ * reads as a loading spinner, and every one of them is a thing you have to be
+ * taught. The whole point of the tags was legibility, and a symbol you must
+ * learn is strictly worse than a word you already know. The colour carries the
+ * grouping; the word carries the meaning.
+ */
 export const TAG_GLYPH: Record<Tag, string> = {
-  travels: '▸',
-  area: '◍',
-  lingers: '⧗',
+  travels: 'travels',
+  area: 'area',
+  lingers: 'lingers',
 };
 
 export const TAG_LABEL: Record<Tag, string> = {
