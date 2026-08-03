@@ -321,19 +321,28 @@ function apply(world: World, c: Command, tick: number, hooks: ReplayHooks): void
     case 'recompile':
       world.recompile(c.rows);
       return;
+    // Editing the Engine by hand. Every one of these has to re-sync the budget,
+    // because the editor does it — `afterChange` calls `syncBudget` after each
+    // edit, and `applyDraft` calls it internally, so this was the only path that
+    // changed the Engine without it. A drag at 3:13 of a real run was enough to
+    // put the reserved Cycles a fraction out and diverge everything after it.
     case 'move':
       // The capacity limit is part of the rule, not part of the choice: a move
       // the player was refused must be refused on replay too.
       world.engine.moveNode(c.fp, c.fs, c.tp, c.ts, world.budget.capacity);
+      world.syncBudget();
       return;
     case 'swap':
       world.engine.swapModifiers(c.p, c.a, c.b);
+      world.syncBudget();
       return;
     case 'scrapNode':
       world.engine.scrapNode(c.p, c.s);
+      world.syncBudget();
       return;
     case 'scrapRow':
       world.engine.scrapProgram(c.p);
+      world.syncBudget();
       return;
   }
 }
