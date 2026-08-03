@@ -15,7 +15,7 @@
  */
 import { Application, Container, Graphics, Sprite, Text, Texture } from 'pixi.js';
 import { TUNABLE } from '../sim/tunables';
-import type { Hue } from '../sim/types';
+import type { EnemyMark, Hue } from '../sim/types';
 import type { TerminalKind, World } from '../sim/world';
 import { enemy as getEnemy } from '../content/index';
 import { Camera } from './camera';
@@ -909,6 +909,18 @@ export class Renderer {
       if (t.kind === 'recompile') {
         g.rect(t.x - r + 6, t.y - r + 6, (r - 6) * 2, (r - 6) * 2);
         g.stroke({ width: 1, color, alpha: BAND.inFlight });
+      } else if (t.kind === 'cache') {
+        // §12.4 — a Cache is a box with something in it, and a ring of teeth to
+        // say the something bites. Read from across the arena: the teeth turn.
+        g.circle(t.x, t.y, r - 5).stroke({ width: 1.5, color, alpha: BAND.inFlight });
+        for (let i = 0; i < 8; i++) {
+          const a = (i / 8) * Math.PI * 2 + t.age * 0.5;
+          g.moveTo(t.x + Math.cos(a) * (r + 3), t.y + Math.sin(a) * (r + 3)).lineTo(
+            t.x + Math.cos(a) * (r + 9),
+            t.y + Math.sin(a) * (r + 9),
+          );
+        }
+        g.stroke({ width: 2, color, alpha: BAND.entity });
       } else if (t.kind === 'extract') {
         for (const [sx, sy] of CORNERS) {
           g.moveTo(t.x + sx * (r + 10), t.y + sy * (r + 2)).lineTo(
@@ -958,10 +970,13 @@ export class Renderer {
         TUNABLE.beaconRadius + TUNABLE.playerRadius;
       const moving = t.requiresStillness && Math.hypot(world.player.vx, world.player.vy) > 12;
       label.visible = true;
+      // §12.4 — a POI whose price is a fight has to say so *before* it is paid.
+      // "HOLD E" on a Cache would be a trap, and §17.1 does not allow traps.
+      const prompt = t.kind === 'cache' ? 'HOLD  E  —  THEY WAKE UP' : 'HOLD  E';
       label.text = near
         ? moving
           ? 'HOLD STILL'
-          : 'HOLD  E'
+          : prompt
         : `${t.kind.toUpperCase()}_${String(t.id).padStart(2, '0')}`;
       label.alpha = near ? BAND.telegraph : BAND.inFlight;
       label.style.fill = moving && near ? PALETTE.signal : TERMINAL_COLOR[t.kind];
@@ -1444,6 +1459,14 @@ export class Renderer {
           arcSegment(g, e.x, e.y, blast, a0, a0 + (Math.PI * 2) / segments);
         }
         g.stroke({ width: 1, color: PALETTE.signal, alpha: BAND.structure * 2 });
+      }
+
+      // §10.4 — variant marks. One table, one entry per mark: the whole reason a
+      // new variant is a JSON edit rather than a renderer edit.
+      if (def.marks) {
+        for (const mark of def.marks) {
+          ENEMY_MARKS[mark]?.(g, e, r, born, color, world.time, (a) => this.jitter(a));
+        }
       }
 
       // §10.3 — elites wear their affixes.
@@ -1984,6 +2007,85 @@ const TERMINAL_COLOR: Record<TerminalKind, number> = {
   beacon: PALETTE.beacon,
   recompile: PALETTE.void,
   extract: PALETTE.thermal,
+  // §12.4 — the Cache is voltaic: it is the one POI that hands you a card, and
+  // voltaic is the hue this game already uses for "your side of the fight".
+  cache: PALETTE.voltaic,
+};
+
+/**
+ * §16.4 — the mark vocabulary, as a table.
+ *
+ * A variant is a known silhouette plus one added glyph, and the point of the
+ * table is that adding the twentieth one costs a line here and a line of JSON.
+ * Every mark obeys the same three rules: it sits *outside* the body so it never
+ * hides the shape, it uses form rather than a new colour (hue is spoken for by
+ * threat class, §16.3), and it fades in with `born` like everything else.
+ */
+type MarkDraw = (
+  g: Graphics,
+  e: World['enemies'][number],
+  r: number,
+  born: number,
+  color: number,
+  time: number,
+  jitter: (amount: number) => number,
+) => void;
+
+const ENEMY_MARKS: Record<EnemyMark, MarkDraw> = {
+  // Armour on the leading edge. Answers single-target spam: flank it or use area.
+  shield: (g, e, r, born, color) => {
+    const facing = Math.atan2(e.aimY, e.aimX);
+    arcSegment(g, e.x, e.y, r + 5, facing - 1.1, facing + 1.1);
+    g.stroke({ width: 3, color, alpha: BAND.telegraph * born });
+  },
+  // A charge building toward a detonation. Brightens as it nears the player, so
+  // "do not kill this one next to you" is legible before it is a lesson.
+  charge: (g, e, r, born, color, time) => {
+    const pulse = 0.55 + 0.45 * Math.sin(time * 5 + e.id);
+    g.circle(e.x, e.y, r * 0.45).fill({ color: PALETTE.signal, alpha: 0.5 * pulse * born });
+    g.circle(e.x, e.y, r + 3 + pulse * 2).stroke({
+      width: 1,
+      color: PALETTE.signal,
+      alpha: BAND.structure * 2 * pulse * born,
+    });
+    void color;
+  },
+  // Phases. Drawn as a dashed ring, so the rhythm is readable while it is solid.
+  phase: (g, e, r, born, color, time) => {
+    for (let i = 0; i < 8; i += 2) {
+      const a0 = (i / 8) * Math.PI * 2 + time * 1.4;
+      arcSegment(g, e.x, e.y, r + 4, a0, a0 + Math.PI / 8);
+    }
+    g.stroke({ width: 1.5, color, alpha: BAND.inFlight * born });
+  },
+  // Carries children. A second outline just inside the first: something in there.
+  brood: (g, e, r, born, color: number) => {
+    g.circle(e.x, e.y, r * 0.62).stroke({ width: 1.5, color, alpha: BAND.inFlight * born });
+    g.circle(e.x, e.y, r * 0.34).stroke({ width: 1, color, alpha: BAND.structure * 2 * born });
+  },
+  // Elite of its family. Three spikes above, the genre's oldest shorthand.
+  crown: (g, e, r, born) => {
+    for (let i = -1; i <= 1; i++) {
+      const a = -Math.PI / 2 + i * 0.42;
+      g.moveTo(e.x + Math.cos(a) * (r + 3), e.y + Math.sin(a) * (r + 3)).lineTo(
+        e.x + Math.cos(a) * (r + 10),
+        e.y + Math.sin(a) * (r + 10),
+      );
+    }
+    g.stroke({ width: 2, color: PALETTE.beacon, alpha: BAND.entity * born });
+  },
+  // Hurts to touch, more than its size suggests.
+  spines: (g, e, r, born, color, time, jitter) => {
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2 + time * 0.6;
+      const out = r + 6 + jitter(1.5);
+      g.moveTo(e.x + Math.cos(a) * r, e.y + Math.sin(a) * r).lineTo(
+        e.x + Math.cos(a) * out,
+        e.y + Math.sin(a) * out,
+      );
+    }
+    g.stroke({ width: 1.5, color, alpha: BAND.entity * born });
+  },
 };
 
 /**

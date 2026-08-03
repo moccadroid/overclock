@@ -10,7 +10,8 @@
     "contactDamage": 1,
     "xp": 1,
     "description": "Drifts toward the player in loose flocks. Mass, fuel rain, cascade kindling.",
-    "hue": "thermal"
+    "hue": "thermal",
+    "family": "mote"
   },
   {
     "id": "drifter",
@@ -23,7 +24,8 @@
     "contactDamage": 6,
     "xp": 2,
     "description": "Steady seek. Baseline pressure.",
-    "hue": "void"
+    "hue": "void",
+    "family": "drifter"
   },
   {
     "id": "charger",
@@ -39,7 +41,8 @@
     "dashSpeed": 620,
     "dashDuration": 0.45,
     "description": "Stops, aims, telegraphed dash. Punishes standing still.",
-    "hue": "thermal"
+    "hue": "thermal",
+    "family": "charger"
   },
   {
     "id": "bulwark",
@@ -143,5 +146,195 @@
     "elite": true,
     "description": "Mini-elite. Any base behaviour plus one or two affixes. Wave punctuation.",
     "hue": "void"
+  },
+  {
+    "id": "mote_shielded",
+    "name": "Shielded Mote",
+    "family": "mote",
+    "shape": "dot",
+    "behavior": "seek",
+    "hp": 6,
+    "speed": 140,
+    "radius": 7,
+    "contactDamage": 2,
+    "xp": 2,
+    "shieldArc": 1.1,
+    "marks": [
+      "shield"
+    ],
+    "substitutes": {
+      "fromThreat": 4,
+      "share": 0.3
+    },
+    "hue": "thermal",
+    "description": "A Mote with armour on its leading edge. Shots from the front do nothing; go around it, or use something with area."
+  },
+  {
+    "id": "mote_charged",
+    "name": "Charged Mote",
+    "family": "mote",
+    "shape": "dot",
+    "behavior": "seek",
+    "hp": 3,
+    "speed": 170,
+    "radius": 7,
+    "contactDamage": 1,
+    "xp": 3,
+    "marks": [
+      "charge"
+    ],
+    "deathBlast": {
+      "damage": 14,
+      "radius": 95
+    },
+    "substitutes": {
+      "fromThreat": 6,
+      "share": 0.22
+    },
+    "hue": "thermal",
+    "description": "A Mote carrying a charge. Killing it near you hurts — which is most of the time, if you stand still and let the cascade work."
+  },
+  {
+    "id": "mote_ghost",
+    "name": "Ghost Mote",
+    "family": "mote",
+    "shape": "dot",
+    "behavior": "seek",
+    "hp": 4,
+    "speed": 150,
+    "radius": 6,
+    "contactDamage": 2,
+    "xp": 3,
+    "marks": [
+      "phase"
+    ],
+    "phaseInterval": 1.6,
+    "phaseDuration": 0.9,
+    "substitutes": {
+      "fromThreat": 9,
+      "share": 0.16
+    },
+    "hue": "thermal",
+    "description": "A Mote that is not always there. Burst damage passes through it; sustained damage does not."
+  },
+  {
+    "id": "drifter_brood",
+    "name": "Brood Drifter",
+    "family": "drifter",
+    "shape": "circle",
+    "behavior": "seek",
+    "hp": 20,
+    "speed": 150,
+    "radius": 15,
+    "contactDamage": 6,
+    "xp": 4,
+    "marks": [
+      "brood"
+    ],
+    "splitsInto": {
+      "enemy": "mote",
+      "count": 4
+    },
+    "substitutes": {
+      "fromThreat": 5,
+      "share": 0.28
+    },
+    "hue": "void",
+    "description": "A Drifter carrying young. Killing it makes four more problems — a gift to an On Kill build and a wall to everything else."
+  },
+  {
+    "id": "drifter_shielded",
+    "name": "Plated Drifter",
+    "family": "drifter",
+    "shape": "circle",
+    "behavior": "seek",
+    "hp": 34,
+    "speed": 140,
+    "radius": 15,
+    "contactDamage": 7,
+    "xp": 5,
+    "shieldArc": 1.0,
+    "marks": [
+      "shield"
+    ],
+    "substitutes": {
+      "fromThreat": 8,
+      "share": 0.24
+    },
+    "hue": "void",
+    "description": "Plated across the front. The answer is to be somewhere it is not looking."
+  },
+  {
+    "id": "drifter_spined",
+    "name": "Spined Drifter",
+    "family": "drifter",
+    "shape": "circle",
+    "behavior": "seek",
+    "hp": 26,
+    "speed": 176,
+    "radius": 14,
+    "contactDamage": 16,
+    "xp": 5,
+    "marks": [
+      "spines"
+    ],
+    "substitutes": {
+      "fromThreat": 11,
+      "share": 0.2
+    },
+    "hue": "void",
+    "description": "Faster than it looks and far worse to touch. The one in the crowd that actually takes your Integrity."
+  },
+  {
+    "id": "charger_crowned",
+    "name": "Crowned Charger",
+    "family": "charger",
+    "shape": "triangle",
+    "behavior": "charge",
+    "hp": 52,
+    "speed": 146,
+    "radius": 17,
+    "contactDamage": 18,
+    "xp": 8,
+    "marks": [
+      "crown"
+    ],
+    "windup": 0.55,
+    "dashSpeed": 620,
+    "dashDuration": 0.45,
+    "substitutes": {
+      "fromThreat": 9,
+      "share": 0.22
+    },
+    "hue": "thermal",
+    "description": "A Charger that has survived enough to lead. Shorter telegraph, longer dash, and it will not be the only one."
+  },
+  {
+    "id": "charger_charged",
+    "name": "Powder Charger",
+    "family": "charger",
+    "shape": "triangle",
+    "behavior": "charge",
+    "hp": 24,
+    "speed": 150,
+    "radius": 15,
+    "contactDamage": 12,
+    "xp": 6,
+    "marks": [
+      "charge"
+    ],
+    "windup": 0.7,
+    "dashSpeed": 540,
+    "dashDuration": 0.4,
+    "deathBlast": {
+      "damage": 22,
+      "radius": 130
+    },
+    "substitutes": {
+      "fromThreat": 12,
+      "share": 0.2
+    },
+    "hue": "thermal",
+    "description": "It was carrying that the whole time. Kill it at range, or kill it and move."
   }
 ]

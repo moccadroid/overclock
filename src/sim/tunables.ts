@@ -177,19 +177,6 @@ export const TUNABLE = {
    * on where it started instead of migrating off the map.
    */
   cascadeReachFalloff: 0.88,
-  /**
-   * §12 — enemies get tougher as Threat climbs.
-   *
-   * They did not, at all: `hp: def.hp` with nothing applied, so a Drifter at
-   * minute eleven was the Drifter from minute one while player output had gone up
-   * a hundredfold. Measured on an 11:23 run: 142 damage taken, total, across the
-   * whole run. Threat reaches ~24 by the Meltdown line, so these put a late
-   * Drifter at roughly 2.2x health and 1.7x bite — enough to be a threat without
-   * pretending the horde can out-scale an exponential Engine, which is a race
-   * §23.1 says never to run.
-   */
-  enemyHpPerThreat: 0.05,
-  enemyDamagePerThreat: 0.03,
   cascadeCostGrowth: 0.5,
   /** Orbitals stack, so they need a ceiling and a per-enemy hit cadence. */
   maxOrbitals: 14,
@@ -307,6 +294,19 @@ export const TUNABLE = {
 
   // ---- §5.7 scrap ----
   scrapOutputBonus: 0.04,
+
+  // ---- §12.4 the Cache ----
+  /**
+   * A POI you channel for a free draft, paid for by the current composition
+   * arriving again in its hardest form. The interval is deliberately close to
+   * the level cadence (§1.3's decision every ~30s): a Cache should feel like an
+   * *extra* draft you fought for, not a replacement for levelling.
+   */
+  cacheChannelTime: 2.2,
+  cacheInterval: 75,
+  cacheFromTime: 45,
+  /** How big the menagerie is, as a share of the director's density target. */
+  cacheWaveFraction: 0.85,
 
   // ---- §12 director ----
   /** Threat reaches ~24 by the 20:00 Meltdown line — the scale wave bands use. */

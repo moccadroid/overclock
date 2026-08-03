@@ -430,7 +430,7 @@ The rhythm of a full run is **break → collapse → break harder**, up to 2–3
 
 **Shape = behavior. Hue = fuel type + damage type. Sides ≈ tier.** A player who has never seen an enemy must correctly predict its behavior from silhouette alone. Every enemy exists in all three hues (hue changes drops and resistance interactions, never behavior). No exceptions in v1.
 
-### 10.2 Roster (v1: 10 + swarm)
+### 10.2 Roster (v1: 10 families + 8 variants)
 
 | Shape | Name | Behavior | Role |
 |---|---|---|---|
@@ -454,7 +454,34 @@ Wardens and Meltdown-tier enemies roll 1–2:
 - **Phasing** — periodically untargetable for 1s (breaks lock-on cadence)
 - **Anchored** — projects a small suppression zone (mobile Suppressor)
 
-### 10.4 THE MIRROR
+### 10.4 Variants — how a run gets harder
+
+**Difficulty never comes from multiplying a number by Threat.** That was tried, measured and removed: enemy HP and contact damage scaled with Threat for one build, and it was wrong three ways. It is *invisible* — a Drifter at minute eleven is pixel-identical to the one at minute one, so the player cannot see that anything changed and concludes their build got worse. It has *no counterplay* — a bigger number asks you to do nothing differently, where every good difficulty spike in this game (the Suppressor, the Glutton, the Lancer corridor) asks a question. And it *lies about the curve* — when you die you cannot tell whether you under-built or the game over-scaled, which poisons the read the Results screen exists to give.
+
+Difficulty comes from **what is on screen**. Three layers, and they must stay distinct:
+
+| Layer | What it is | Rule |
+|---|---|---|
+| **Family** | The silhouette. Mote, Drifter, Charger… | Shape is behaviour (16.4). It never changes meaning |
+| **Variant** | A member of a family carrying one extra idea, with its own def and one added mark | Must be readable at a glance **and** answerable by a different play. If it does not change what the player *does*, it is flat scaling in a costume |
+| **Affix** | A modifier rolled onto elites (10.3) | Rare, rolled, ring-marked. Unchanged |
+
+**The mark vocabulary.** A variant is a known silhouette plus one glyph: `shield` (armour on the leading edge), `charge` (detonates on death), `phase` (periodically untargetable), `brood` (splits), `crown` (elite of its family), `spines` (hurts far more than its size suggests). Marks sit outside the body so they never hide the shape, and use form rather than colour — hue is spoken for by threat class (16.3).
+
+**Substitution** is how they enter a run. Past a Threat band, a rising share of a family's spawns are a variant instead, ramped over the four Threat above the band so the first Shielded Mote arrives alone rather than as a wave. Measured across the bands:
+
+```
+threat  0-4   mote: 100% base                    drifter: 100% base
+threat  8     mote: 63/27/11 base/shield/charge  drifter: 79/21 base/brood
+threat 12     mote: 47/21/20/12                  drifter: 53/22/20/5    charger: 83/18
+threat 18+    mote: 47/19/19/15                  drifter: 43/20/20/17   charger: 62/20/18
+```
+
+Minute eleven looks different from minute one because the things on screen **are different things**.
+
+**The cost of the twentieth variant is one JSON entry.** `family`, `marks`, `deathBlast`, `phaseInterval`, `substitutes` and the existing `shieldArc` / `splitsInto` are all data; the renderer looks marks up in a table. Nothing in the simulation switches on a variant id, and nothing may start.
+
+### 10.5 THE MIRROR
 
 The signature elite. From minute 10 [T], spawns every ~90s [T]:
 
@@ -540,7 +567,24 @@ Spawning is composition-based, not random-soup:
 
 Every ~75s [T] a Beacon spawns somewhere on the arena (edge-indicator marked). Channel 1.5s to activate: the next wave template spawns **immediately and enriched** (+50% fuel and XP drops [T]), and Threat permanently ticks up one notch. Ignoring beacons is safe and slow; chaining them is the greed line. Speed is a choice — the timer is a resource, not a wall.
 
-### 12.4 Extraction
+### 12.4 Points of interest
+
+A POI is a thing on the map worth walking to: hold **E** on it and something happens. They are the reason to leave the middle of the screen, and the arena needs more of them than it has.
+
+They live in one registry — kind, channel time, whether it needs stillness, how many may exist, how often one is placed, when it starts appearing, and where to look for a spot — plus one effect function each. **The cost of the next POI is one registry entry, one effect, and one colour.** No new timer, no new branch in the spawner, no new branch in the completion path.
+
+| POI | From | Channel | What it does |
+|---|---|---|---|
+| **Beacon** | 0:00 | 1.2s | Calls the next wave early and enriched; bumps Threat (12.3) |
+| **Cache** | 0:45 | 2.2s | **A free draft — and the current composition wakes up in its hardest form** |
+| **Recompile** | 8:00 | 3s, still | The prestige choice (9) |
+| **Extract** | 15:00 | 3s | Bank the run at ×1.0 and end it |
+
+**The Cache** is the first POI that is a *decision* rather than a service. Channelling it hands you a draft immediately, and spawns the composition currently running — every enemy in it forced to the nastiest variant its family has, enriched, and wearing an elite affix. Measured: 70 enemies on screen becomes 120, sixty-three of them hardened Ghost Motes.
+
+Its label says `HOLD E — THEY WAKE UP` before you pay, because 17.1 does not allow traps. Difficulty you *opt into* is the only kind that can be this sharp without being unfair, and it is the shape the rest of the map wants: a place, a price, a payout you chose.
+
+### 12.5 Extraction
 
 From minute 15 [T], one **Extract terminal** exists at a fixed arena landmark. Channel 5s (interruptible) to end the run voluntarily: score banks at current value with a **safe-exit multiplier of ×1.0** — no Meltdown multiplier ever applies. Extraction exists so a great build can be banked by a player out of time or nerve; the results screen shows what the Meltdown multiplier *would have offered*, feeding next run's greed.
 

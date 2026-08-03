@@ -89,14 +89,26 @@ export function botInput(world: World): InputState {
     (worthConverting
       ? world.terminals.find((t) => t.kind === 'recompile' && t.alive)
       : undefined) ??
-    (healthy ? world.terminals.find((t) => t.kind === 'beacon' && t.alive) : undefined);
+    (healthy ? world.terminals.find((t) => t.kind === 'beacon' && t.alive) : undefined) ??
+    // §12.4 — a Cache is a free draft paid for with a hard wave, so the bot takes
+    // one only while it is in shape to survive the bill. Without this the probe
+    // never exercises the POI at all.
+    (healthy && p.integrity > p.maxIntegrity * 0.75
+      ? world.terminals.find((t) => t.kind === 'cache' && t.alive)
+      : undefined);
 
   if (target) {
     const dx = target.x - p.x;
     const dy = target.y - p.y;
     const d = hypot(dx, dy);
-    const range = target.kind === 'recompile' ? 2200 : 900;
-    if (d < range && threatDist > 150) {
+    const range = target.kind === 'recompile' ? 2200 : target.kind === 'cache' ? 1800 : 900;
+    // The pull has to survive a crowd. `threatDist > 150` meant the bot only
+    // approached a POI when nothing was near it, and at this game's densities
+    // that is never: measured across three full runs, the reference pilot
+    // channelled *zero* beacons and zero Caches, so every POI in the game went
+    // untested by the harness. It still backs off when something is right on
+    // top of it — that is dodging, not ignoring.
+    if (d < range && threatDist > 60) {
       ax += (dx / (d || 1)) * 1.4;
       ay += (dy / (d || 1)) * 1.4;
     }

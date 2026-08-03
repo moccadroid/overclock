@@ -291,6 +291,12 @@ export type EnemyShape =
   | 'line'
   | 'pentagon';
 
+/**
+ * §16.4 — the mark vocabulary. One added glyph on a known silhouette, so the
+ * learning cost of a variant is one mark rather than one shape.
+ */
+export type EnemyMark = 'shield' | 'charge' | 'phase' | 'brood' | 'crown' | 'spines';
+
 export type EnemyBehavior = 'seek' | 'charge' | 'intercept' | 'suppress' | 'lance';
 
 export interface EnemyDef {
@@ -338,6 +344,43 @@ export interface EnemyDef {
   beamDamage?: number;
   /** Warden — rolls elite affixes (§10.3). */
   elite?: boolean;
+
+  // ---- §10.4 variants -------------------------------------------------------
+  //
+  // A *family* is a silhouette and a behaviour: Mote, Drifter, Charger. A
+  // *variant* is a member of that family carrying one extra idea — armour on its
+  // front, a charge that detonates, a phase, a brood. Same shape, one added
+  // mark, one new question for the player.
+  //
+  // This is deliberately data and not code. Difficulty in this game may not come
+  // from multiplying a number by Threat (that was tried, and a Drifter at minute
+  // eleven being pixel-identical to the one at minute one is exactly why it felt
+  // fake); it comes from *what is on screen*. So the cost of the twentieth
+  // variant has to be one JSON entry, and everything below exists to make that
+  // true.
+
+  /** Which family this belongs to. Defaults to its own id. */
+  family?: string;
+  /**
+   * Visual marks, drawn by the renderer's mark table. Purely presentational —
+   * they say what the def's other fields already do, so a variant is never
+   * something the player has to discover by dying to it.
+   */
+  marks?: EnemyMark[];
+  /**
+   * Detonates on death, for this share of its contact damage, at this radius.
+   * The Volatile elite affix in def form, so an ordinary enemy can carry it.
+   */
+  deathBlast?: { damage: number; radius: number };
+  /** Phases in and out on its own, without being an elite. Seconds. */
+  phaseInterval?: number;
+  phaseDuration?: number;
+  /**
+   * §12 — substitution. Past `fromThreat`, this share of `family` spawns become
+   * this variant instead. How a run's trash changes character without anything
+   * being multiplied.
+   */
+  substitutes?: { fromThreat: number; share: number };
   description: string;
 }
 

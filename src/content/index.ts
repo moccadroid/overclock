@@ -240,6 +240,28 @@ const enemySchema: Schema = {
       count: { type: 'number', required: true, min: 1 },
     },
   },
+  // §10.4 — variants. See EnemyDef for why these are data rather than code.
+  family: { type: 'string' },
+  marks: {
+    type: 'array',
+    items: { type: 'string', oneOf: ['shield', 'charge', 'phase', 'brood', 'crown', 'spines'] },
+  },
+  deathBlast: {
+    type: 'object',
+    fields: {
+      damage: { type: 'number', required: true, min: 0 },
+      radius: { type: 'number', required: true, min: 1 },
+    },
+  },
+  phaseInterval: { type: 'number', min: 0 },
+  phaseDuration: { type: 'number', min: 0 },
+  substitutes: {
+    type: 'object',
+    fields: {
+      fromThreat: { type: 'number', required: true, min: 0 },
+      share: { type: 'number', required: true, min: 0, max: 1 },
+    },
+  },
   description: { type: 'string', required: true },
 };
 
@@ -380,6 +402,27 @@ export const TRIGGER_BY_ID = index(TRIGGERS);
 export const ACTION_BY_ID = index(ACTIONS);
 export const MODIFIER_BY_ID = index(MODIFIERS);
 export const ENEMY_BY_ID = index(ENEMIES);
+
+/** §10.4 — which family an enemy belongs to. Its own id unless it says otherwise. */
+export function familyOf(enemyId: string): string {
+  return ENEMY_BY_ID.get(enemyId)?.family ?? enemyId;
+}
+
+/**
+ * Variants that can stand in for a family, grouped by it and ordered rarest
+ * first so a rare variant is not starved by a common one taking the roll.
+ */
+export const VARIANTS_BY_FAMILY: ReadonlyMap<string, EnemyDef[]> = (() => {
+  const map = new Map<string, EnemyDef[]>();
+  for (const e of ENEMIES) {
+    if (!e.substitutes || !e.family) continue;
+    const list = map.get(e.family) ?? [];
+    list.push(e);
+    map.set(e.family, list);
+  }
+  for (const list of map.values()) list.sort((a, b) => a.substitutes!.share - b.substitutes!.share);
+  return map;
+})();
 export const WAVE_BY_ID = index(WAVES);
 export const AXIOM_BY_ID = index(AXIOMS);
 export const ARENA_BY_ID = index(ARENAS);

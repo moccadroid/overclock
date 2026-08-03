@@ -30,10 +30,12 @@ import {
   ACTION_BY_ID,
   ENEMY_BY_ID,
   TRIGGER_BY_ID,
+  VARIANTS_BY_FAMILY,
   WAVES,
   arena as getArena,
   axiom as getAxiom,
   enemy as getEnemy,
+  familyOf,
 } from '../content/index';
 
 export interface InputState {
@@ -231,7 +233,34 @@ export interface Zone extends SpatialItem {
  * - `recompile` §9    — delete the Engine, forge a Kernel, rebuild steeper.
  * - `extract`  §12.4 — bank the run at ×1.0 and walk away.
  */
-export type TerminalKind = 'beacon' | 'recompile' | 'extract';
+/**
+ * §12.4 — points of interest. A POI is a thing on the map worth walking to:
+ * you hold E on it and something happens.
+ *
+ * This is a registry rather than a switch because the map is going to grow. The
+ * cost of the next POI has to be one entry in POIS, one effect in POI_EFFECTS,
+ * and one colour in the renderer's table — no new timer field, no new branch in
+ * the spawner, no new branch in the completion path.
+ */
+export type TerminalKind = 'beacon' | 'recompile' | 'extract' | 'cache';
+
+export interface PoiDef {
+  kind: TerminalKind;
+  /** Seconds of channelling. */
+  channelTime: number;
+  /** §9.1 — Recompile must be channelled standing still. */
+  requiresStillness: boolean;
+  /** How many may exist at once. */
+  maxAlive: number;
+  /** Seconds between placements. Zero means "place once and never again". */
+  interval: number;
+  /** Not before this point in the run. */
+  fromTime: number;
+  /** Where to look for a spot, as a ring around the player. */
+  ring: [number, number];
+  /** Some POIs live at an authored landmark instead of a found spot. */
+  atLandmark?: boolean;
+}
 
 export interface Terminal extends SpatialItem {
   id: number;
@@ -243,6 +272,73 @@ export interface Terminal extends SpatialItem {
   /** §9.1 — Recompile must be channelled while stationary. */
   requiresStillness: boolean;
 }
+
+/**
+ * Every POI in the game. Order is the order they are considered each tick, which
+ * is stable because this is a literal — determinism (§0) forbids anything else.
+ */
+export const POIS: readonly PoiDef[] = [
+  {
+    kind: 'beacon',
+    channelTime: TUNABLE.beaconChannelTime,
+    requiresStillness: false,
+    maxAlive: TUNABLE.maxBeacons,
+    interval: TUNABLE.beaconInterval,
+    fromTime: 0,
+    ring: [TUNABLE.spawnRingMin * 0.5, TUNABLE.spawnRingMax],
+  },
+  {
+    kind: 'cache',
+    channelTime: TUNABLE.cacheChannelTime,
+    requiresStillness: false,
+    maxAlive: 1,
+    interval: TUNABLE.cacheInterval,
+    fromTime: TUNABLE.cacheFromTime,
+    ring: [TUNABLE.spawnRingMin * 0.7, TUNABLE.spawnRingMax * 1.2],
+  },
+  {
+    // §9.1 — Recompile terminals appear from minute 8.
+    kind: 'recompile',
+    channelTime: TUNABLE.recompileChannelTime,
+    requiresStillness: true,
+    maxAlive: 1,
+    interval: TUNABLE.recompileInterval,
+    fromTime: TUNABLE.recompileFromTime,
+    ring: [TUNABLE.spawnRingMin * 0.6, TUNABLE.spawnRingMax],
+  },
+  {
+    // §12.4 — one Extract terminal, at a fixed landmark, from minute 15.
+    kind: 'extract',
+    channelTime: TUNABLE.extractChannelTime,
+    requiresStillness: false,
+    maxAlive: 1,
+    interval: 0,
+    fromTime: TUNABLE.extractFromTime,
+    ring: [0, 0],
+    atLandmark: true,
+  },
+];
+
+/** What channelling one does. One entry per POI, and nothing else to touch. */
+const POI_EFFECTS: Record<TerminalKind, (w: World) => void> = {
+  beacon: (w) => {
+    w.stats.beaconsChannelled++;
+    w.threat += TUNABLE.beaconThreatBump;
+    w.spawnWaveNow(true);
+    w.mark('beacon', 'beacon');
+  },
+  cache: (w) => w.openCacheNow(),
+  // Does not fire immediately: the player chooses how much to sacrifice.
+  recompile: (w) => {
+    w.pendingRecompileChoice = true;
+  },
+  // §12.4 — banked at x1.0. No Meltdown multiplier ever applies.
+  extract: (w) => {
+    w.ending = 'extracted';
+    w.player.alive = false;
+    w.mark('extract', 'extracted');
+  },
+};
 
 export type ContainmentKind = 'sweeper' | 'cell' | 'nullfront';
 
@@ -357,6 +453,8 @@ interface PendingSpawn {
   y: number;
   hue: Hue;
   enriched: boolean;
+  /** §12.4 — from a Cache: arrives wearing an elite affix. */
+  hardened: boolean;
   alive: boolean;
 }
 
@@ -419,7 +517,7 @@ export interface TraceSample {
   eps: number;
 }
 
-export type TraceMarkerKind = 'level' | 'recompile' | 'meltdown' | 'extract' | 'death' | 'beacon';
+export type TraceMarkerKind = 'level' | 'recompile' | 'meltdown' | 'extract' | 'death' | 'beacon' | 'cache';
 
 export interface TraceMarker {
   t: number;
@@ -439,6 +537,8 @@ export interface RunStats {
   overheats: number;
   /** Magnets collected. A run\'s XP tedium, counted. */
   magnets: number;
+  /** §12.4 — Caches channelled. */
+  cachesOpened: number;
   /** Gorged Interceptors detonated. */
   gluttonsPopped: number;
   /** Suppressors killed from inside their own field. */
@@ -599,8 +699,8 @@ export class World {
   baseCapacity: number = TUNABLE.cycleCapacityBase;
   /** §5.3 On Depth — cascades that already announced themselves this tick. */
   private deepThisTick = new Set<number>();
-  beaconTimer = 20;
-  recompileTimer = 0;
+  /** §12.4 — per-POI placement countdowns. See POIS. */
+  private readonly poiTimers = new Map<TerminalKind, number>([['beacon', 20]]);
   wardenTimer: number = TUNABLE.wardenInterval;
   containmentTimer: number = TUNABLE.containmentFirstDelay;
   score = 0;
@@ -644,6 +744,7 @@ export class World {
     peakConcurrentEnemies: 0,
     overheats: 0,
     magnets: 0,
+    cachesOpened: 0,
     gluttonsPopped: 0,
     suppressorsKilledInside: 0,
     damageTaken: 0,
@@ -1654,35 +1755,27 @@ export class World {
   }
 
   private spawnTerminals(dt: number): void {
-    const count = (kind: TerminalKind): number =>
-      this.terminals.reduce((n, t) => n + (t.alive && t.kind === kind ? 1 : 0), 0);
+    for (const poi of POIS) {
+      if (this.time < poi.fromTime) continue;
+      let alive = 0;
+      for (const t of this.terminals) if (t.alive && t.kind === poi.kind) alive++;
+      if (alive >= poi.maxAlive) continue;
 
-    this.beaconTimer -= dt;
-    if (this.beaconTimer <= 0 && count('beacon') < TUNABLE.maxBeacons) {
-      this.beaconTimer = TUNABLE.beaconInterval;
-      const spot = this.findOpenSpot(TUNABLE.spawnRingMin * 0.5, TUNABLE.spawnRingMax);
-      this.pushTerminal('beacon', spot.x, spot.y, TUNABLE.beaconChannelTime, false);
-    }
-
-    // §9.1 — Recompile terminals appear from minute 8.
-    if (this.time >= TUNABLE.recompileFromTime) {
-      this.recompileTimer -= dt;
-      if (this.recompileTimer <= 0 && count('recompile') < 1) {
-        this.recompileTimer = TUNABLE.recompileInterval;
-        const spot = this.findOpenSpot(TUNABLE.spawnRingMin * 0.6, TUNABLE.spawnRingMax);
-        this.pushTerminal('recompile', spot.x, spot.y, TUNABLE.recompileChannelTime, true);
+      // A one-shot POI (Extract) has no timer at all; everything else counts
+      // down its own, kept in a map so adding a POI adds no field to the World.
+      if (poi.interval > 0) {
+        const left = (this.poiTimers.get(poi.kind) ?? poi.interval) - dt;
+        if (left > 0) {
+          this.poiTimers.set(poi.kind, left);
+          continue;
+        }
+        this.poiTimers.set(poi.kind, poi.interval);
       }
-    }
 
-    // §12.4 — one Extract terminal, at a fixed landmark, from minute 15.
-    if (this.time >= TUNABLE.extractFromTime && count('extract') === 0) {
-      this.pushTerminal(
-        'extract',
-        this.arena.extractX,
-        this.arena.extractY,
-        TUNABLE.extractChannelTime,
-        false,
-      );
+      const spot = poi.atLandmark
+        ? { x: this.arena.extractX, y: this.arena.extractY }
+        : this.findOpenSpot(poi.ring[0], poi.ring[1]);
+      this.pushTerminal(poi.kind, spot.x, spot.y, poi.channelTime, poi.requiresStillness);
     }
   }
 
@@ -1707,22 +1800,66 @@ export class World {
   }
 
   private completeTerminal(t: Terminal): void {
-    if (t.kind === 'beacon') {
-      this.stats.beaconsChannelled++;
-      this.threat += TUNABLE.beaconThreatBump;
-      this.spawnWave(true);
-      this.mark('beacon', 'beacon');
-      return;
+    POI_EFFECTS[t.kind](this);
+  }
+
+  /**
+   * §12.4 The Cache — the first POI that is a *decision* rather than a service.
+   *
+   * A free draft, and the neighbourhood wakes up: the composition currently
+   * running, spawned again at once and hardened — every enemy in it forced to
+   * the nastiest variant its family has, enriched, and wearing an elite affix.
+   *
+   * This is the shape the map wants more of. The Beacon calls a wave and bumps
+   * Threat; the Cache trades a real fight for a real card, right now, at a place
+   * you had to walk to. Difficulty you *opt into* is the only kind that can be
+   * this sharp without being unfair.
+   */
+  /** Called by POI_EFFECTS. See openCache. */
+  openCacheNow(): void {
+    this.openCache();
+  }
+
+  /** Called by POI_EFFECTS. See spawnWave. */
+  spawnWaveNow(enriched: boolean): void {
+    this.spawnWave(enriched);
+  }
+
+  private openCache(): void {
+    this.pendingDrafts = Math.min(TUNABLE.maxQueuedDrafts, this.pendingDrafts + 1);
+    this.stats.cachesOpened++;
+    if (!this.composition) this.rotateComposition();
+    const composition = this.composition;
+    if (!composition) return;
+
+    const count = Math.round(this.targetAlive * TUNABLE.cacheWaveFraction);
+    for (let i = 0; i < count; i++) {
+      const entry = this.rng.pickWeighted(
+        composition.entries,
+        composition.entries.map((e) => e.count),
+      );
+      const origin = this.pickSpawnOrigin();
+      this.queueSpawn(
+        this.harden(entry.enemy),
+        origin.x,
+        origin.y,
+        entry.spread,
+        this.rng.next() * 0.8,
+        true,
+        true,
+      );
     }
-    if (t.kind === 'recompile') {
-      // Does not fire immediately: the player chooses how much to sacrifice.
-      this.pendingRecompileChoice = true;
-      return;
-    }
-    // §12.4 — banked at ×1.0. No Meltdown multiplier ever applies.
-    this.ending = 'extracted';
-    this.player.alive = false;
-    this.mark('extract', 'extracted');
+    this.pushFx('rupture', 'void', this.player.x, this.player.y, 320, [], 0.6);
+    this.cue('level', 'void', 0, 1);
+    this.mark('cache', 'cache opened');
+  }
+
+  /** The hardest variant a family has, for the Cache. */
+  private harden(enemy: string): string {
+    const options = VARIANTS_BY_FAMILY.get(familyOf(enemy));
+    if (!options || options.length === 0) return enemy;
+    // Rarest first in the registry, and the rarest is the nastiest.
+    return options[0]!.id;
   }
 
   /**
@@ -2023,7 +2160,7 @@ export class World {
     }
   }
 
-  private mark(kind: TraceMarkerKind, label: string): void {
+  mark(kind: TraceMarkerKind, label: string): void {
     if (this.markers.length < 400) this.markers.push({ t: this.time, kind, label });
   }
 
@@ -2149,22 +2286,6 @@ export class World {
       if (s.alive && this.projectsZone(s.enemy)) n++;
     }
     return n;
-  }
-
-  /**
-   * §12 — how much tougher the horde is right now.
-   *
-   * Density was the only thing Threat scaled, and against an Engine that gains a
-   * hundredfold over a run, more copies of a 12 HP Drifter is not pressure. Both
-   * of these are deliberately gentle: the horde is *not* supposed to keep up
-   * (§23.1 — never race the player's own exponent), only to stop being furniture.
-   */
-  get threatHpScale(): number {
-    return 1 + this.threat * TUNABLE.enemyHpPerThreat;
-  }
-
-  get threatDamageScale(): number {
-    return 1 + this.threat * TUNABLE.enemyDamagePerThreat;
   }
 
   /** §11.2 — is the player inside a Suppressor's zone? Triggers do not fire there. */
@@ -2300,6 +2421,26 @@ export class World {
     this.maybeDropMagnet(enemy.x, enemy.y);
 
     // §10.3 Volatile — a telegraphed death explosion.
+    // §10.4 — a Charged variant detonates on death without being an elite. Same
+    // code path as the Volatile affix; the difference is only where it is
+    // authored, which is the whole point of putting traits on the def.
+    if (def.deathBlast) {
+      const blast = def.deathBlast;
+      this.pushFx('burst', enemy.hue, enemy.x, enemy.y, blast.radius, [], 0.3);
+      const dx = this.player.x - enemy.x;
+      const dy = this.player.y - enemy.y;
+      const reach = blast.radius + TUNABLE.playerRadius;
+      if (dx * dx + dy * dy < reach * reach) {
+        this.hurtPlayer(blast.damage, {
+          id: def.id,
+          label: def.name,
+          enemyId: def.id,
+          shape: def.shape,
+          mode: 'detonation',
+        });
+      }
+    }
+
     if (enemy.affixes.includes('volatile')) {
       this.pushFx('burst', enemy.hue, enemy.x, enemy.y, TUNABLE.affixVolatileRadius, [], 0.3);
       const dx = this.player.x - enemy.x;
@@ -2518,10 +2659,13 @@ export class World {
       }
       const def = getEnemy(e.defId);
 
-      // §10.3 Phasing — untargetable for a beat, on a steady cycle.
-      if (e.affixes.includes('phasing')) {
-        const cycle = TUNABLE.affixPhaseInterval + TUNABLE.affixPhaseDuration;
-        e.phased = e.spawnAge % cycle > TUNABLE.affixPhaseInterval;
+      // §10.3 Phasing — untargetable for a beat, on a steady cycle. Carried
+      // either by the elite affix or by the def itself (§10.4 Ghost variants),
+      // because a variant should not have to be an elite to have an idea.
+      const phaseEvery = def.phaseInterval ?? (e.affixes.includes('phasing') ? TUNABLE.affixPhaseInterval : 0);
+      if (phaseEvery > 0) {
+        const hold = def.phaseDuration ?? TUNABLE.affixPhaseDuration;
+        e.phased = e.spawnAge % (phaseEvery + hold) > phaseEvery;
       }
 
       // §10.2 — the behaviours that are not "walk at the player".
@@ -2665,7 +2809,7 @@ export class World {
       return;
     }
     if (def.contactDamage > 0) {
-      this.hurtPlayer(def.contactDamage * this.threatDamageScale, {
+      this.hurtPlayer(def.contactDamage, {
         id: def.id,
         label: def.name,
         enemyId: def.id,
@@ -3328,7 +3472,16 @@ export class World {
         clamp(safe.y, 20, this.arena.height - 20),
         s.hue,
       );
-      if (e) e.enriched = s.enriched;
+      if (e) {
+        e.enriched = s.enriched;
+        // §12.4 — the Cache's price. One affix each, rolled from the same pool
+        // the Warden uses, so a menagerie is genuinely the wave you already know
+        // wearing everything that makes it worse.
+        if (s.hardened) {
+          const pool: EliteAffix[] = ['volatile', 'phasing', 'anchored'];
+          e.affixes.push(pool[this.rng.int(pool.length)]!);
+        }
+      }
     }
     if (due) {
       let w = 0;
@@ -3359,6 +3512,33 @@ export class World {
     this.emit({ type: 'wave', depth: 0, x: origin.x, y: origin.y });
   }
 
+  /**
+   * §10.4 — substitution: the same wave, made of different things.
+   *
+   * A wave template asks for "a Mote"; past a Threat band, some of those Motes
+   * are Shielded or Charged instead. This is the whole of how a run gets harder
+   * without a single number being multiplied — minute eleven looks different
+   * from minute one because the things on screen *are different things*, and a
+   * player can see the difference and answer it.
+   *
+   * Data-driven from the variant's own `substitutes` block, so a new variant
+   * enters the game by existing. Rolled once per spawn, so a wave is a mix
+   * rather than a switch.
+   */
+  private substitute(enemy: string): string {
+    const options = VARIANTS_BY_FAMILY.get(familyOf(enemy));
+    if (!options) return enemy;
+    for (const variant of options) {
+      const rule = variant.substitutes!;
+      if (this.threat < rule.fromThreat) continue;
+      // Ramped in over the band above `fromThreat`, so the first Shielded Mote
+      // arrives alone rather than as a whole wave of them.
+      const ramp = Math.min(1, (this.threat - rule.fromThreat) / 4);
+      if (this.rng.chance(rule.share * ramp)) return variant.id;
+    }
+    return enemy;
+  }
+
   /** Place one spawn around an origin and queue it to arrive after `delay`. */
   private queueSpawn(
     enemy: string,
@@ -3367,6 +3547,8 @@ export class World {
     spread: number,
     delay: number,
     enriched: boolean,
+    /** §12.4 — a Cache's menagerie: every one of them wears an elite affix. */
+    hardened = false,
   ): void {
     if (this.pendingSpawns.length >= SAFETY.maxEntities) return;
 
@@ -3378,6 +3560,7 @@ export class World {
     // director makes the density up with something that can be shot at.
     if (this.suppressorCount() >= TUNABLE.suppressorsAlive && this.projectsZone(enemy)) return;
 
+    enemy = this.substitute(enemy);
     const rx = ox + this.rng.range(-spread, spread);
     const ry = oy + this.rng.range(-spread, spread);
     // Spread can drag a cluster member back into view; push it out again before
@@ -3391,6 +3574,7 @@ export class World {
       y: clamp(safe.y, 20, this.arena.height - 20),
       hue: this.rng.pick(HUES),
       enriched,
+      hardened,
       alive: true,
     });
   }
@@ -3447,10 +3631,8 @@ export class World {
       y,
       vx: 0,
       vy: 0,
-      // §12 — Threat makes them tougher as well as more numerous. Baked at
-      // spawn so an enemy's health cannot change under it while it is alive.
-      hp: def.hp * this.threatHpScale,
-      maxHp: def.hp * this.threatHpScale,
+      hp: def.hp,
+      maxHp: def.hp,
       radius: def.radius,
       state: 'seek',
       timer: def.windup !== undefined ? 0.5 : 0,
