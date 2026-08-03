@@ -20,7 +20,7 @@ import { BRANDING } from '../branding';
 import { shapeSvg } from './gfx/shapes';
 import { inspector } from './overlays';
 import { renderPrimer } from './primer';
-import { applyEffects, VIEW_EFFECTS } from './visual';
+import { applyEffects, presetFor, VIEW_EFFECTS, VIEW_PRESETS } from './visual';
 import type { Audio } from '../audio/audio';
 import { MusicLab } from './lab';
 
@@ -239,17 +239,27 @@ export class TitleScreen {
 
     for (const slider of panel.querySelectorAll<HTMLInputElement>('[data-setting]')) {
       slider.addEventListener('input', () => {
+        const key = slider.dataset.setting as 'volume' | 'music' | 'effects';
         const value = Number(slider.value) / 100;
-        this.audio.setVolume(value);
-        this.library.setAudio(this.library.snapshot.settings.muted, value);
+        if (key === 'volume') this.audio.setVolume(value);
+        else if (key === 'music') this.audio.setMusicVolume(value);
+        else this.audio.setSfxVolume(value);
+        this.library.setAudio({ [key]: value });
+        // Updated in place rather than by re-rendering, or the slider loses the
+        // pointer mid-drag and the value stops following the mouse.
         const out = slider.parentElement?.querySelector('.set-val');
         if (out) out.textContent = `${Math.round(value * 100)}%`;
+      });
+      // One click of the thing you are setting, so a level is audible while you
+      // set it. Music auditions itself; effects have to be asked.
+      slider.addEventListener('change', () => {
+        if (slider.dataset.setting === 'effects') this.audio.chrome('confirm');
       });
     }
     panel.querySelector('.set-mute')?.addEventListener('click', () => {
       const muted = !this.library.snapshot.settings.muted;
       this.audio.setMuted(muted);
-      this.library.setAudio(muted, this.library.snapshot.settings.volume);
+      this.library.setAudio({ muted });
       this.render();
     });
     for (const card of panel.querySelectorAll<HTMLElement>('[data-effect]')) {
@@ -257,20 +267,19 @@ export class TitleScreen {
         this.library.toggleEffect(card.dataset.effect!);
         // Applied immediately, and the menu is drawn over the live renderer, so
         // the change is visible behind this panel as you make it.
-        applyEffects(this.library.snapshot.settings.effects);
+        applyEffects(this.library.snapshot.settings.fx);
         this.render();
       });
     }
-    panel.querySelector('.fx-all')?.addEventListener('click', () => {
-      const on = this.library.snapshot.settings.effects;
-      const all = VIEW_EFFECTS.map((e) => e.id);
-      const target = on.length === all.length ? [] : all;
-      for (const id of all) {
-        if (target.includes(id) !== on.includes(id)) this.library.toggleEffect(id);
-      }
-      applyEffects(this.library.snapshot.settings.effects);
-      this.render();
-    });
+    for (const seg of panel.querySelectorAll<HTMLElement>('[data-preset]')) {
+      seg.addEventListener('click', () => {
+        const preset = VIEW_PRESETS.find((p) => p.id === seg.dataset.preset);
+        if (!preset) return;
+        this.library.setEffects(preset.effects);
+        applyEffects(this.library.snapshot.settings.fx);
+        this.render();
+      });
+    }
 
     const field = panel.querySelector<HTMLInputElement>('.seed-field');
     field?.addEventListener('input', () => {
@@ -415,52 +424,76 @@ export class TitleScreen {
   /**
    * §20 — settings.
    *
-   * Visual effects are toggles, not presets. A preset makes every choice
-   * all-or-nothing: wanting lighting but not scanlines meant taking the bundle
-   * with both. Each toggle is one effect at a value tuned to look right on its
-   * own, and they stack — everything off is §16's schematic with no shader
-   * running at all, everything on is barely legible and meant to be.
+   * Read as a row of labelled controls rather than as a document. The previous
+   * version put a paragraph beside every visual toggle, which meant you had to
+   * read the whole screen before you could change anything on it — the prose was
+   * accurate and it was still the wrong shape for a settings pane.
+   *
+   * Visual quality is a preset *and* a set of toggles. Presets alone were
+   * rejected once, correctly: wanting lighting but not scanlines meant taking a
+   * bundle with both. So the preset row is the one-click path and the toggles
+   * underneath are the disagreement, and the row reads CUSTOM the moment your
+   * set is not one of the named ones.
    */
   private renderSettings(): string {
     const set = this.library.snapshot.settings;
-    const on = new Set(set.effects);
+    const on = new Set(set.fx);
+    const preset = presetFor(set.fx);
+
+    const level = (
+      key: string,
+      label: string,
+      value: number,
+      note: string,
+      disabled = false,
+    ): string =>
+      `<div class="opt${disabled ? ' off' : ''}">` +
+      `<span class="opt-label">${label}</span>` +
+      `<span class="opt-control">` +
+      `<input class="set-slider" type="range" min="0" max="100" ` +
+      `value="${Math.round(value * 100)}" data-setting="${key}"${disabled ? ' disabled' : ''} />` +
+      `<span class="set-val">${Math.round(value * 100)}%</span></span>` +
+      `<span class="opt-note">${note}</span>` +
+      `</div>`;
+
+    const presets = VIEW_PRESETS.map(
+      (p) =>
+        `<button class="seg${p.id === preset ? ' on' : ''}" data-preset="${p.id}">` +
+        `${p.name}</button>`,
+    ).join('');
 
     const effects = VIEW_EFFECTS.map(
       (e) =>
-        `<div class="fx${on.has(e.id) ? ' on' : ''}" data-effect="${e.id}">` +
-        `<span class="fx-mark">${on.has(e.id) ? '▣' : '▢'}</span>` +
-        `<span class="fx-name">${e.name}</span>` +
-        `<span class="fx-note">${e.note}</span>` +
+        `<div class="opt" data-effect="${e.id}">` +
+        `<span class="opt-label">${e.name}</span>` +
+        `<span class="opt-control"><span class="toggle${on.has(e.id) ? ' on' : ''}">` +
+        `${on.has(e.id) ? 'ON' : 'OFF'}</span></span>` +
+        `<span class="opt-note">${e.note}</span>` +
         `</div>`,
     ).join('');
 
     return (
       `<div class="settings">` +
       `<div class="k">audio</div>` +
-      `<div class="set-row">` +
-      `<span class="set-label">VOLUME</span>` +
-      `<input class="set-slider" type="range" min="0" max="100" ` +
-      `value="${Math.round(set.volume * 100)}" data-setting="volume" />` +
-      `<span class="set-val">${Math.round(set.volume * 100)}%</span>` +
-      `<span class="set-note">master</span>` +
+      `<div class="opt">` +
+      `<span class="opt-label">Sound</span>` +
+      `<span class="opt-control"><span class="toggle set-mute${set.muted ? '' : ' on'}">` +
+      `${set.muted ? 'MUTED' : 'ON'}</span></span>` +
+      `<span class="opt-note">M toggles this in a run too</span>` +
       `</div>` +
-      `<div class="set-row">` +
-      `<span class="set-label">MUTE</span>` +
-      `<button class="btn set-mute${set.muted ? ' on' : ''}">` +
-      `${set.muted ? 'MUTED' : 'SOUND ON'}</button>` +
-      `<span class="set-val"></span>` +
-      `<span class="set-note">M toggles this in a run too</span>` +
-      `</div>` +
+      level('volume', 'Master', set.volume, 'everything', set.muted) +
+      level('music', 'Music', set.music, 'the arrangement your Engine writes', set.muted) +
+      level('effects', 'Effects', set.effects, 'shots, kills, pickups, chrome', set.muted) +
 
-      `<div class="k">effects — ${on.size}/${VIEW_EFFECTS.length} on</div>` +
-      `<div class="mu-lead">Stack them. Everything off is the plain drawing with ` +
-      `no shader running at all; everything on is the arena lit by your own engine ` +
-      `and hard to read, which is the point. Lighting is the one that changes what ` +
-      `the picture is — the rest are lenses over it. None of it touches the ` +
-      `simulation, and Heat and Meltdown push whatever you pick further.</div>` +
+      `<div class="k">visual</div>` +
+      `<div class="opt">` +
+      `<span class="opt-label">Quality</span>` +
+      `<span class="opt-control seg-group">${presets}</span>` +
+      `<span class="opt-note">${preset === null ? 'custom — your own set' : 'a starting point; change anything below'}</span>` +
+      `</div>` +
       effects +
-      `<div class="mu-ops"><button class="btn fx-all">` +
-      `${on.size === VIEW_EFFECTS.length ? 'ALL OFF' : 'ALL ON'}</button></div>` +
+      `<div class="set-foot">None of this touches the simulation. Heat and ` +
+      `Meltdown push whatever you pick further.</div>` +
       `</div>`
     );
   }
@@ -499,7 +532,7 @@ export class TitleScreen {
    */
   private renderCredits(): string {
     const lines: [string, string][] = [
-      ['design & code', 'built with Claude'],
+      ['design & code', 'Max Uh'],
       ['sound', 'synthesised in the browser — no samples, no audio files'],
       ['music', 'written by your Engine, out of cells a person wrote'],
       ['art', 'drawn every frame as vectors and light — no textures'],
@@ -597,3 +630,4 @@ function nodeName(id: string): string {
 function escapeAttr(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 }
+

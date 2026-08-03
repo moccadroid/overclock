@@ -166,36 +166,68 @@ export const VIEW_EFFECTS: ViewEffect[] = [
   {
     id: 'lighting',
     name: 'Lighting',
-    note: 'everything emits. Shots light the grid they fly over; a Nova floods the room.',
+    note: 'shots light the ground they cross',
     values: { lit: 0.4, haze: 0.7, glow: 1.15 },
   },
   {
     id: 'bloom',
     name: 'Bloom',
-    note: 'light spills past its edges, and keeps spilling. Three stacked passes.',
+    note: 'bright things spill past their edges',
     values: { bloom: 2.2, glow: 1.3 },
   },
   {
     id: 'chromatic',
     name: 'Chromatic',
-    note: 'the lens splits colour toward the edges, the way real glass does.',
+    note: 'colour splits toward the corners',
     values: { aberration: 0.6 },
   },
   {
     id: 'tube',
     name: 'Tube',
-    note: 'a CRT: curved glass, scanlines, and darkness in the corners.',
+    note: 'CRT curve, scanlines, vignette',
     values: { barrel: 0.09, scan: 0.3, vignette: 0.36 },
   },
   {
     id: 'grain',
     name: 'Grain',
-    note: 'the black field is never quite black. Animated, subtle, alive.',
+    note: 'the black is never quite black',
     values: { grain: 0.11 },
   },
 ];
 
 export const VIEW_EFFECT_IDS = VIEW_EFFECTS.map((e) => e.id);
+
+/**
+ * §20.1 — named starting points, with the toggles still underneath.
+ *
+ * Presets alone were rejected once already, and correctly: wanting lighting but
+ * not scanlines meant taking a bundle with both. But five checkboxes with a
+ * paragraph each is documentation, not a settings screen — you have to read the
+ * whole thing before you can change anything.
+ *
+ * So: pick a preset in one click, or open the toggles and disagree with it. The
+ * preset row reads CUSTOM the moment your set is not one of these, which is the
+ * part that makes both halves honest.
+ */
+export const VIEW_PRESETS: { id: string; name: string; effects: string[] }[] = [
+  { id: 'off', name: 'OFF', effects: [] },
+  { id: 'minimal', name: 'MINIMAL', effects: ['lighting'] },
+  // The shipped default, so a player who has never opened this screen sees a
+  // named preset rather than CUSTOM. A settings pane that opens on "custom" is
+  // telling you that you already changed something, which is a small lie.
+  { id: 'standard', name: 'STANDARD', effects: ['lighting', 'bloom'] },
+  { id: 'high', name: 'HIGH', effects: ['lighting', 'bloom', 'grain'] },
+  { id: 'full', name: 'FULL', effects: VIEW_EFFECT_IDS.slice() },
+];
+
+/** Which preset a toggle set corresponds to, or null when it is nobody's. */
+export function presetFor(enabled: readonly string[]): string | null {
+  const set = new Set(enabled);
+  const match = VIEW_PRESETS.find(
+    (p) => p.effects.length === set.size && p.effects.every((id) => set.has(id)),
+  );
+  return match?.id ?? null;
+}
 
 /** The live view state. Mutated by `applyEffects`; read by the renderer. */
 export const VIEW: ViewState = { ...BASE };

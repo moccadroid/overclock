@@ -155,6 +155,10 @@ function step<T>(cell: (T | null)[], count: number): T | null {
   return cell[count % cell.length] ?? null;
 }
 
+function clamp01(v: number): number {
+  return Math.max(0, Math.min(1, v));
+}
+
 /** Which absolute semitone a melodic step lands on, over the current chord. */
 function tone(tones: number[], s: MelodicStep): number {
   return tones[s.tone % tones.length]! + s.octave * 12;
@@ -164,6 +168,13 @@ export class Audio {
   private ctx: AudioContext | null = null;
   private clock: Clock | null = null;
   private master!: GainNode;
+  /** Everything the arrangement plays. Under the Music slider. */
+  private musicGroup!: GainNode;
+  /** Everything the Engine and the chrome play. Under the Effects slider. */
+  private sfxGroup!: GainNode;
+  private uiBus!: GainNode;
+  private musicVolume = 1;
+  private sfxVolume = 1;
   /** Kick and accents. Never ducked — the kick is what everything ducks under. */
   private punchBus!: GainNode;
   /** Bass, pad, hats. Ducked on every kick. */
@@ -325,15 +336,38 @@ export class Audio {
       .connect(this.master)
       .connect(ctx.destination);
 
+    // Two groups under the master, because "the music is too loud" and "the
+    // shots are too loud" are different complaints with different fixes, and a
+    // single slider can only answer one of them.
+    //
+    // They sit *above* the limiter, not below it: the limiter's whole job is
+    // that nothing downstream can raise the level, and a group gain that could
+    // push into it would be a volume control that makes things louder by making
+    // them quieter somewhere else. These only ever attenuate.
+    this.musicGroup = ctx.createGain();
+    this.musicGroup.gain.value = this.musicVolume;
+    this.musicGroup.connect(this.lowShelf);
+
+    this.sfxGroup = ctx.createGain();
+    this.sfxGroup.gain.value = this.sfxVolume;
+    this.sfxGroup.connect(this.lowShelf);
+
     this.punchBus = ctx.createGain();
     this.punchBus.gain.value = 0.95;
-    this.punchBus.connect(this.lowShelf);
+    this.punchBus.connect(this.musicGroup);
+
+    // Chrome used to share the punch bus, which put UI clicks under the music
+    // slider. It keeps that bus's level — a click that ducks under the kick
+    // reads as a click that did not register — but it is an effect, not music.
+    this.uiBus = ctx.createGain();
+    this.uiBus.gain.value = 0.95;
+    this.uiBus.connect(this.sfxGroup);
 
     this.musicFilter = ctx.createBiquadFilter();
     this.musicFilter.type = 'lowpass';
     this.musicFilter.frequency.value = 2200;
     this.musicFilter.Q.value = 1.1;
-    this.musicFilter.connect(this.lowShelf);
+    this.musicFilter.connect(this.musicGroup);
 
     this.musicBus = ctx.createGain();
     this.musicBus.gain.value = 0.9;
@@ -359,7 +393,7 @@ export class Audio {
 
     this.engineBus = ctx.createGain();
     this.engineBus.gain.value = 0.5;
-    this.engineBus.connect(this.lowShelf);
+    this.engineBus.connect(this.sfxGroup);
 
     this.clock = new Clock(ctx);
     this.clock.onStep((step) => this.onStep(step.time, step.index, step.count));
@@ -373,8 +407,18 @@ export class Audio {
   }
 
   setVolume(v: number): void {
-    this.volume = Math.max(0, Math.min(1, v));
+    this.volume = clamp01(v);
     this.applyMaster();
+  }
+
+  setMusicVolume(v: number): void {
+    this.musicVolume = clamp01(v);
+    if (this.musicGroup) this.musicGroup.gain.value = this.musicVolume;
+  }
+
+  setSfxVolume(v: number): void {
+    this.sfxVolume = clamp01(v);
+    if (this.sfxGroup) this.sfxGroup.gain.value = this.sfxVolume;
   }
 
   /**
@@ -594,9 +638,7 @@ export class Audio {
       if (now - this.lastHover < 0.045) return;
       this.lastHover = now;
     }
-    // Chrome goes to the punch bus: it must not duck under the kick, because a
-    // click that ducks reads as a click that did not register.
-    uiVoice(this.voice(this.punchBus), now, sound);
+    uiVoice(this.voice(this.uiBus), now, sound);
   }
 
   /** For the occasions the sim does not model as cues — Discovery, Recompile. */

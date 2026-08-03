@@ -111,9 +111,12 @@ export class Game {
 
     // Browsers refuse to start an AudioContext outside a user gesture. Reaching
     // this line means START RUN was clicked or ENTER was pressed, which counts.
-    this.muted = this.library.snapshot.settings.muted;
+    const settings = this.library.snapshot.settings;
+    this.muted = settings.muted;
     this.audio.setMuted(this.muted);
-    this.audio.setVolume(this.library.snapshot.settings.volume);
+    this.audio.setVolume(settings.volume);
+    this.audio.setMusicVolume(settings.music);
+    this.audio.setSfxVolume(settings.effects);
     this.audio.start();
     this.audio.beginRun();
 
@@ -143,7 +146,7 @@ export class Game {
     if (cmd === 'mute') {
       this.muted = !this.muted;
       this.audio.setMuted(this.muted);
-      this.library.setAudio(this.muted, this.library.snapshot.settings.volume);
+      this.library.setAudio({ muted: this.muted });
       this.hud.flash(this.muted ? 'AUDIO MUTED  [M]' : 'AUDIO ON  [M]');
       return;
     }

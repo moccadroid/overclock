@@ -46,9 +46,14 @@ describe('the Library (GDD §15)', () => {
     // And the visual effects are *ids*, not numbers. Sliders would put floats in
     // the Library, and floats one refactor away from the progression fields is
     // how the guard above eventually gets loosened.
-    const effects = (data.settings as { effects: unknown }).effects;
-    expect(Array.isArray(effects)).toBe(true);
-    for (const e of effects as unknown[]) expect(typeof e).toBe('string');
+    //
+    // They live under `fx` rather than `effects` because `effects` is now the
+    // sound-effects volume. The names collided the moment audio grew a second
+    // level, and a settings key that means two things is how the wrong one gets
+    // read.
+    const fx = (data.settings as { fx: unknown }).fx;
+    expect(Array.isArray(fx)).toBe(true);
+    for (const e of fx as unknown[]) expect(typeof e).toBe('string');
   });
 
   it('§15.2 — a fresh account starts with roughly 60% of the node pool', () => {

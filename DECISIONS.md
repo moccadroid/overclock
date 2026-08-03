@@ -2272,6 +2272,49 @@ schematic. This is UX, not art.
 
 ---
 
+## D-103 · SETTLED · Three levels, and a settings screen that reads like one
+
+**Three volume sliders.** "The music is too loud" and "the shots are too loud"
+are different complaints and one slider can only answer one. Master, Music and
+Effects, as two group gains under the master:
+
+    punchBus ─┬─→ musicGroup ─┐
+    musicBus ─┘               ├─→ lowShelf → limiter → master → out
+    engineBus ┬─→ sfxGroup ───┘
+    uiBus ────┘
+
+They sit *above* the limiter, never below it. §18.4's guarantee is that nothing
+downstream can raise the level, and a group gain that could push into the
+limiter would be a volume control that gets louder by making something else
+quieter. These only attenuate.
+
+Chrome moved off the punch bus onto its own. It shared that bus so a click would
+not duck under the kick — still true, `uiBus` keeps the same gain — but a UI
+click is an effect, not music, and it was under the wrong slider.
+
+`settings.effects` is now the sound-effects level and the visual toggle list
+moved to `settings.fx`. The names collided the moment audio grew a second level,
+and a settings key meaning two things is how the wrong one gets read.
+
+**The settings screen.** It was five checkboxes with a paragraph each, which is
+documentation rather than a settings pane — you had to read the whole thing
+before you could change anything on it. Every option is now one row: label,
+control, short hint. Notes cut from sentences to four or five words.
+
+Visual quality is a preset **and** the toggles. Presets alone were rejected once
+and correctly — wanting lighting but not scanlines meant taking a bundle with
+both — but toggles alone made a wall of prose. So the preset row is the one-click
+path, the toggles underneath are the disagreement, and the row reads CUSTOM the
+moment your set is not a named one. STANDARD is the shipped default, so a player
+who has never opened the screen sees a name rather than CUSTOM, which would be a
+small lie about having changed something.
+
+Mute is styled as an alarm rather than as an on state: the colour follows the
+thing that is wrong, not the thing that is switched. Muting also greys the three
+levels, since they cannot do anything while it holds.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

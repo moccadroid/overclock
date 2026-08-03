@@ -27,9 +27,11 @@ const library = new Library();
 const audio = new Audio();
 // §20.1 — a player's visual preferences apply before the first frame, not after
 // they have already seen the wrong one.
-applyEffects(library.snapshot.settings.effects);
+applyEffects(library.snapshot.settings.fx);
 audio.setMuted(library.snapshot.settings.muted);
 audio.setVolume(library.snapshot.settings.volume);
+audio.setMusicVolume(library.snapshot.settings.music);
+audio.setSfxVolume(library.snapshot.settings.effects);
 // §18 — cells the player has written join the pool the arranger chooses from,
 // before anything asks it for an arrangement. Widening the vocabulary, not
 // picking the song: the Engine still decides which of them it wants.

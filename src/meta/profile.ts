@@ -83,13 +83,20 @@ export interface LibraryData {
    */
   settings: {
     muted: boolean;
+    /**
+     * Three levels, because "the music is too loud" and "the shots are too
+     * loud" are different complaints and one slider can only answer one.
+     * `volume` is the master; the other two attenuate under it.
+     */
     volume: number;
+    music: number;
+    effects: number;
     /**
      * §20.1 — which visual effects are on. Ids, like everything else here: the
      * numbers live in `visual.ts` where they can be tuned together, and §15.1's
      * no-numbers guard stays honest by construction rather than by exception.
      */
-    effects: string[];
+    fx: string[];
   };
 }
 
@@ -102,7 +109,7 @@ function emptyData(): LibraryData {
     bestScore: 0,
     bestDepth: 0,
     bestTime: 0,
-    settings: { muted: false, volume: 0.7, effects: ['lighting', 'bloom'] },
+    settings: { muted: false, volume: 0.7, music: 0.85, effects: 0.9, fx: ['lighting', 'bloom'] },
   };
 }
 
@@ -135,7 +142,9 @@ export class Library {
         settings: {
           muted: parsed.settings?.muted === true,
           volume: number(parsed.settings?.volume) ?? base.settings.volume,
-          effects: array(parsed.settings?.effects) ?? base.settings.effects,
+          music: number(parsed.settings?.music) ?? base.settings.music,
+          effects: number(parsed.settings?.effects) ?? base.settings.effects,
+          fx: array(parsed.settings?.fx) ?? base.settings.fx,
         },
       };
     } catch {
@@ -217,15 +226,21 @@ export class Library {
     if (changed) this.save();
   }
 
-  setAudio(muted: boolean, volume: number): void {
-    this.data.settings = { ...this.data.settings, muted, volume };
+  setAudio(levels: Partial<Pick<LibraryData['settings'], 'muted' | 'volume' | 'music' | 'effects'>>): void {
+    this.data.settings = { ...this.data.settings, ...levels };
     this.save();
   }
 
   toggleEffect(id: string): void {
-    const on = this.data.settings.effects;
-    const effects = on.includes(id) ? on.filter((e) => e !== id) : [...on, id];
-    this.data.settings = { ...this.data.settings, effects };
+    const on = this.data.settings.fx;
+    const fx = on.includes(id) ? on.filter((e) => e !== id) : [...on, id];
+    this.data.settings = { ...this.data.settings, fx };
+    this.save();
+  }
+
+  /** §20.1 — set the whole visual toggle set at once, for the quality presets. */
+  setEffects(fx: string[]): void {
+    this.data.settings = { ...this.data.settings, fx: [...fx] };
     this.save();
   }
 
