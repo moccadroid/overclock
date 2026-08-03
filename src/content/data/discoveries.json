@@ -13,7 +13,7 @@
     "id": "sculptor",
     "name": "Sculptor",
     "hint": "Purge 4 cards from the pool in one run.",
-    "teaches": "Purging is not throwing a card away \u2014 it is deleting it from every draft that follows, so the ones you want come round sooner.",
+    "teaches": "Purging is not throwing a card away — it is deleting it from every draft that follows, so the ones you want come round sooner.",
     "score": 500,
     "unlocks": []
   },
@@ -245,6 +245,70 @@
     "score": 600,
     "unlocks": [
       "siphon"
+    ]
+  },
+  {
+    "id": "magnetised",
+    "name": "Magnetised",
+    "hint": "Collect three Magnets in one run.",
+    "teaches": "A Magnet is not loot, it is a decision about where you are standing when you take it.",
+    "score": 300,
+    "unlocks": [
+      "on_sweep"
+    ]
+  },
+  {
+    "id": "force_fed",
+    "name": "Force Fed",
+    "hint": "Let an Interceptor eat its fill, then kill it.",
+    "teaches": "Spraying projectiles builds the thing that punishes it — and a Glutton's detonation is yours to aim.",
+    "score": 400,
+    "unlocks": [
+      "on_glutton",
+      "insulate"
+    ]
+  },
+  {
+    "id": "trespass",
+    "name": "Trespass",
+    "hint": "Kill a Suppressor from inside its own field.",
+    "teaches": "A suppression field switches your Triggers off. Everything already in flight still lands.",
+    "score": 350,
+    "unlocks": [
+      "on_enter",
+      "stagger"
+    ]
+  },
+  {
+    "id": "deep_end",
+    "name": "Deep End",
+    "hint": "Reach cascade depth 8 without overheating.",
+    "teaches": "Depth is what heats you. A build that runs deep and cold has solved the game's central tension.",
+    "score": 600,
+    "unlocks": [
+      "on_depth",
+      "grounding_rod"
+    ]
+  },
+  {
+    "id": "thermostat",
+    "name": "Thermostat",
+    "hint": "Cross into Instability II and come back down without an Overheat.",
+    "teaches": "Heat is a dial. Living at the top of it is a strategy, not a mistake.",
+    "score": 450,
+    "unlocks": [
+      "on_threshold",
+      "governor"
+    ]
+  },
+  {
+    "id": "reflection",
+    "name": "Reflection",
+    "hint": "Run five live Programs at once.",
+    "teaches": "A full Engine is a shape, not a list — rows that feed each other beat rows that each do their own thing.",
+    "score": 500,
+    "unlocks": [
+      "mirror"
     ]
   }
 ]

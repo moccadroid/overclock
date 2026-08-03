@@ -26,6 +26,10 @@ export interface DiscoveryState {
   /** Seconds firing with no Clock-driven row live. */
   unclockedFiring: number;
   overheatsSeen: number;
+  /** Reached Instability II and came back down without an Overheat. */
+  recoveredFromTier2: boolean;
+  /** Overheat count when tier 2 was last entered, to tell recovery from reset. */
+  tier2At: number;
 }
 
 export type DiscoveryCheck = (w: World, s: DiscoveryState) => boolean;
@@ -81,6 +85,15 @@ export const DISCOVERY_CHECKS: Record<string, DiscoveryCheck> = {
   critical_mass: (w) => w.stats.crits >= 200,
   volatile_thinking: (w) => w.stats.peakEps >= 400,
   bloodletting: (w) => w.stats.desperateConverts > 0,
+
+  // §7.3 / §10.2 / §11.2 — the systems added after the first pass, each taught
+  // by the thing a player does with it by accident before they do it on purpose.
+  magnetised: (w) => w.stats.magnets >= 3,
+  force_fed: (w) => w.stats.gluttonsPopped > 0,
+  trespass: (w) => w.stats.suppressorsKilledInside > 0,
+  deep_end: (w) => w.stats.maxDepth >= 8 && w.stats.overheats === 0,
+  thermostat: (_w, s) => s.recoveredFromTier2,
+  reflection: (w) => w.engine.compiled.filter((c) => c.live).length >= 5,
 };
 
 /**
@@ -94,6 +107,8 @@ export class DiscoveryTracker {
     tierHeld: [0, 0, 0, 0],
     unclockedFiring: 0,
     overheatsSeen: 0,
+    recoveredFromTier2: false,
+    tier2At: -1,
   };
 
   /** Ids already in the player's Library, so a repeat does not re-announce. */
@@ -122,6 +137,12 @@ export class DiscoveryTracker {
       this.state.tierHeld = [0, 0, 0, 0];
     }
     for (let t = 0; t < 4; t++) this.state.tierHeld[t] = t === tier ? this.state.tierHeld[t]! + dt : 0;
+
+    // Thermostat: went up into II and came back down with the Engine intact.
+    if (tier >= 2) this.state.tier2At = world.stats.overheats;
+    else if (tier <= 1 && this.state.tier2At === world.stats.overheats && this.state.tier2At >= 0) {
+      this.state.recoveredFromTier2 = true;
+    }
 
     const selfDriven = world.engine.programs.some(
       (p, i) => world.engine.compiled[i]?.live && isSelfDriving(p.triggerId),

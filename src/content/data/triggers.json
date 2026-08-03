@@ -89,5 +89,59 @@
     "listens": "convert",
     "payload": 6,
     "description": "When a conversion resolves. x6 — the economy-engine payoff."
+  },
+  {
+    "id": "on_lull",
+    "name": "On Lull",
+    "kind": "trigger",
+    "cycleCost": 2,
+    "listens": "lull",
+    "payload": 30,
+    "description": "When nothing has died for two seconds. x30 — the only Trigger that pays you for a quiet arena, and the answer to a build that stalls."
+  },
+  {
+    "id": "on_threshold",
+    "name": "On Threshold",
+    "kind": "trigger",
+    "cycleCost": 2,
+    "listens": "threshold",
+    "payload": 25,
+    "description": "When Heat crosses into a new Instability tier, climbing. x25 — Heat as a source instead of only a tax."
+  },
+  {
+    "id": "on_depth",
+    "name": "On Depth",
+    "kind": "trigger",
+    "cycleCost": 3,
+    "listens": "depth",
+    "payload": 14,
+    "description": "When one of your cascades runs five deep. x14 — the Engine listening to itself."
+  },
+  {
+    "id": "on_sweep",
+    "name": "On Sweep",
+    "kind": "trigger",
+    "cycleCost": 2,
+    "listens": "sweep",
+    "payload": 45,
+    "description": "When a Magnet pulls the floor in. x45, once every minute or two. Rare, enormous, and you choose when."
+  },
+  {
+    "id": "on_glutton",
+    "name": "On Glutton",
+    "kind": "trigger",
+    "cycleCost": 2,
+    "listens": "glutton",
+    "payload": 35,
+    "description": "When a gorged Interceptor detonates. x35 — your own projectile spam, paid back."
+  },
+  {
+    "id": "on_enter",
+    "name": "On Enter",
+    "kind": "trigger",
+    "cycleCost": 2,
+    "listens": "enter",
+    "payload": 30,
+    "description": "When you cross into a suppression field. x30 — it fires as you enter, before the field switches you off."
   }
 ]

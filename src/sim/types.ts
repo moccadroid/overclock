@@ -15,7 +15,19 @@ export type EventType =
   | 'wound'
   | 'wave'
   | 'overheat'
-  | 'convert';
+  | 'convert'
+  /** Nothing has died for a while — the arena went quiet. */
+  | 'lull'
+  /** Heat crossed into a new Instability tier, on the way up. */
+  | 'threshold'
+  /** A cascade reached the depth where Heat starts charging in earnest. */
+  | 'depth'
+  /** A Magnet was collected and the whole floor came in. */
+  | 'sweep'
+  /** A gorged Interceptor went up. */
+  | 'glutton'
+  /** The player crossed into a suppression field. */
+  | 'enter';
 
 export interface GameEvent {
   type: EventType;

@@ -50,6 +50,22 @@ const LOCKED_AT_START: readonly string[] = [
   'quantize',
   'attune',
   'volatile',
+  // The triggers that listen to systems you meet later in a run, or later in an
+  // account: a Magnet, a Glutton, a suppression field, your own cascade depth.
+  // Every one of them is a card that would read as noise on run one.
+  'on_sweep',
+  'on_glutton',
+  'on_enter',
+  'on_depth',
+  'on_threshold',
+  // And the modifiers that are decisions about the *shape* of an Engine rather
+  // than about an Action: taking the row above's Action, resetting cascade
+  // depth, capping your own output to afford another row.
+  'mirror',
+  'grounding_rod',
+  'governor',
+  'insulate',
+  'stagger',
 ];
 
 /**

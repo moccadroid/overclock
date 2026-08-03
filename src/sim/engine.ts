@@ -466,6 +466,35 @@ export class Engine {
   recompile(): void {
     this.compiled = this.programs.map(compileProgram);
 
+    // §5.5 Mirror — take the Action of the row above, whatever it has become.
+    // Resolved here rather than in compileProgram because it is the second node
+    // whose meaning depends on a *neighbour*, and a row cannot see its neighbour
+    // until every row has compiled once.
+    for (let i = 1; i < this.compiled.length; i++) {
+      const row = this.compiled[i]!;
+      if (row.ctx.mirror <= 0) continue;
+      const above = this.programs[i - 1];
+      if (!above?.actionId) continue;
+      const mirrored: Program = {
+        ...this.programs[i]!,
+        actionId: above.actionId,
+      };
+      const rebuilt = compileProgram(mirrored);
+      rebuilt.ctx.mirror = row.ctx.mirror;
+      this.compiled[i] = rebuilt;
+    }
+
+    // §5.5 Governor — half the Cycles for a ceiling on output. Applied after the
+    // chain so it caps whatever the chain produced, including a Trigger payload:
+    // the point is a row you can *afford*, and a cap you could multiply past
+    // afterwards would not be one.
+    for (const row of this.compiled) {
+      if (row.ctx.governor <= 0) continue;
+      const trig = this.programs[this.compiled.indexOf(row)]?.triggerId;
+      const base = trig ? (TRIGGER_BY_ID.get(trig)?.payload ?? 1) : 1;
+      row.ctx.output = Math.min(row.ctx.output, base * row.ctx.governor);
+    }
+
     // §5.6 Ground — "the Program above it costs -30% Cycles". This is the only
     // node whose effect reaches outside its own row, so it has to be applied
     // after every row has compiled, and it is why row order is a build axis.

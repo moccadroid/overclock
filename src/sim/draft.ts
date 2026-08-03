@@ -7,7 +7,7 @@
  * modifier that lands nowhere breaks that promise.
  */
 import { ACTIONS, MODIFIERS, TRIGGERS, NODE_BY_ID } from '../content/index';
-import type { NodeDef } from './types';
+import type { NodeDef, NodeKind } from './types';
 import { LOADBEARING, TUNABLE } from './tunables';
 import { TAG_GLYPH, tagRequiredBy, tagsOf, type Tag } from './engine';
 import type { World } from './world';
@@ -196,6 +196,17 @@ function ownedCount(world: World, kind: 'trigger' | 'action'): number {
   return world.engine.programs.filter((p) => p[key] !== null).length;
 }
 
+/** How many nodes of this kind exist at all. Cached — content is immutable. */
+const CLASS_SIZE: Record<NodeKind, number> = {
+  trigger: TRIGGERS.length,
+  action: ACTIONS.length,
+  modifier: MODIFIERS.length,
+};
+
+function classSize(kind: NodeKind): number {
+  return Math.max(1, CLASS_SIZE[kind]);
+}
+
 function weightFor(world: World, node: NodeDef): number {
   const bias = getAxiom(world.config.axiomId).poolBias;
   const hue = hueOf(node);
@@ -215,7 +226,13 @@ function weightFor(world: World, node: NodeDef): number {
   //
   // Modifiers stay ahead of both, because you can absorb those forever and they
   // are the scaling that lets a build become monstrous late.
-  let base = node.kind === 'modifier' ? 26 : 13;
+  // Per *class*, not per card. The old version gave every modifier 26 and every
+  // trigger 13, which meant the class shares moved every time content was added:
+  // six new Triggers took the pool from ten to sixteen and pulled the whole
+  // trigger share up with them, for no design reason at all. Dividing by the
+  // live count of each kind fixes the ratio where §8.2 wants it — modifiers
+  // twice everything else — and keeps it there however much content lands later.
+  let base = (node.kind === 'modifier' ? 2 : 1) * (100 / classSize(node.kind));
 
   if (node.kind !== 'modifier') {
     base *= HUNGER[Math.min(HUNGER.length - 1, ownedCount(world, node.kind))]!;

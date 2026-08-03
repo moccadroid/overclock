@@ -213,5 +213,151 @@
       }
     ],
     "description": "The row above reserves 30% fewer Cycles. This row outputs 20% less."
+  },
+  {
+    "id": "fork",
+    "name": "Fork",
+    "kind": "modifier",
+    "cycleMult": 1.4,
+    "ops": [
+      {
+        "target": "jumps",
+        "add": 2
+      },
+      {
+        "target": "output",
+        "mul": 0.8
+      }
+    ],
+    "description": "+2 chain jumps, -20% output. Arc had no modifier of its own until this one."
+  },
+  {
+    "id": "conduct",
+    "name": "Conduct",
+    "kind": "modifier",
+    "cycleMult": 1.3,
+    "ops": [
+      {
+        "target": "range",
+        "add": 0.8
+      }
+    ],
+    "description": "+80% range: shots fly further, beams and chains stretch. Range as a row decision."
+  },
+  {
+    "id": "seeker",
+    "name": "Seeker",
+    "kind": "modifier",
+    "cycleMult": 1.4,
+    "ops": [
+      {
+        "target": "seek",
+        "add": 5
+      },
+      {
+        "target": "speed",
+        "mul": 0.75
+      }
+    ],
+    "description": "Projectiles steer toward what they were aimed at, and fly 25% slower for it."
+  },
+  {
+    "id": "slug",
+    "name": "Slug",
+    "kind": "modifier",
+    "cycleMult": 1.3,
+    "ops": [
+      {
+        "target": "speed",
+        "mul": 0.5
+      },
+      {
+        "target": "output",
+        "add": 0.9
+      }
+    ],
+    "description": "Half speed, +90% output. A shot that takes its time and lands like a wall."
+  },
+  {
+    "id": "bloom",
+    "name": "Bloom",
+    "kind": "modifier",
+    "cycleMult": 1.4,
+    "ops": [
+      {
+        "target": "bloom",
+        "add": 0.4
+      }
+    ],
+    "description": "Area effects detonate a second time, smaller, right after the first. Bursts, fields, mines, shoves."
+  },
+  {
+    "id": "insulate",
+    "name": "Insulate",
+    "kind": "modifier",
+    "cycleMult": 1.2,
+    "ops": [
+      {
+        "target": "insulate",
+        "add": 1
+      },
+      {
+        "target": "output",
+        "mul": 0.75
+      }
+    ],
+    "description": "This row makes no Heat at all, and pays 25% of its output for it. The cold half of a hot build."
+  },
+  {
+    "id": "grounding_rod",
+    "name": "Grounding Rod",
+    "kind": "modifier",
+    "cycleMult": 1.6,
+    "ops": [
+      {
+        "target": "rootDepth",
+        "add": 1
+      }
+    ],
+    "description": "Events from this row start a fresh cascade at depth 0 — no depth falloff, no Heat from how deep it was."
+  },
+  {
+    "id": "stagger",
+    "name": "Stagger",
+    "kind": "modifier",
+    "cycleMult": 1.1,
+    "ops": [
+      {
+        "target": "stagger",
+        "add": 0.35
+      }
+    ],
+    "description": "Everything this row does lands 0.35s late. Pairs with Resonate: the row above fires, this one answers."
+  },
+  {
+    "id": "mirror",
+    "name": "Mirror",
+    "kind": "modifier",
+    "cycleMult": 1.5,
+    "ops": [
+      {
+        "target": "mirror",
+        "add": 1
+      }
+    ],
+    "description": "This row uses the Action of the row above it, whatever that becomes. Its own Action is ignored."
+  },
+  {
+    "id": "governor",
+    "name": "Governor",
+    "kind": "modifier",
+    "cycleMult": 0.5,
+    "ops": [
+      {
+        "target": "governor",
+        "add": 2
+      }
+    ],
+    "description": "Half the Cycles, and this row's output is capped at 2x its base. How a full Engine finds room for one more."
   }
 ]

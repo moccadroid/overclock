@@ -108,6 +108,16 @@ export const TUNABLE = {
    */
   suppressorsAlive: 2,
 
+  // ---- §5.3 the new triggers ----
+  /**
+   * On Lull — how long the arena must stay quiet. Two seconds is long enough
+   * that ordinary play never sees it and short enough that a stalled build gets
+   * its answer within one dodge.
+   */
+  lullSeconds: 2,
+  /** On Depth — the cascade depth that counts as deep. Matches heatFreeDepth+3. */
+  onDepthAt: 5,
+
   // ---- §5.3 / §5.5 node behaviour ----
   /** §8.2 — base crit chance. Crits hit harder and emit their own event. */
   critChance: 0.05,

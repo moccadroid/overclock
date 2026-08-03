@@ -437,6 +437,10 @@ export interface RunStats {
   overheats: number;
   /** Magnets collected. A run\'s XP tedium, counted. */
   magnets: number;
+  /** Gorged Interceptors detonated. */
+  gluttonsPopped: number;
+  /** Suppressors killed from inside their own field. */
+  suppressorsKilledInside: number;
   damageTaken: number;
   beaconsChannelled: number;
   converts: number;
@@ -553,6 +557,13 @@ export class World {
   private consolidateTimer = 0;
   /** Seconds until another Magnet may drop. See maybeDropMagnet. */
   private magnetCooldown = 0;
+  /** §5.3 On Lull — seconds since anything last died. */
+  private quietFor = 0;
+  private killsThisTick = 0;
+  /** §5.3 On Threshold — the Heat tier last seen, so only climbs fire. */
+  private lastTier = 0;
+  /** §5.3 On Depth — cascades that already announced themselves this tick. */
+  private deepThisTick = new Set<number>();
   beaconTimer = 20;
   recompileTimer = 0;
   wardenTimer: number = TUNABLE.wardenInterval;
@@ -598,6 +609,8 @@ export class World {
     peakConcurrentEnemies: 0,
     overheats: 0,
     magnets: 0,
+    gluttonsPopped: 0,
+    suppressorsKilledInside: 0,
     damageTaken: 0,
     beaconsChannelled: 0,
     converts: 0,
@@ -722,7 +735,33 @@ export class World {
 
     // §11.2 — inside a Suppressor's zone the player's Triggers do not fire.
     // Actions already in flight resolve; nothing new starts.
+    const wasSuppressed = this.suppressedNow;
     this.suppressedNow = this.suppressed;
+    // §5.3 On Enter — fired on the *crossing*, which is the one instant inside a
+    // suppression field where a Trigger still works. Walking in is a decision;
+    // this is what pays for it.
+    if (this.suppressedNow && !wasSuppressed) {
+      this.emit({ type: 'enter', depth: 0, x: this.player.x, y: this.player.y });
+    }
+
+    // §5.3 On Lull — the arena went quiet. Kills reset it, so this fires when a
+    // build has run out of things to feed on, which is exactly when a build that
+    // feeds on kills has nothing.
+    this.quietFor = this.killsThisTick > 0 ? 0 : this.quietFor + dt;
+    this.killsThisTick = 0;
+    this.deepThisTick.clear();
+    if (this.quietFor >= TUNABLE.lullSeconds) {
+      this.quietFor = 0;
+      this.emit({ type: 'lull', depth: 0, x: this.player.x, y: this.player.y });
+    }
+
+    // §5.3 On Threshold — Heat crossing a tier, climbing only. Cooling back down
+    // through a tier is relief, not an event.
+    const tier = this.budget.tier;
+    if (tier > this.lastTier) {
+      this.emit({ type: 'threshold', depth: 0, x: this.player.x, y: this.player.y });
+    }
+    this.lastTier = tier;
 
     if (!this.budget.stalled) {
       if (!this.suppressedNow) this.advanceClocks(dt);
@@ -838,7 +877,23 @@ export class World {
     // reservation now, so a fire has already been paid for by existing. What has
     // not been paid for is *how deep into a cascade* this fire is, and that is
     // charged here, per event, so a chain's total cost grows with its own depth.
-    this.budget.chargeDepth(depth);
+    // §5.5 Grounding Rod — this row's events start a fresh cascade. Everything
+    // downstream of it is depth 0 again: no falloff, no Heat for how deep it
+    // was. It is the most expensive modifier in the game (x1.6) for exactly that
+    // reason, and it is the answer to a build that runs deep and cooks itself.
+    if (compiled.ctx.rootDepth > 0) depth = 0;
+
+    // §5.5 Insulate — a row that makes no Heat at all, for a quarter of its
+    // output. Heat is charged from depth, so this is where it is skipped.
+    if (compiled.ctx.insulate <= 0) this.budget.chargeDepth(depth);
+    // §5.3 On Depth — the Engine listening to itself. Fired once per Program per
+    // tick at the depth where Heat starts charging in earnest, so a build can
+    // route its deepest cascades into something else. Gated per tick because a
+    // deep chain resolves hundreds of events and each of them is "deep".
+    if (depth >= TUNABLE.onDepthAt && !this.deepThisTick.has(index)) {
+      this.deepThisTick.add(index);
+      this.emit({ type: 'depth', depth, x: this.player.x, y: this.player.y });
+    }
 
     if (this.budget.rollMisfire(this.rng)) {
       this.stats.misfires++;
@@ -956,10 +1011,21 @@ export class World {
           this.spawnProjectile(def.id, damage, depth, index, ox, oy, compiled.ctx, corrupted, hue);
           break;
         case 'burst':
-          this.doBurst(def.id, damage, depth, index, ox, oy, (compiled.ctx.area * this.areaMul), hue, compiled.ctx.leech);
+          this.doBurst(
+            def.id,
+            damage,
+            depth,
+            index,
+            ox,
+            oy,
+            compiled.ctx.area * this.areaMul,
+            hue,
+            compiled.ctx.leech,
+            compiled.ctx.bloom,
+          );
           break;
         case 'chain':
-          this.doChain(def.id, damage, depth, index, ox, oy, hue, compiled.ctx.leech);
+          this.doChain(def.id, damage, depth, index, ox, oy, hue, compiled.ctx);
           break;
         case 'zone':
         case 'vortex':
@@ -1032,14 +1098,14 @@ export class World {
     // term existed in the text and nowhere else. It matters twice over now:
     // range is speed x lifetime, so this is also the flight-only range stat
     // sitting next to Reach, which covers everything.
-    const speed = (def.speed ?? 400) * (1 + this.bonuses.travels * 0.2);
+    const speed = (def.speed ?? 400) * (1 + this.bonuses.travels * 0.2) * ctx.speed;
     this.projectiles.push({
       id: this.nextId++,
       x,
       y,
       vx: dx * speed,
       vy: dy * speed,
-      life: (def.lifetime ?? 2) * this.reachMul,
+      life: (def.lifetime ?? 2) * this.reachMul * ctx.range,
       damage,
       pierce: (def.pierce ?? 0) + Math.round(ctx.pierce) + this.bonuses.travels,
       hue,
@@ -1052,7 +1118,7 @@ export class World {
       bounces: Math.round(ctx.bounce),
       volatile: ctx.volatile,
       leech: ctx.leech,
-      seek: def.seek ?? 0,
+      seek: (def.seek ?? 0) + ctx.seek,
       siphon: def.siphon ?? 0,
       alive: true,
     });
@@ -1068,6 +1134,7 @@ export class World {
     area: number,
     hue: Hue,
     leech = 0,
+    bloom = 0,
   ): void {
     const def = ACTION_BY_ID.get(actionId)!;
     const radius = (def.radius ?? 100) * Math.max(0.1, area);
@@ -1075,6 +1142,25 @@ export class World {
       this.damageEnemy(enemy, damage, depth, programIndex, hue, leech);
     });
     this.pushFx('burst', hue, x, y, radius, [], 0.22);
+
+    // §5.5 Bloom — a second, smaller detonation right after the first. Deferred
+    // rather than immediate, because two explosions in one frame is just one
+    // explosion with a bigger number on it. Rupture's own scheduler carries it:
+    // a delayed burst at a position is exactly what that is.
+    if (bloom > 0 && this.pendingBursts.length < SAFETY.maxScheduledFires) {
+      this.pendingBursts.push({
+        time: this.time + 0.16,
+        x,
+        y,
+        radius: radius * 0.7,
+        damage: damage * bloom,
+        hue,
+        depth,
+        programIndex,
+        leech,
+        alive: true,
+      });
+    }
   }
 
   private doChain(
@@ -1085,11 +1171,12 @@ export class World {
     x: number,
     y: number,
     hue: Hue,
-    leech = 0,
+    ctx: FireContext,
   ): void {
+    const leech = ctx.leech;
     const def = ACTION_BY_ID.get(actionId)!;
-    const jumps = def.jumps ?? 3;
-    const range = (def.range ?? 200) * this.reachMul;
+    const jumps = (def.jumps ?? 3) + Math.round(ctx.jumps);
+    const range = (def.range ?? 200) * this.reachMul * ctx.range;
     const hit: number[] = [];
     const points: number[] = [x, y];
     let cx = x;
@@ -1279,7 +1366,7 @@ export class World {
     ctx: FireContext,
     hue: Hue,
   ): void {
-    const range = (def.range ?? 800) * this.reachMul;
+    const range = (def.range ?? 800) * this.reachMul * ctx.range;
     // Farthest, not nearest: the point of a beam is everything on the way.
     let far: Enemy | null = null;
     let farD2 = 0;
@@ -2123,7 +2210,10 @@ export class World {
     this.stats.kills++;
     this.stats.killsByEnemy.set(enemy.defId, (this.stats.killsByEnemy.get(enemy.defId) ?? 0) + 1);
     this.cue('kill', hue, depth, Math.min(1, enemy.maxHp / 60));
-    if (this.suppressedNow) this.stats.suppressedKills++;
+    if (this.suppressedNow) {
+      this.stats.suppressedKills++;
+      if ((getEnemy(enemy.defId).zoneRadius ?? 0) > 0) this.stats.suppressorsKilledInside++;
+    }
 
     const def = getEnemy(enemy.defId);
 
@@ -2166,6 +2256,8 @@ export class World {
       const radius = enemy.radius * TUNABLE.interceptorBlastScale;
       this.pushFx('rupture', enemy.hue, enemy.x, enemy.y, radius, [], 0.45);
       this.cue('kill', enemy.hue, depth, 1);
+      this.stats.gluttonsPopped++;
+      this.emit({ type: 'glutton', depth, x: enemy.x, y: enemy.y, hue: enemy.hue });
       for (const other of this.enemies) {
         if (!other.alive || other.id === enemy.id) continue;
         const ox = other.x - enemy.x;
@@ -2200,6 +2292,7 @@ export class World {
       }
     }
 
+    this.killsThisTick++;
     this.emit({
       type: 'kill',
       depth: depth + 1,
@@ -2948,6 +3041,7 @@ export class World {
       item.vy = psin(a) * 220;
     }
     this.stats.magnets++;
+    this.emit({ type: 'sweep', depth: 0, x: this.player.x, y: this.player.y });
     this.pushFx('burst', 'voltaic', this.player.x, this.player.y, 420, [], 0.5);
     this.cue('pickup', 'voltaic', 0, 1);
   }
