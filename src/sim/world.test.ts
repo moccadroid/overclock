@@ -390,7 +390,10 @@ describe('Recompile (GDD §9)', () => {
     // Run one has to hand you a Trigger or an Action about half the time.
     expect(hungry).toBeGreaterThan(0.45);
     // And three rows in, it is back to the modifier-heavy pool §8.2 describes.
-    expect(fed).toBeLessThan(0.32);
+    // The bar moved from 0.32 to 0.35 when blank suppression landed: a modifier
+    // that is inert on every Action you own is weighted to 12%, and that weight
+    // has to go somewhere. Two thirds modifiers is still the shape §8.2 asks for.
+    expect(fed).toBeLessThan(0.35);
     expect(hungry).toBeGreaterThan(fed * 1.7);
   });
 

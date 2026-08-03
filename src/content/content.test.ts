@@ -1,6 +1,28 @@
 import { describe, expect, it } from 'vitest';
 import { validateCollection, type Schema } from './validate';
 import { ACTIONS, ALL_NODES, AXIOMS, ENEMIES, MODIFIERS, TRIGGERS, WAVES } from './index';
+import { World } from '../sim/world';
+import { rollDraft, STAT_CARDS } from '../sim/draft';
+
+/** The event alphabet, as the sim's own type declares it. */
+const EVENT_KINDS = [
+  'clock',
+  'hit',
+  'kill',
+  'crit',
+  'pickup',
+  'dash',
+  'wound',
+  'wave',
+  'overheat',
+  'convert',
+  'lull',
+  'threshold',
+  'depth',
+  'sweep',
+  'glutton',
+  'enter',
+];
 
 const schema: Schema = {
   id: { type: 'string', required: true },
@@ -95,6 +117,35 @@ describe('shipped content loads and cross-references resolve', () => {
       expect(TRIGGERS.some((t) => t.id === ax.starter.trigger)).toBe(true);
       expect(ACTIONS.some((a) => a.id === ax.starter.action)).toBe(true);
       expect(ax.starter.modifiers.length).toBeLessThanOrEqual(3);
+    }
+  });
+
+  it('every stat card in the type is actually rollable', () => {
+    // Twice now a stat has been added to StatKind and to STAT_CARDS and never to
+    // the array rollDraft picks from — the class stats first, then Reach. Both
+    // times the card existed, was documented, and could not be drawn. Both times
+    // it took a measurement across whole runs to notice. This is that
+    // measurement, as a build failure.
+    const world = new World({ seed: 'stat-coverage', axiomId: 'ignition' });
+    const seen = new Set<string>();
+    for (let i = 0; i < 6000; i++) {
+      for (const card of rollDraft(world).cards) {
+        if (card.kind === 'stat') seen.add(card.stat);
+      }
+    }
+    for (const stat of Object.keys(STAT_CARDS)) {
+      expect(seen.has(stat), `stat "${stat}" is defined but never offered`).toBe(true);
+    }
+  });
+
+  it('every Trigger listens for an event the sim actually emits', () => {
+    // A Trigger whose event is never emitted is a card that cannot do anything,
+    // and On Overheat spent a whole release in exactly that state because Heat
+    // never reached 100. Emission is measured elsewhere; this checks the weaker
+    // but automatable half: the event kind exists in the alphabet.
+    const emitted = new Set<string>(EVENT_KINDS);
+    for (const t of TRIGGERS) {
+      expect(emitted.has(t.listens), `${t.id} listens for "${t.listens}"`).toBe(true);
     }
   });
 });

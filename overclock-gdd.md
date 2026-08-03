@@ -149,7 +149,9 @@ Rules of cascade physics:
 - Processing any event costs **Cycles** (Section 6). Running out of Cycles doesn't stop the engine — it Overclocks it (heat, instability).
 - Hard safety cap at depth **12** [T] — events beyond it are dropped silently. This cap should be high enough that players hit the Cycle economy long before the wall. The wall exists for the runtime's safety, not for balance.
 
-### 5.3 Trigger nodes (v1: 10)
+### 5.3 Trigger nodes (v1: 16)
+
+**A Trigger's payload is priced against its measured frequency, not against how it feels.** Instrumented over 792 seconds of play: On Hit fires 188 times a second, On Kill 18, On Crit 9.5, Clock 0.83, On Wave 0.05. A payload ladder running 1→8 was trying to cover a frequency ladder running 1→3,800, so On Hit was worth 188 output a second and On Wave 0.34 — a 550:1 gap between two cards that cost the same. Every payload below is `target value per second ÷ measured rate`, and any new Trigger has to be measured before it is priced.
 
 | Node | Fires when | Cycle cost/event [T] | Notes |
 |---|---|---|---|
@@ -162,9 +164,15 @@ Rules of cascade physics:
 | On Wound | You take damage | 2 | Masochist builds; pairs with Leech |
 | On Wave | A wave spawns | 3 | Burst archetype |
 | On Overheat | Heat crosses a threshold tier | 3 | Weaponizes the penalty system — intended |
-| On Convert | A fuel conversion resolves | 2 | Economy-engine builds |
+| On Convert | A conversion resolves | 2 | Economy-engine builds |
+| On Lull | Nothing has died for 2s | 2 | The answer to a build that stalls — the only Trigger that pays for a quiet arena |
+| On Threshold | Heat climbs into a new Instability tier | 2 | Heat as a source, not only a tax |
+| On Depth | One of your cascades runs 5 deep | 3 | The Engine listening to itself |
+| On Sweep | A Magnet pulls the floor in (7.3) | 2 | Rare, enormous, and *you* choose when |
+| On Glutton | A gorged Interceptor detonates (10.2) | 2 | Your own projectile spam, paid back |
+| On Enter | You cross into a suppression field (11.2) | 2 | Fires on the crossing — the one instant a Trigger still works in there |
 
-### 5.4 Action nodes (v1: 14)
+### 5.4 Action nodes (v1: 17)
 
 Every Action has a **hue affinity** (Thermal / Voltaic / Void — Section 7) that determines its fuel consumption and its damage type for resistance purposes.
 
@@ -191,7 +199,7 @@ Every Action has a **hue affinity** (Thermal / Voltaic / Void — Section 7) tha
 
 Range is then something you **buy**. The Reach stat (+25% to all of it) is the first source and more should follow — they are the only cards in the game that change *where the player has to stand* rather than how large a number is, which also means they are the only cards with a real trade-off: further away is also alone. The camera gives a little ground as output climbs (16.6), twelve per cent at full tilt and no more.
 
-### 5.5 Modifier nodes (v1: 14)
+### 5.5 Modifier nodes (v1: 25)
 
 Modifiers transform the Action (or the event stream reaching it). **Order matters** — the canonical example, required to work exactly this way:
 
@@ -213,9 +221,23 @@ Modifiers transform the Action (or the event stream reaching it). **Order matter
 | Volatile | Effect detonates at end of life for 50% output | ×1.4 |
 | Quantize | Snaps all fires to the audio grid (18.2); +25% output when on-beat | ×1.2 |
 | Attune | Action's hue affinity shifts to your fullest fuel gauge | ×1.2 |
-| Overdrive | +100% output; every fire adds Heat directly | ×1.0 |
+| Overdrive | +100% output; every fire adds Heat directly | ×1.4 |
+| Fork | +2 chain jumps, −20% output | ×1.4 |
+| Conduct | +80% range: flight, beams and chains | ×1.3 |
+| Seeker | Projectiles steer; −25% speed | ×1.4 |
+| Slug | −50% projectile speed, **+90% output** | ×1.3 |
+| Bloom | Area effects detonate a second time at 40%, 0.16s later | ×1.4 |
+| Insulate | This row produces no Heat at all; −25% output | ×1.2 |
+| Grounding Rod | This row's events restart the cascade at depth 0 | ×1.6 |
+| Stagger | Everything this row does lands 0.35s late | ×1.1 |
+| Mirror | Take the Action of the row above, whatever it becomes | ×1.5 |
+| Governor | Output capped at ×2 base, for **half** the Cycles | ×0.5 |
 
 **Echo is deliberately the strongest modifier in the game.** Echo stacking (multiple Echoes in one Program, or Echo interacting with On Hit loops) is the intended discovery path to exponential output. Do not nerf Echo; price it in Cycles.
+
+**Echo is positional.** It repeats *what is to its left* — each Echo snapshots the row's output where it sits, so the copies inherit the modifiers before it and none of the ones after. Measured across the three positions of one Echo in a three-card row: 57.8 / 66.6 / 70.4. This is load-bearing: the first implementation folded Echo into a count at the end of the chain, which made every ordering of the same three cards produce byte-identical output and quietly removed the ordering decision from the game's strongest card.
+
+**Modifiers are tag-gated, and the tags are derived.** Which fields an Action reads (`PRIMITIVE_FIELDS`) is the single source of truth; the flight / area / duration tags on the cards are computed from it, so a card can never claim an interaction the simulation does not honour. Audited across every (modifier × Action) pair: 29% were silent no-ops, including Volatile — which promised "effects detonate at the end of their life" and worked only on projectiles. Legal-but-inert combinations stay legal (pillar 1); the draft simply stops *offering* them (8.3).
 
 ### 5.6 Topology nodes and adjacency
 
@@ -350,14 +372,25 @@ Three cards. Each card is one of:
 
 - A **node** (Trigger / Action / Modifier — pool weighted by what the player owns and their Axiom)
 - A **capacity upgrade** (+15 Cycles [T])
-- A **stat card** (rare; only: magnet radius, move speed, Integrity, crit — small pool, deliberately boring, exists as a floor for dead drafts)
+- A **stat card**. No longer "deliberately boring": stats are the floor that keeps a draft from being dead, but a floor made only of +8% numbers is a floor nobody stands on. The pool now covers the systems that had no dial at all:
+  - *Gain, Precision, Servo, Plating, Collector* — the small numbers, still.
+  - *Ballistics / Yield / Half-Life* — the class stats, one per behaviour tag. They pay a focused Engine and nothing else, which makes them the first stats that are a decision.
+  - *Reach* (+25% range on everything) — the counterweight to short base ranges (5.4b). The only stat that changes **where the player stands**.
+  - *Coolant* (+2 Heat vented a second) and *Capacitor* (+6 capacity per **unfilled** row) — Heat and Cycles get dials. Capacitor is the only card in the game that gets *worse* as you build, which makes taking it a read on where the run is going.
+  - *Salvage* (Purges also bank +4% output) — pays for using the draft economy.
+  - *Momentum* (+2% output per second since you were last hurt, cap +40%) — every other defensive card buys Integrity; this one buys play.
 
 Rarity tiers (Common / Refined / Prototype) scale node numbers, never change behavior. Behavior differences are always separate nodes — legibility rule.
 
 ### 8.3 Draft economy
 
-- **Reroll:** start with 2 per run [T]; +1 from certain drafts.
-- **Purge:** start with 1 [T]. Permanently removes a card from this run's pool. Narrowing tool — purging thins the pool toward your engine.
+The tools are the player's grip on the pool, and the first version had none. Measured: two rerolls and one purge a run, tool cards at 2% of offers, and a Purge that removed **one node from a pool of 42** — half a percentage point of the modifier slice, about one card changed over a whole run. Not a weak tool; a rounding error with a button.
+
+- **Reroll:** available at *every* draft, priced in Heat (12, rising with each reroll in the same draft) [T]. Banked rerolls from tool cards are spent first and stay free. A resource you are afraid to spend is inventory, not a decision — and pricing it in Heat means the cost rises exactly when a run is already in trouble.
+- **Purge:** removes a card from this run's pool for good **and banks a Scrap stack** (+4% output, doubled by the Salvage stat). Refusing a card is progress rather than housekeeping, so the third card in an offer is never wasted.
+- **Lock:** hold one card over for the next draft, for what a reroll costs. "I need this but cannot afford it yet" used to be a pure loss.
+- **Refusal memory:** a node offered and refused three times [T] stops being offered. The draft already reads what you own; reading what you have *rejected* costs one counter. Measured before this: a run refused six Program Slots and the pool kept asking.
+- **Blank suppression:** a Modifier that is inert on every Action you own is weighted to 12%. It is never zero — an inert modifier is a legitimate bet on an Action you have not drawn — but 25% of offered modifier cards were doing nothing, and it is 3% now.
 - **Auto-slot:** picking a node places it in the first compatible empty slot. A "place manually" option opens the editor. Default flow must be two clicks total: pick → back in the fight in <2s.
 
 ### 8.4 Axioms (starting programs)

@@ -54,7 +54,11 @@ export const TUNABLE = {
   // climbs. Twelve past free saturates the cap. The point is that the whole
   // band between "free" and "on fire" is reachable, which is exactly what the
   // overdraw model never managed.
-  heatPerDepthEvent: 0.1,
+  // Retuned down from 0.1 after the trigger payloads were priced against
+  // measured event rates: more output per fire meant deeper, faster cascades,
+  // and a probe run went from 6 overheats to 34 — one every ten seconds, which
+  // is not a dial any more, it is weather.
+  heatPerDepthEvent: 0.06,
   heatGainMaxPerSec: 45,
   heatDecayPerSec: 8,
   overheatStallSeconds: 3,

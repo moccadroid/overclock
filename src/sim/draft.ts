@@ -9,7 +9,7 @@
 import { ACTIONS, MODIFIERS, TRIGGERS, NODE_BY_ID } from '../content/index';
 import type { NodeDef, NodeKind } from './types';
 import { LOADBEARING, TUNABLE } from './tunables';
-import { TAG_GLYPH, tagRequiredBy, tagsOf, type Tag } from './engine';
+import { inertFields, TAG_GLYPH, tagRequiredBy, tagsOf, type Tag } from './engine';
 import type { World } from './world';
 import { axiom as getAxiom } from '../content/index';
 
@@ -276,6 +276,17 @@ function weightFor(world: World, node: NodeDef): number {
 
   if (node.kind !== 'modifier') {
     base *= HUNGER[Math.min(HUNGER.length - 1, ownedCount(world, node.kind))]!;
+  }
+
+  // §5.5 — a modifier that does nothing to anything you own is not a card, it is
+  // a blank. Measured before this: 25% of the modifier cards a run was offered
+  // were inert on every Action the player had. The tags say so on the card now,
+  // which helps a player who reads them; this stops the pool asking in the first
+  // place. Not zero — an inert modifier is a legitimate bet on an Action you
+  // have not drawn yet, and §1.3's first pillar says the grammar stays legal.
+  if (node.kind === 'modifier') {
+    const owned = world.engine.programs.map((p) => p.actionId).filter((a): a is string => !!a);
+    if (owned.length > 0 && owned.every((a) => inertFields(node.id, a).length > 0)) base *= 0.12;
   }
 
   // §8.2 — "pool weighted by what the player owns". An empty slot pulls its own
