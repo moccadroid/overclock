@@ -510,6 +510,18 @@ interface ScheduledFire {
 export interface Player {
   x: number;
   y: number;
+  /**
+   * Where the avatar was at the start of this tick.
+   *
+   * Presentation reads it; the simulation never does. It lives here because only
+   * the sim knows when a tick began. The renderer runs at the display's rate —
+   * 144Hz on the machine this was reported from — while the sim steps at 60, so
+   * without it the avatar's position updates every 2.4 frames while the camera
+   * smoothing moves every frame, and the one object the player is looking at
+   * judders against a world that does not.
+   */
+  prevX: number;
+  prevY: number;
   vx: number;
   vy: number;
   integrity: number;
@@ -858,6 +870,8 @@ export class World {
     this.player = {
       x: this.arena.spawnX,
       y: this.arena.spawnY,
+      prevX: this.arena.spawnX,
+      prevY: this.arena.spawnY,
       vx: 0,
       vy: 0,
       integrity: TUNABLE.playerIntegrity,
@@ -2821,6 +2835,8 @@ export class World {
   // ------------------------------------------------------------------ updates
 
   private updatePlayer(input: InputState, dt: number): void {
+    this.player.prevX = this.player.x;
+    this.player.prevY = this.player.y;
     const p = this.player;
     p.iframes = Math.max(0, p.iframes - dt);
     p.dashCooldown = Math.max(0, p.dashCooldown - dt);

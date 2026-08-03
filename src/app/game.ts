@@ -375,7 +375,13 @@ export class Game {
 
     // The camera only tracks while time is running — a frozen draft or editor
     // should not drift the view out from under the player.
-    this.renderer.render(this.world, elapsed, this.mode === 'running');
+    // The leftover accumulator is how far into the next tick the display is.
+    this.renderer.render(
+      this.world,
+      elapsed,
+      this.mode === 'running',
+      Math.min(1, this.accumulator / SIM_DT),
+    );
     // Pixi does not present on its own ticker any more — see Renderer.present.
     this.renderer.present();
 

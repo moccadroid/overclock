@@ -133,6 +133,9 @@ export class Renderer {
   private shakeX = 0;
   private shakeY = 0;
   private jitterSeed = 1;
+  /** The avatar's drawn position: the sim's, interpolated across the tick. */
+  private playerX = 0;
+  private playerY = 0;
   /** Ruins drawn last time. A gate opening changes it; nothing else does. */
   private ruinCount = -1;
   /**
@@ -343,15 +346,23 @@ export class Renderer {
     }
   }
 
-  render(world: World, frameDt: number, cameraActive: boolean): void {
+  /**
+   * `alpha` is how far into the current simulation tick the display is, 0..1.
+   *
+   * Everything the sim owns moves in 60Hz steps; the display runs at whatever
+   * the monitor does. The avatar is the one object on screen the player's eye is
+   * locked to, and it sits still in the middle of a world that slides — so its
+   * 60Hz stepping reads as *the character* being laggy while the horde looks
+   * fine. Interpolating between the last two ticks fixes it, and interpolating
+   * rather than extrapolating means never showing a position the run did not
+   * actually have.
+   */
+  render(world: World, frameDt: number, cameraActive: boolean, alpha = 1): void {
+    const p = world.player;
+    this.playerX = p.prevX + (p.x - p.prevX) * alpha;
+    this.playerY = p.prevY + (p.y - p.prevY) * alpha;
     if (cameraActive) {
-      this.camera.follow(
-        world.player.x,
-        world.player.y,
-        world.player.dirX,
-        world.player.dirY,
-        frameDt,
-      );
+      this.camera.follow(this.playerX, this.playerY, p.dirX, p.dirY, frameDt);
     }
 
     this.clock += frameDt;
@@ -1865,7 +1876,10 @@ export class Renderer {
   private drawPlayer(world: World, heat: number, dt: number): void {
     const g = this.gPlayer;
     g.clear();
-    const p = world.player;
+    // A shallow copy at the interpolated position: everything below reads `p.x`
+    // and `p.y`, and the avatar has to be drawn where the *display* says it is,
+    // not where the last 60Hz tick left it. See render().
+    const p = { ...world.player, x: this.playerX, y: this.playerY };
     if (!p.alive) return;
 
     // ---- animation state -------------------------------------------------
