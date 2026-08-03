@@ -259,6 +259,8 @@ export class Audio {
   private lastHover = 0;
   /** Steps still owed to a big event. See `bigEvent`. */
   private claim = 0;
+  /** Context time of the last accent, so a sixteenth can only hold one. */
+  private lastBigEvent = -1;
   /**
    * §18.1 — one part per live Program. This is the arrangement, and it is
    * literally the player's Engine. See parts.ts.
@@ -719,6 +721,10 @@ export class Audio {
   /** For the occasions the sim does not model as cues — Discovery, Recompile. */
   celebrate(): void {
     if (!this.ctx) return;
+    // Capped like the cue path already was. This was the last push into the
+    // audio layer with no bound on it, and `bigEvent` is what an unbounded one
+    // costs: a queue nobody drains fast enough is a leak with a soundtrack.
+    if (this.occasions.length >= 4) return;
     this.occasions.push({ kind: 'level', hue: this.state.dominant, depth: 0, weight: 1 });
   }
 
@@ -848,6 +854,23 @@ export class Audio {
   bigEvent(hue: Hue): void {
     if (!this.ctx || !this.clock) return;
     const at = this.clock.quantize(this.ctx.currentTime);
+
+    // One accent per sixteenth, and no more. This is the fix for a crash.
+    //
+    // The caller reports every large detonation as it appears, which at level
+    // fifteen with a Nova build is dozens per *frame* — and this method schedules
+    // about ten Web Audio nodes each. Thousands of nodes a second first killed
+    // the audio (it went silent and never came back), then the tab.
+    //
+    // Rate-limiting at the caller would have been the wrong place. Everything
+    // quantizes, so forty calls in one sixteenth all schedule at the identical
+    // instant: they were never forty accents, they were one accent played forty
+    // times on top of itself. Refusing them here is both the performance fix and
+    // the correct musical behaviour, and it means no future caller can flood it
+    // either. §18.4's polyphony cap, applied to the one voice that had none.
+    if (at <= this.lastBigEvent) return;
+    this.lastBigEvent = at;
+
     const tones = this.tones;
     const voice = this.voice(this.punchBus);
     sub(voice, at, semiHz(tones[0]! - 24), 0.9, 0.45);

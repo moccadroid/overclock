@@ -2373,6 +2373,54 @@ player owns. There is no backend, no account and nothing to opt out of.
 
 ---
 
+## D-105 · BUG · An unbounded accent killed the tab
+
+Reported: audio disappeared around level 15 and never came back, the frame
+lagged every time the screen filled with detonations, and eventually the tab
+froze hard enough that the run was unrecoverable.
+
+Three symptoms, one cause. `reportBigEvents` tells the audio layer about every
+large detonation as it appears — and at level 15 with a Nova build that is dozens
+per *frame*. `bigEvent` schedules about ten Web Audio nodes per call. Measured at
+**2,364 calls per second**, which is roughly 23,000 nodes a second created and
+left for the collector. The audio thread goes first, then the allocation pressure
+takes the frame, and then it takes the tab.
+
+It is also the one path into the audio layer with no bound on it. The sim caps
+cues at 96 a frame, `pending` at 64, accents at three a step, occasions at four —
+all of that was already there, and this seam bypassed every bit of it, because it
+was added later and from the presentation side.
+
+Rate-limiting at the caller would have been the wrong fix. Everything here
+quantizes, so forty calls inside one sixteenth all schedule at the *identical*
+instant: they were never forty accents, they were one accent played forty times
+on top of itself. So `bigEvent` refuses anything that lands on a sixteenth it has
+already used — which is simultaneously the performance fix, the correct musical
+behaviour, and a guarantee no future caller can undo. Measured after: 2,364
+requests a second become **7.6**, which is exactly the sixteenth-note rate at
+112 BPM. A 310x reduction that is structural rather than tuned.
+
+`celebrate()` was capped at the same time. It was the last push into the audio
+layer without a bound, and this is what an unbounded one costs.
+
+**The recording did not survive, and that was the second bug.** A twenty-minute
+run reached level 22 and every byte of it went with the tab, because the recorder
+only persisted at the *end* of a run — reliable for exactly the runs nobody needs
+and useless for the one kind that matters. A recording that does not survive the
+crash it is describing is not evidence.
+
+So a run in progress is now stashed every fifteen seconds into its own slot,
+separate from the finished-run window so it cannot evict anything. On the next
+boot, a stash still sitting there means the last session ended without the run
+ending — a freeze, a crash, a closed tab — and it is promoted into the window,
+because that is precisely the recording somebody wants. Verified end to end: a
+run abandoned mid-play came back as 60s / level 6 / 94 kills and replayed with no
+divergence.
+
+Worst case is now fifteen seconds of a run rather than all of it.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

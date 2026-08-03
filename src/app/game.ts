@@ -18,7 +18,7 @@ import {
 import { Input } from './input';
 import { NO_INPUT, World, type RunConfig } from '../sim/world';
 import { Recorder, type Recording } from '../sim/record';
-import { keepRun } from '../meta/runstore';
+import { clearPartial, keepRun, stashPartial, STASH_EVERY } from '../meta/runstore';
 import { SIM_DT } from '../sim/tunables';
 import { VISUAL } from './visual';
 import { Library } from '../meta/profile';
@@ -84,6 +84,8 @@ export class Game {
    */
   private readonly recorder: Recorder;
   private recording: Recording | null = null;
+  /** Seconds of play since the run was last written out. */
+  private stashTimer = 0;
 
   constructor(
     config: RunConfig,
@@ -304,6 +306,7 @@ export class Game {
         // what this tick saw. See sim/record.ts.
         this.recorder.step(this.world, input);
         this.world.advance(input, SIM_DT);
+        this.stashTimer += SIM_DT;
         this.accumulator -= SIM_DT;
         steps++;
         this.applyImpactFeedback();
@@ -337,6 +340,16 @@ export class Game {
         }
       }
       if (steps === 8) this.accumulator = 0;
+
+      // §14 — write the run out periodically, so a crash costs seconds rather
+      // than everything. A twenty-minute run that froze the tab took every byte
+      // of itself with it; the recorder was reliable for exactly the runs nobody
+      // needs. Sealing is a stringify of a few tens of kilobytes and happens
+      // four times a minute, which is far below anything a frame notices.
+      if (this.stashTimer >= STASH_EVERY) {
+        this.stashTimer = 0;
+        stashPartial({ ...this.recorder.finish(this.world), startedAt: Date.now() });
+      }
     }
 
     // §18.2 read backwards: the picture is told where the beat is. Read every
@@ -529,6 +542,7 @@ export class Game {
     // the sim may never read a clock.
     this.recording = { ...this.recorder.finish(this.world), startedAt: Date.now() };
     keepRun(this.recording);
+    clearPartial();
 
     this.message.showResults(this.world, this.library, (cmd) => this.onCommand(cmd));
   }
@@ -620,4 +634,5 @@ export class Game {
   }
 
 }
+
 

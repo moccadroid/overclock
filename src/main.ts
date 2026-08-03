@@ -14,7 +14,7 @@ import { Library } from './meta/profile';
 import { Audio } from './audio/audio';
 import { applyEffects } from './app/visual';
 import { installUserCells } from './meta/cellstore';
-import { describeRun, loadRuns } from './meta/runstore';
+import { describeRun, loadRuns, recoverPartial } from './meta/runstore';
 import './app/ui.css';
 
 const params = new URLSearchParams(location.search);
@@ -37,6 +37,18 @@ audio.setSfxVolume(library.snapshot.settings.effects);
 // before anything asks it for an arrangement. Widening the vocabulary, not
 // picking the song: the Engine still decides which of them it wants.
 installUserCells();
+// §14 — a run in progress is stashed every few seconds, so one still sitting
+// there means the last session ended without the run ending: a freeze, a crash,
+// or a closed tab. Promote it into the window, because that is exactly the
+// recording somebody wants to look at.
+const crashed = recoverPartial();
+if (crashed) {
+  // eslint-disable-next-line no-console
+  console.warn(
+    `[${BRANDING.title}] recovered an unfinished run: ${describeRun(crashed)} — ` +
+      `see __oc.runs()`,
+  );
+}
 
 /**
  * Playtest hook: `?meltdown=90` brings the Meltdown line forward so the third

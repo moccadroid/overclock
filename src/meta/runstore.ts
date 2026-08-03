@@ -17,8 +17,25 @@ import { RECORDING_VERSION, type Recording } from '../sim/record';
 
 const STORAGE_KEY = 'overclock.runs.v1';
 
+/**
+ * The run currently being played, stashed every few seconds.
+ *
+ * Its own slot rather than an entry in the window, because it is overwritten
+ * constantly and must not push finished runs out.
+ *
+ * This exists because of a crash. A twenty-minute run reached level 22, froze
+ * the tab, and every byte of it was gone — the recorder only persisted at the
+ * end, which meant it was reliable for exactly the runs nobody needs and useless
+ * for the one kind that matters. A recording that does not survive the crash it
+ * is describing is not evidence.
+ */
+const PARTIAL_KEY = 'overclock.run.partial.v1';
+
 /** How many runs the window holds. */
 export const KEEP = 5;
+
+/** How often a run in progress is written out, in seconds of play. */
+export const STASH_EVERY = 15;
 
 /**
  * Runs whose format this build can still replay.
@@ -68,7 +85,53 @@ export function keepRun(recording: Recording): Recording[] {
   return [];
 }
 
+/** Overwrite the in-progress slot. Cheap enough to do every few seconds. */
+export function stashPartial(recording: Recording): void {
+  try {
+    localStorage.setItem(PARTIAL_KEY, JSON.stringify(recording));
+  } catch {
+    // Out of room. The finished-run window is worth more than this slot, so
+    // this one loses quietly rather than evicting anything.
+  }
+}
+
+export function clearPartial(): void {
+  try {
+    localStorage.removeItem(PARTIAL_KEY);
+  } catch {
+    // Nothing to do.
+  }
+}
+
+/**
+ * Fold a crashed run into the window. Called once at boot.
+ *
+ * A partial that is still here means the last session ended without the run
+ * ending — a freeze, a crash, or a closed tab. It is promoted to a real entry
+ * because that is precisely the recording somebody wants to look at, and the
+ * slot is cleared so it is only ever promoted once.
+ */
+export function recoverPartial(): Recording | null {
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(PARTIAL_KEY);
+  } catch {
+    return null;
+  }
+  if (!raw) return null;
+  clearPartial();
+  try {
+    const parsed = JSON.parse(raw) as Recording;
+    if (parsed?.version !== RECORDING_VERSION || parsed.ticks <= 0) return null;
+    keepRun(parsed);
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 export function clearRuns(): void {
+  clearPartial();
   try {
     localStorage.removeItem(STORAGE_KEY);
   } catch {
