@@ -2014,6 +2014,91 @@ between a lamp and a painted circle.
 
 ---
 
+## D-98 · SETTLED · Lights have shapes, and the field has an exposure
+
+Three changes to the light field, from one screenshot of yellow washes with no
+interior detail.
+
+**Shapes.** Every light was the same radial blob, and most of the things that
+emit light in this game are not round. A light is now a point, a **capsule** or
+an **area**. A bolt at 1400 units/s covers twenty-odd units between frames, so it
+lights the streak it crossed rather than the disc it stopped in. An Arc is a
+polyline and lights along it, hop by hop, which is the only thing that makes a
+chain read as something that *travelled*. A Field is a region, so it gets a
+falloff that is flat to 55% of its radius — a radial over 220 units is a lamp
+standing inside a dark ring, not a lit floor. One quad each; the capsule is a
+single baked texture whose falloff is measured to a spine rather than to a point.
+
+Bursts stayed points, deliberately. An `area` was tried and is wrong for them: a
+detonation is hottest at its centre, and it is that gradient which survives
+sixteen of them overlapping. An even disc has no interior left to lose.
+
+**Exposure.** The buffer is 8-bit and additive, so a region that sums past 1.0
+clips — and clipped means *no variation at all*, which is what turns forty
+thermal sources into one flat yellow shape with a soft edge. The field now
+measures what it is being asked to emit and scales the frame down when that would
+clip. It ducks fast and recovers slow. It is a limiter, and for the same reason
+the audio bus has one: the fix for "too much at once" is never to let it through
+and clip, it is to make room for it.
+
+The metric counts intensity **squared**, which is the part that makes it read as
+a camera rather than as a dimmer. Four hundred fuel motes glowing at 0.1 never
+clip anything, but they carry more raw energy than the Nova in the middle of
+them — so a linear metric let a floor covered in loot pull the brightness out of
+the explosion. Squaring makes a source's pull scale with how close it is to
+clipping on its own.
+
+Calibrated against a measured run rather than by eye: a 57-EPS stretch sits at
+0.17 for half its frames and peaks at 0.41, so the target is 0.2. Ordinary play
+is untouched, a busy frame trims ~20%, sixteen simultaneous Novas hit the floor
+at 0.22 and stay individually readable.
+
+**A budget, not a cap.** Lights are collected as requests and submitted at the
+end of the frame, so an over-full frame keeps the *brightest* rather than the
+first 512 it happened to see. Selection is a histogram over the exponent of each
+light's energy, not a sort — the frame that needs the budget is by definition the
+one that can least afford an O(n log n) pass, and a 766-EPS cascade measured
+thirteen thousand requests. Arc segments are also capped at six lights per chain
+however many times it bounced, which is what took that thirteen thousand down to
+under fifteen hundred.
+
+Measured after: at 1626 requests with 1382 enemies on screen the entire light
+field costs less than the noise floor of a 14ms frame.
+
+---
+
+## D-99 · SETTLED · A starving Engine is fed; a fed one is left alone
+
+"I sometimes go for a WHILE until I get anything… if you don't get trigger +
+action combos early, the game can spiral and suddenly you're too weak to make
+loot."
+
+That is the only way a run dies before it starts, and it is not a bad build — it
+is *no* build. D-48 set the steady-state pool ratio (modifiers > stats > actions
+> triggers), which is right for a full Engine and lethal for an empty one.
+
+So the pool now leans toward whichever of Trigger/Action you are short of: ×4.2
+at none, ×2.6 at one, ×1.5 at two, ×1 at three or more. Filler cards (stats,
+capacity) drop from 30% to 12% of the offer while either count is below two —
++8% Power on a build with one live row is a card that does nothing, offered at
+the exact moment a card that does nothing is most expensive.
+
+This keys on what you **own**, not on your level. It fires exactly when a build
+is starving, it stops on its own without a cliff at level 10, and it fires again
+after a Recompile, which hands you the same problem in the middle of a run. It is
+also per-kind: three Actions and no Trigger is as dead as no Actions at all.
+
+Measured over 500 runs of the first draft: trigger-or-action went from 27% of
+cards to 56%, and at three of each the distribution is *identical* to before.
+
+One follow-on. `autoSlot` filled the first empty slot of the matching kind, which
+pairs correctly by index order right up until a drafted Program slot puts the
+rows out of step — after which a Trigger lands in row 3 and an Action in row 4,
+two dead rows where one live one was available. It now completes a half-built row
+before starting a new one.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

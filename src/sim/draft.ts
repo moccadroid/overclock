@@ -109,6 +109,30 @@ function affordable(world: World, node: NodeDef): boolean {
   return landed !== null && load <= world.budget.capacity;
 }
 
+/**
+ * §8.2 — how badly the Engine needs more of a kind, as a pool multiplier.
+ *
+ * A run only fails one way at the start, and it is not a bad build: it is *no*
+ * build. Modifiers outnumber triggers and actions in the pool by a wide margin
+ * and are weighted higher on top of that, which is right for a full Engine and
+ * lethal for an empty one. Draft five modifiers before your second action and
+ * the clear rate never gets high enough to earn the drafts that would have
+ * fixed it — the run is over about ninety seconds before it ends.
+ *
+ * So the pool leans toward whichever of the two you are short of, hard when you
+ * have none and not at all once you have three. This is deliberately a function
+ * of what you *own* rather than of your level: it fires exactly when a build is
+ * starving, and it stops on its own without a cliff at level 10. It also fires
+ * again after a Recompile, which deletes the Engine and hands you the same
+ * problem in the middle of a run.
+ */
+const HUNGER = [4.2, 2.6, 1.5, 1];
+
+function ownedCount(world: World, kind: 'trigger' | 'action'): number {
+  const key = kind === 'trigger' ? 'triggerId' : 'actionId';
+  return world.engine.programs.filter((p) => p[key] !== null).length;
+}
+
 function weightFor(world: World, node: NodeDef): number {
   const bias = getAxiom(world.config.axiomId).poolBias;
   const hue = hueOf(node);
@@ -122,11 +146,18 @@ function weightFor(world: World, node: NodeDef): number {
   // and they are the scaling that lets a build become monstrous late. Weighting
   // actions highest (an earlier correction, when the pool was starving you of
   // weapons) overshot into the opposite problem: a pile of triggers and weapons
-  // with nothing to sharpen them.
+  // with nothing to sharpen them. This is the steady-state ratio; the hunger
+  // multiplier below is what gets you *to* the steady state.
   let base = node.kind === 'modifier' ? 26 : node.kind === 'trigger' ? 7 : 13;
 
+  if (node.kind !== 'modifier') {
+    base *= HUNGER[Math.min(HUNGER.length - 1, ownedCount(world, node.kind))]!;
+  }
+
   // §8.2 — "pool weighted by what the player owns". An empty slot pulls its own
-  // kind toward you, so a half-built Engine finishes itself.
+  // kind toward you, so a half-built Engine finishes itself. This stacks with
+  // hunger on purpose: a lone Trigger with nothing to fire is the single worst
+  // state the Engine can be in, and it should not survive one draft.
   const programs = world.engine.programs;
   if (node.kind === 'action' && programs.some((p) => p.actionId === null && p.triggerId)) base *= 2;
   if (node.kind === 'trigger' && programs.some((p) => p.triggerId === null && p.actionId)) base *= 2;
@@ -160,9 +191,13 @@ export function rollDraft(world: World): DraftOffer {
     // §8.2 — capacity upgrades and (here) a Program slot are the floor that keeps
     // a draft from ever being dead.
     const slotAvailable = world.engine.programs.length < LOADBEARING.programSlotsMax;
-    // Stats sit second in the intended frequency, so the filler slice is wider.
+    // Stats sit second in the intended frequency, so the filler slice is wide —
+    // but not while the Engine is starving. +8 Power on a build with one live
+    // row is a card that does nothing, offered at the exact moment a card that
+    // does nothing is most expensive.
+    const starving = ownedCount(world, 'trigger') < 2 || ownedCount(world, 'action') < 2;
     const fillerWeight =
-      remaining.length === 0 ? 1 : world.phase === 'meltdown' ? 0.4 : 0.3;
+      remaining.length === 0 ? 1 : starving ? 0.12 : world.phase === 'meltdown' ? 0.4 : 0.3;
     const rollFiller = remaining.length === 0 || world.rng.chance(fillerWeight);
 
     if (rollFiller) {

@@ -48,6 +48,8 @@ interface WarpSource {
 const VIEW_HEIGHT = 900;
 const VIEW_WIDTH_MIN = 1200;
 const VIEW_WIDTH_MAX = 1900;
+/** Most lights one Arc contributes, however many times it actually bounced. */
+const CHAIN_LIGHT_HOPS = 6;
 
 export class Renderer {
   readonly app = new Application();
@@ -239,7 +241,7 @@ export class Renderer {
     // §16.7 — the degradation ladder pushes whatever preset the player chose
     // further than they asked, which is how Heat and Meltdown stay legible as
     // *damage to the picture* rather than as a separate effect.
-    this.emitLights(world, heat, melt);
+    this.emitLights(world, heat, melt, frameDt);
     this.post.update(
       VIEW,
       Math.max(heat * 0.6, melt),
@@ -265,75 +267,137 @@ export class Renderer {
    * Skipped entirely when the preset asks for no lighting — a Schematic run
    * should not pay for a buffer nobody samples.
    */
-  private emitLights(world: World, heat: number, melt: number): void {
+  private emitLights(world: World, heat: number, melt: number, dt: number): void {
     if (VIEW.lit <= 0 && VIEW.haze <= 0) return;
     const lights = this.lights;
     lights.begin();
 
-    // Every light here is deliberately faint.
-    //
-    // The buffer is 8-bit and additive: once a region sums past 1.0 it clips,
-    // and a clipped region has no variation left in it at all — which is exactly
-    // what turned a screen of detonations into one flat opaque disc with a
-    // banded edge. It looked cheap because it *was* cheap: a solid shape, not
-    // light. Keeping every contributor low means forty of them can overlap and
-    // still be forty distinct sources rather than one blown-out blob.
+    // Every light here is deliberately faint, and every one of them is culled
+    // against the camera. The field's exposure will pull a busy frame back on
+    // its own, but exposure spends its range on *overlap*, and a light that is
+    // off screen contributes nothing but load.
     //
     // The player is wide and dim: it is on screen every frame in the same place,
     // so a hot core would be a permanent hole in the middle of the picture.
-    lights.add(world.player.x, world.player.y, 340, PALETTE.player, 0.2 + heat * 0.12);
+    lights.point(world.player.x, world.player.y, 340, PALETTE.player, 0.2 + heat * 0.12);
 
     // Detonations and impacts. Short-lived and huge — a Nova should visibly
     // flood the room it went off in, which is most of what "excitement" means.
     for (const fx of world.fx) {
       if (!fx.alive) continue;
       const t = Math.max(0, fx.life / fx.maxLife);
+
+      // An Arc is a polyline, and lighting it as a disc at its origin throws
+      // away the only interesting thing about it. Each hop lights the air it
+      // crossed, which is what makes a chain read as something that *travelled*.
+      if (fx.kind === 'chain') {
+        const points = fx.points;
+        const hops = Math.max(1, points.length / 2 - 1);
+        // A deep Echo chain can be forty hops long, and forty hops times forty
+        // simultaneous chains is where a light *field* turns into a light *list*.
+        // Sampling every nth hop keeps the arc lit end to end at a bounded cost;
+        // the ones in between are a few pixels from a segment that is already
+        // lighting them.
+        const stride = Math.max(1, Math.ceil(hops / CHAIN_LIGHT_HOPS)) * 2;
+        for (let i = 0; i + 3 < points.length; i += stride) {
+          const x0 = points[i]!;
+          const y0 = points[i + 1]!;
+          const x1 = points[i + 2]!;
+          const y1 = points[i + 3]!;
+          if (!this.camera.isVisible((x0 + x1) / 2, (y0 + y1) / 2, 320)) continue;
+          lights.beam(x0, y0, x1, y1, 110, HUE_COLOR[fx.hue], t * t * 0.5);
+        }
+        continue;
+      }
+
+      if (!this.camera.isVisible(fx.x, fx.y, fx.radius * 2 + 160)) continue;
       // Big and brief. A detonation's light should be gone before the next one
       // lands, or a fast engine simply holds the whole arena at maximum.
-      const radius = Math.max(70, fx.radius * 1.7);
-      lights.add(fx.x, fx.y, radius * (1.3 - t * 0.3), HUE_COLOR[fx.hue], t * t * 0.4);
+      //
+      // A point, not an area, and that distinction is the difference between the
+      // old flat blob and something worth looking at. A detonation is *hottest
+      // at its centre*, and it is that gradient which survives fourteen of them
+      // overlapping — an even disc has no interior left to lose, so a wall of
+      // them is one shape. Areas are for things that genuinely are regions.
+      const radius = Math.max(70, fx.radius * 1.7) * (1.3 - t * 0.3);
+      lights.point(fx.x, fx.y, radius, HUE_COLOR[fx.hue], t * t * 0.5);
     }
 
-    // Every shot is a lamp.
+    // Every shot is a lamp, and a lamp moving at 1400 units/s covers twenty-odd
+    // units between frames. Lighting the disc it stopped in gives a dotted line
+    // of glows; lighting the streak gives a shot that draws light behind it.
     for (const proj of world.projectiles) {
-      if (!proj.alive || !this.camera.isVisible(proj.x, proj.y, 160)) continue;
-      lights.add(proj.x, proj.y, 95, HUE_COLOR[proj.hue], 0.16);
+      if (!proj.alive || !this.camera.isVisible(proj.x, proj.y, 200)) continue;
+      const speed = Math.sqrt(proj.vx * proj.vx + proj.vy * proj.vy);
+      const trail = Math.min(190, speed * 0.055);
+      if (trail < 24) {
+        lights.point(proj.x, proj.y, 95, HUE_COLOR[proj.hue], 0.16);
+      } else {
+        const k = trail / Math.max(1, speed);
+        lights.beam(
+          proj.x - proj.vx * k,
+          proj.y - proj.vy * k,
+          proj.x,
+          proj.y,
+          150,
+          HUE_COLOR[proj.hue],
+          0.13,
+        );
+      }
     }
 
     for (const zone of world.zones) {
-      if (!zone.alive) continue;
+      if (!zone.alive || !this.camera.isVisible(zone.x, zone.y, zone.radius + 200)) continue;
       const t = Math.max(0, zone.life / zone.maxLife);
-      lights.add(zone.x, zone.y, zone.radius * 1.4, HUE_COLOR[zone.hue], 0.2 * t);
+      lights.area(zone.x, zone.y, zone.radius * 1.4, HUE_COLOR[zone.hue], 0.17 * t);
     }
 
     for (const m of world.mines) {
       if (!m.alive || !this.camera.isVisible(m.x, m.y, 140)) continue;
-      lights.add(m.x, m.y, 80, HUE_COLOR[m.hue], m.arm <= 0 ? 0.16 : 0.07);
+      lights.point(m.x, m.y, 80, HUE_COLOR[m.hue], m.arm <= 0 ? 0.16 : 0.07);
     }
 
     for (const o of world.orbitals) {
       const ox = world.player.x + Math.cos(o.angle) * o.orbitRadius;
       const oy = world.player.y + Math.sin(o.angle) * o.orbitRadius;
-      lights.add(ox, oy, 85, HUE_COLOR[o.hue], 0.16);
+      lights.point(ox, oy, 85, HUE_COLOR[o.hue], 0.16);
     }
 
     // Enemies carry their own dim glow, so a horde lights the ground it walks
     // over. This is the one that makes a crowd feel like a crowd.
     for (const e of world.enemies) {
       if (!e.alive || !this.camera.isVisible(e.x, e.y, 120)) continue;
-      lights.add(e.x, e.y, e.radius * 4, HUE_COLOR[e.hue], e.flash > 0 ? 0.35 : 0.09);
+      lights.point(e.x, e.y, e.radius * 4, HUE_COLOR[e.hue], e.flash > 0 ? 0.35 : 0.09);
+
+      // §10.2 Lancer — the corridor is the whole threat, so it is the one enemy
+      // telegraph that lights the room. It brightens as the charge completes,
+      // which puts the warning in the light rather than only in the line.
+      if (e.beamActive > 0) {
+        const range = TUNABLE.lancerBeamRange;
+        const charge = 1 - e.beamActive / (getEnemy(e.defId).windup ?? 0.9);
+        lights.beam(
+          e.x,
+          e.y,
+          e.x + Math.cos(e.facing) * range,
+          e.y + Math.sin(e.facing) * range,
+          90,
+          HUE_COLOR[e.hue],
+          0.05 + charge * charge * 0.3,
+        );
+      }
     }
 
     for (const item of world.pickups) {
       if (!item.alive || !this.camera.isVisible(item.x, item.y, 90)) continue;
       const colour = item.kind === 'xp' ? PALETTE.xp : HUE_COLOR[item.hue];
-      lights.add(item.x, item.y, 48, colour, 0.1);
+      lights.point(item.x, item.y, 48, colour, 0.1);
     }
 
     // §13.2 — Meltdown lights the whole arena from nowhere, which is the world
-    // overexposing rather than any object getting brighter.
+    // overexposing rather than any object getting brighter. An area, not a
+    // point: the whole screen is lit, not a lamp standing where the player is.
     if (melt > 0) {
-      lights.add(world.player.x, world.player.y, 2200, 0xffb000, melt * 0.18);
+      lights.area(world.player.x, world.player.y, 2200, 0xffb000, melt * 0.16);
     }
 
     const scale = this.scale;
@@ -341,7 +405,7 @@ export class Renderer {
     const offsetY = (this.app.screen.height - VIEW_HEIGHT * scale) / 2 + this.shakeY;
     const worldX = this.viewWidth / 2 - this.camera.x;
     const worldY = VIEW_HEIGHT / 2 - this.camera.y;
-    lights.render(scale, offsetX + worldX * scale, offsetY + worldY * scale);
+    lights.render(scale, offsetX + worldX * scale, offsetY + worldY * scale, dt);
   }
 
   /** Turn the sim's death list into decomposing line segments (§17.1). */

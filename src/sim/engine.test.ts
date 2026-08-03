@@ -193,6 +193,26 @@ describe('Engine structure', () => {
     expect(e.programs[0]!.modifierIds[0]).toBe('amplify');
   });
 
+  it('a drafted node completes a half-built row before starting a new one', () => {
+    // Index order gets this right on its own until the rows go out of step —
+    // which a drafted Program slot does. Leaving a lone Trigger in one row and a
+    // lone Action in the next is two dead rows where one live one was there for
+    // the taking, and it is exactly how an early run stops being able to kill
+    // fast enough to earn the drafts that would have fixed it.
+    const e = new Engine();
+    e.programs[1]!.actionId = 'bolt';
+    e.programs[2]!.triggerId = 'on_kill';
+
+    expect(e.autoSlot('clock')).toBe(1);
+    expect(e.autoSlot('nova')).toBe(2);
+    expect(e.compiled[1]!.live).toBe(true);
+    expect(e.compiled[2]!.live).toBe(true);
+
+    // With nothing to complete it still fills in index order, so the Engine
+    // stays readable top to bottom.
+    expect(e.autoSlot('on_hit')).toBe(0);
+  });
+
   it('scrapping refunds Cycles and grants permanent global output (§5.7)', () => {
     const e = new Engine();
     e.autoSlot('clock');

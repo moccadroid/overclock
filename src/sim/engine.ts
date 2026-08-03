@@ -331,16 +331,34 @@ export class Engine {
    * Auto-slot a drafted node into the first compatible empty slot (§8.3).
    * Returns the program index it landed in, or null if there was no room.
    */
+  /**
+   * The lowest row where `fits`, preferring one where `prefer` also holds.
+   * Deterministic in both passes: index order, never "nearest" or "newest".
+   */
+  private firstSlot(
+    fits: (p: Program) => boolean,
+    prefer: (p: Program) => boolean,
+  ): number {
+    const paired = this.programs.findIndex((p) => fits(p) && prefer(p));
+    return paired >= 0 ? paired : this.programs.findIndex(fits);
+  }
+
   autoSlot(nodeId: string): number | null {
+    // A Trigger or an Action completes a half-built row before it starts a new
+    // one. Index order alone gets this right until a Program slot is drafted in
+    // the middle of the sequence, after which it can leave a lone Trigger in row
+    // 3 and a lone Action in row 4 — two dead rows where one live one was
+    // available, and §17.3's promise that a drafted node fires within two
+    // seconds quietly broken.
     if (TRIGGER_BY_ID.has(nodeId)) {
-      const i = this.programs.findIndex((p) => p.triggerId === null);
+      const i = this.firstSlot((p) => p.triggerId === null, (p) => p.actionId !== null);
       if (i < 0) return null;
       this.programs[i]!.triggerId = nodeId;
       this.recompile();
       return i;
     }
     if (ACTION_BY_ID.has(nodeId)) {
-      const i = this.programs.findIndex((p) => p.actionId === null);
+      const i = this.firstSlot((p) => p.actionId === null, (p) => p.triggerId !== null);
       if (i < 0) return null;
       this.programs[i]!.actionId = nodeId;
       this.recompile();

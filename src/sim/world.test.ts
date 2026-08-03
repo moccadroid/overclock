@@ -7,6 +7,7 @@ import { Rng } from './rng';
 import { botInput } from '../harness/bot';
 import { applyDraft, purgeCard, rollDraft } from './draft';
 import { inertFields } from './engine';
+import { NODE_BY_ID } from '../content/index';
 
 /** Run with the harness pilot, which actually collects fuel and XP. */
 function runPiloted(world: World, seconds: number): void {
@@ -342,6 +343,75 @@ describe('Recompile (GDD §9)', () => {
       }
     }
     expect([...seen].sort()).toEqual(['purge', 'reroll']);
+  });
+
+  it('§8.2 — a starving Engine is fed, and a fed one is left alone', () => {
+    // The only way a run dies before it starts: you draft five modifiers before
+    // your second Action, the clear rate never gets high enough to earn the
+    // drafts that would have fixed it, and the run is over ninety seconds before
+    // it ends. The pool leans toward whichever of Trigger/Action you are short
+    // of — and stops leaning entirely once you have three of each, which is the
+    // half of this that keeps the late-run economy the one that was tuned.
+    const share = (rows: [string | null, string | null][]): number => {
+      let core = 0;
+      let total = 0;
+      for (let seed = 0; seed < 240; seed++) {
+        const w = new World({ seed: `hunger-${seed}`, axiomId: 'ignition' });
+        w.engine.programs.forEach((p, i) => {
+          p.triggerId = rows[i]?.[0] ?? null;
+          p.actionId = rows[i]?.[1] ?? null;
+          p.modifierIds = p.modifierIds.map(() => null);
+        });
+        w.engine.recompile();
+        w.syncBudget();
+        for (const card of rollDraft(w).cards) {
+          total++;
+          if (card.kind !== 'node') continue;
+          const kind = NODE_BY_ID.get(card.nodeId)!.kind;
+          if (kind !== 'modifier') core++;
+        }
+      }
+      return core / total;
+    };
+
+    const hungry = share([['clock', 'bolt']]);
+    const fed = share([
+      ['clock', 'bolt'],
+      ['on_hit', 'arc'],
+      ['on_kill', 'nova'],
+    ]);
+
+    // Run one has to hand you a Trigger or an Action about half the time.
+    expect(hungry).toBeGreaterThan(0.45);
+    // And three rows in, it is back to the modifier-heavy pool §8.2 describes.
+    expect(fed).toBeLessThan(0.32);
+    expect(hungry).toBeGreaterThan(fed * 1.7);
+  });
+
+  it('§8.2 — the pull is per-kind, not a blanket "more nodes"', () => {
+    // Three Actions and no Trigger is exactly as dead as no Actions at all, and
+    // a rule that counted nodes rather than kinds would keep handing you the one
+    // you already have three of.
+    let triggers = 0;
+    let actions = 0;
+    for (let seed = 0; seed < 240; seed++) {
+      const w = new World({ seed: `lopsided-${seed}`, axiomId: 'ignition' });
+      const only = ['bolt', 'arc', 'nova'];
+      w.engine.programs.forEach((p, i) => {
+        p.triggerId = null;
+        p.actionId = only[i] ?? null;
+        p.modifierIds = p.modifierIds.map(() => null);
+      });
+      w.engine.recompile();
+      w.syncBudget();
+      for (const card of rollDraft(w).cards) {
+        if (card.kind !== 'node') continue;
+        const kind = NODE_BY_ID.get(card.nodeId)!.kind;
+        if (kind === 'trigger') triggers++;
+        if (kind === 'action') actions++;
+      }
+    }
+    expect(triggers).toBeGreaterThan(actions * 1.5);
   });
 });
 
