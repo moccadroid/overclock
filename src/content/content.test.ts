@@ -16,7 +16,7 @@ const EVENT_KINDS = [
   'wave',
   'overheat',
   'convert',
-  'lull',
+  'idle',
   'threshold',
   'depth',
   'sweep',

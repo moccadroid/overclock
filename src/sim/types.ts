@@ -16,8 +16,8 @@ export type EventType =
   | 'wave'
   | 'overheat'
   | 'convert'
-  /** Nothing has died for a while — the arena went quiet. */
-  | 'lull'
+  /** A Program has been idle: it has not fired for a couple of seconds. */
+  | 'idle'
   /** Heat crossed into a new Instability tier, on the way up. */
   | 'threshold'
   /** A cascade reached the depth where Heat starts charging in earnest. */
@@ -266,6 +266,14 @@ export interface ArenaDef {
 }
 
 export interface ModifierDef extends PoolWeighted {
+  /**
+   * The field this modifier exists for. If the Action ignores it, the modifier
+   * is inert — whatever else its ops happen to touch.
+   *
+   * Without this, a card that grants X and costs Y reads as useful on an Action
+   * that ignores X, because Y still lands. See inertFields.
+   */
+  keyField?: FireField;
   id: string;
   kind: 'modifier';
   name: string;

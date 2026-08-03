@@ -382,6 +382,10 @@ Three cards. Each card is one of:
 
 Rarity tiers (Common / Refined / Prototype) scale node numbers, never change behavior. Behavior differences are always separate nodes — legibility rule.
 
+**Card text states the mechanic and nothing else.** Numbers, units, and the exact condition; no jokes, no rhetorical questions, no editorialising about how good the card is. "Fires when this row has not fired for 2s. x30 output" is the register. If a card needs a sentence of justification to sound appealing, the card is the problem, not the copy.
+
+**A modifier declares the field it is for** (`keyField`), and is inert wherever that field is ignored — whatever else its ops touch. Fork grants +2 chain jumps and costs 20% output; on a Bolt the jumps did nothing and the penalty did, so the draft was offering a card that was *strictly a downside*. A recorded run took it twice with no chain in the Engine. The same rule catches the mirror-image bug in Slug, whose speed penalty is meaningless on a Nova and therefore read as a free +90% output.
+
 ### 8.3 Draft economy
 
 The tools are the player's grip on the pool, and the first version had none. Measured: two rerolls and one purge a run, tool cards at 2% of offers, and a Purge that removed **one node from a pool of 42** — half a percentage point of the modifier slice, about one card changed over a whole run. Not a weak tool; a rounding error with a button.

@@ -124,11 +124,9 @@ export const TUNABLE = {
 
   // ---- §5.3 the new triggers ----
   /**
-   * On Lull — how long the arena must stay quiet. Two seconds is long enough
-   * that ordinary play never sees it and short enough that a stalled build gets
-   * its answer within one dodge.
+   * On Idle — how long a row must go without firing before it fires itself.
    */
-  lullSeconds: 2,
+  idleSeconds: 2,
   /** On Depth — the cascade depth that counts as deep. Matches heatFreeDepth+3. */
   onDepthAt: 5,
 
@@ -306,7 +304,22 @@ export const TUNABLE = {
   cacheInterval: 75,
   cacheFromTime: 45,
   /** How big the menagerie is, as a share of the director's density target. */
-  cacheWaveFraction: 0.85,
+  cacheWaveFraction: 1.15,
+  /**
+   * The ring the menagerie arrives in, around the Cache itself. Wide, because
+   * everything landing on top of you is a shove rather than a fight, and it
+   * should read as the *place* waking up.
+   */
+  cacheRingMin: 380,
+  cacheRingMax: 900,
+  /**
+   * What "hardened" is worth. A Cache's wave is opt-in difficulty, so it is the
+   * one place in the game where a straight multiplier is honest: the player
+   * pressed the button, the card is already in their hand, and the elite version
+   * of a wave has to be *significantly* stronger or the price was fake.
+   */
+  hardenedHp: 4,
+  hardenedDamage: 1.6,
 
   // ---- §12 director ----
   /** Threat reaches ~24 by the 20:00 Meltdown line — the scale wave bands use. */

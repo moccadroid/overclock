@@ -35,6 +35,7 @@ export type StatKind =
   | 'integrity'
   | 'power'
   | 'reach'
+  | 'dashHaste'
   | 'coolant'
   | 'capacitor'
   | 'salvage'
@@ -57,23 +58,23 @@ export const STAT_CARDS: Record<StatKind, { title: string; body: string; apply: 
   {
     crit: {
       title: 'Precision',
-      body: '+4% crit chance. Crits hit for double and fire On Crit.',
+      body: '+10% crit chance. A crit deals double damage and fires On Crit.',
       apply: (w) => {
-        w.bonuses.crit += 0.04;
+        w.bonuses.crit += 0.1;
       },
     },
     magnet: {
       title: 'Collector',
-      body: '+30% pickup radius.',
+      body: '+50% pickup radius.',
       apply: (w) => {
-        w.bonuses.magnet += 0.3;
+        w.bonuses.magnet += 0.5;
       },
     },
     speed: {
       title: 'Servo',
-      body: '+8% move speed.',
+      body: '+15% move speed.',
       apply: (w) => {
-        w.bonuses.speed += 0.08;
+        w.bonuses.speed += 0.15;
       },
     },
     // The scaling that lets a deliberately weak Action become monstrous by the
@@ -81,9 +82,9 @@ export const STAT_CARDS: Record<StatKind, { title: string; body: string; apply: 
     // gets its ×3. It multiplies *everything*, so it stays small per card.
     power: {
       title: 'Gain',
-      body: '+8% damage on every Action you own.',
+      body: '+20% damage on every Action you own.',
       apply: (w) => {
-        w.bonuses.power += 0.08;
+        w.bonuses.power += 0.2;
       },
     },
     // §7.x Reach — the stat that moves you.
@@ -96,9 +97,9 @@ export const STAT_CARDS: Record<StatKind, { title: string; body: string; apply: 
     // since standing further away is also standing alone.
     reach: {
       title: 'Reach',
-      body: '+25% range on everything: shots fly further, beams and chains stretch.',
+      body: '+35% range. Projectile flight distance, beam length, chain jump distance.',
       apply: (w) => {
-        w.bonuses.reach += 0.25;
+        w.bonuses.reach += 0.35;
       },
     },
 
@@ -107,23 +108,33 @@ export const STAT_CARDS: Record<StatKind, { title: string; body: string; apply: 
     // own. These are the two dials.
     coolant: {
       title: 'Coolant',
-      body: '+2 Heat vented per second, always.',
+      body: '+3 Heat vented per second. Base venting is 8.',
       apply: (w) => {
-        w.bonuses.coolant += 2;
+        w.bonuses.coolant += 3;
       },
     },
     capacitor: {
       title: 'Capacitor',
-      body: '+6 Cycle capacity for every Program row you have not filled.',
+      body: '+8 Cycle capacity for each Program row that is not live.',
       apply: (w) => {
-        w.bonuses.capacitor += 6;
+        w.bonuses.capacitor += 8;
       },
     },
+    // §4.1 — the one stat that buys a *verb*. Dash is the whole of the player's
+    // defensive kit and its cooldown has never been touchable by anything.
+    dashHaste: {
+      title: 'Capacitor Bank',
+      body: '-25% dash cooldown, and +0.05s of dash i-frames.',
+      apply: (w) => {
+        w.bonuses.dashHaste += 0.25;
+      },
+    },
+
     // §8.3 — a stat that pays for using the draft economy, so narrowing the pool
     // is a build rather than housekeeping.
     salvage: {
       title: 'Salvage',
-      body: 'Every Purge from here on also permanently adds +4% output.',
+      body: 'Each Purge also adds +4% output permanently, on top of the +4% a Purge already gives.',
       apply: (w) => {
         w.bonuses.salvage += 1;
       },
@@ -132,41 +143,41 @@ export const STAT_CARDS: Record<StatKind, { title: string; body: string; apply: 
     // game buys Integrity; this one buys *play*.
     momentum: {
       title: 'Momentum',
-      body: '+2% output per second since you were last hurt, up to +40%. Resets when you are.',
+      body: '+3% output for each second since you were last hurt, up to +45%. Resets to zero when you take damage.',
       apply: (w) => {
-        w.bonuses.momentum += 0.02;
+        w.bonuses.momentum += 0.03;
       },
     },
 
     integrity: {
       title: 'Plating',
-      body: '+25 max Integrity, and repairs that much now.',
+      body: '+40 max Integrity. Heals 40 now.',
       apply: (w) => {
-        w.player.maxIntegrity += 25;
-        w.player.integrity = Math.min(w.player.maxIntegrity, w.player.integrity + 25);
+        w.player.maxIntegrity += 40;
+        w.player.integrity = Math.min(w.player.maxIntegrity, w.player.integrity + 40);
       },
     },
 
     // ---- the class stats. Worthless to a build that is not focused. --------
     travels: {
       title: 'Ballistics',
-      body: '+1 Pierce and +20% projectile speed on everything with flight.',
+      body: '+1 Pierce and +20% projectile speed. Projectiles only.',
       apply: (w) => {
         w.bonuses.travels += 1;
       },
     },
     area: {
       title: 'Yield',
-      body: '+22% radius on every burst, field, mine and shove.',
+      body: '+30% radius on bursts, fields, mines, vortices and shoves.',
       apply: (w) => {
-        w.bonuses.area += 0.22;
+        w.bonuses.area += 0.3;
       },
     },
     lingers: {
       title: 'Half-Life',
-      body: '+30% duration on everything that has one.',
+      body: '+40% duration on fields, mines, orbitals, vortices and buffs.',
       apply: (w) => {
-        w.bonuses.lingers += 0.3;
+        w.bonuses.lingers += 0.4;
       },
     },
   };
@@ -384,6 +395,8 @@ export function rollDraft(world: World): DraftOffer {
           'reach',
           'reach',
           'reach',
+          'dashHaste',
+          'dashHaste',
           'coolant',
           'capacitor',
           'salvage',
@@ -459,7 +472,9 @@ export function describeCard(card: DraftCard): {
   const node = NODE_BY_ID.get(card.nodeId);
   if (!node) return { title: card.nodeId, body: '', tag: '?' };
   const cost =
-    node.kind === 'modifier' ? `x${node.cycleMult} Cycles` : `${node.cycleCost} Cycles`;
+    node.kind === 'modifier'
+      ? `x${node.cycleMult} Cycles`
+      : `${node.cycleCost} ${node.cycleCost === 1 ? 'Cycle' : 'Cycles'}`;
 
   // §5.5 — the behaviour glyphs, on the card, before you take it.
   //

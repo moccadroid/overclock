@@ -74,6 +74,8 @@ export interface Enemy extends SpatialItem {
   phased: boolean;
   /** Facing, for the Bulwark's shield arc and the Lancer's beam. */
   facing: number;
+  /** §12.4 — came out of a Cache: tougher, and it hits harder. */
+  hardened?: boolean;
   /** Interceptor: fractional progress toward the next meal (area hits). */
   mealProgress?: number;
   /** Interceptor: how many projectiles it has eaten. */
@@ -320,14 +322,14 @@ export const POIS: readonly PoiDef[] = [
 ];
 
 /** What channelling one does. One entry per POI, and nothing else to touch. */
-const POI_EFFECTS: Record<TerminalKind, (w: World) => void> = {
+const POI_EFFECTS: Record<TerminalKind, (w: World, t: Terminal) => void> = {
   beacon: (w) => {
     w.stats.beaconsChannelled++;
     w.threat += TUNABLE.beaconThreatBump;
     w.spawnWaveNow(true);
     w.mark('beacon', 'beacon');
   },
-  cache: (w) => w.openCacheNow(),
+  cache: (w, t) => w.openCacheNow(t.x, t.y),
   // Does not fire immediately: the player chooses how much to sacrifice.
   recompile: (w) => {
     w.pendingRecompileChoice = true;
@@ -638,6 +640,7 @@ export class World {
     capacitor: 0,
     salvage: 0,
     momentum: 0,
+    dashHaste: 0,
   };
 
   /** Class-stat multipliers, read at the point of use so they cannot go stale. */
@@ -680,9 +683,8 @@ export class World {
   private consolidateTimer = 0;
   /** Seconds until another Magnet may drop. See maybeDropMagnet. */
   private magnetCooldown = 0;
-  /** §5.3 On Lull — seconds since anything last died. */
-  private quietFor = 0;
-  private killsThisTick = 0;
+  /** §5.3 On Enter — was the player in a hazard last tick? */
+  private wasInHazard = false;
   /** §5.3 On Threshold — the Heat tier last seen, so only climbs fire. */
   private lastTier = 0;
   /** §8.2 Momentum — seconds since the player was last hurt. */
@@ -870,26 +872,20 @@ export class World {
 
     // §11.2 — inside a Suppressor's zone the player's Triggers do not fire.
     // Actions already in flight resolve; nothing new starts.
-    const wasSuppressed = this.suppressedNow;
+    const wasInHazard = this.wasInHazard;
     this.suppressedNow = this.suppressed;
     // §5.3 On Enter — fired on the *crossing*, which is the one instant inside a
     // suppression field where a Trigger still works. Walking in is a decision;
     // this is what pays for it.
-    if (this.suppressedNow && !wasSuppressed) {
+    // §5.3 On Enter — crossing into *any* hazard. A trigger that only fires on
+    // one enemy type is a card nobody takes; Containment (§11.4) is the same
+    // shape of danger and the same moment of decision.
+    const inHazard = this.suppressedNow || this.insideContainment;
+    if (inHazard && !wasInHazard) {
       this.emit({ type: 'enter', depth: 0, x: this.player.x, y: this.player.y });
     }
+    this.wasInHazard = inHazard;
 
-    // §5.3 On Lull — the arena went quiet. Kills reset it, so this fires when a
-    // build has run out of things to feed on, which is exactly when a build that
-    // feeds on kills has nothing.
-    this.sinceHurt += dt;
-    this.quietFor = this.killsThisTick > 0 ? 0 : this.quietFor + dt;
-    this.killsThisTick = 0;
-    this.deepThisTick.clear();
-    if (this.quietFor >= TUNABLE.lullSeconds) {
-      this.quietFor = 0;
-      this.emit({ type: 'lull', depth: 0, x: this.player.x, y: this.player.y });
-    }
 
     // §5.3 On Threshold — Heat crossing a tier, climbing only. Cooling back down
     // through a tier is relief, not an event.
@@ -979,7 +975,26 @@ export class World {
   private advanceClocks(dt: number): void {
     for (let i = 0; i < this.engine.programs.length; i++) {
       const compiled = this.engine.compiled[i]!;
-      if (!compiled.live || compiled.interval <= 0) continue;
+      if (!compiled.live) continue;
+
+      // §5.3 On Idle — a row that has gone quiet fires itself.
+      //
+      // This started life as "On Lull: nothing has died for two seconds", which
+      // is a condition a player can neither see nor cause, on a card they would
+      // therefore never take. Measured: offered four times across two runs and
+      // refused every time. As a *per-row* idle it is a card with a use on every
+      // build — the safety net under a Trigger that has stopped feeding.
+      const program = this.engine.programs[i]!;
+      if (program.triggerId && TRIGGER_BY_ID.get(program.triggerId)?.listens === 'idle') {
+        const quiet = this.time - (this.engine.lastFired[i] ?? -Infinity);
+        if (quiet >= TUNABLE.idleSeconds) {
+          this.engine.lastFired[i] = this.time;
+          this.fireProgram(i, 0, this.player.x, this.player.y);
+        }
+        continue;
+      }
+
+      if (compiled.interval <= 0) continue;
       // §5.4 Surge speeds up every Clock the player owns while it is active.
       const interval = compiled.interval / (1 + this.surgeRate);
       this.engine.clocks[i] = (this.engine.clocks[i] ?? 0) + dt;
@@ -1800,7 +1815,7 @@ export class World {
   }
 
   private completeTerminal(t: Terminal): void {
-    POI_EFFECTS[t.kind](this);
+    POI_EFFECTS[t.kind](this, t);
   }
 
   /**
@@ -1816,8 +1831,8 @@ export class World {
    * this sharp without being unfair.
    */
   /** Called by POI_EFFECTS. See openCache. */
-  openCacheNow(): void {
-    this.openCache();
+  openCacheNow(x: number, y: number): void {
+    this.openCache(x, y);
   }
 
   /** Called by POI_EFFECTS. See spawnWave. */
@@ -1825,7 +1840,7 @@ export class World {
     this.spawnWave(enriched);
   }
 
-  private openCache(): void {
+  private openCache(cx = this.player.x, cy = this.player.y): void {
     this.pendingDrafts = Math.min(TUNABLE.maxQueuedDrafts, this.pendingDrafts + 1);
     this.stats.cachesOpened++;
     if (!this.composition) this.rotateComposition();
@@ -1838,12 +1853,16 @@ export class World {
         composition.entries,
         composition.entries.map((e) => e.count),
       );
-      const origin = this.pickSpawnOrigin();
+      // Around the Cache, in a wide ring, rather than from the usual edge
+      // origins. It should read as the *place* waking up — you are standing in
+      // the middle of what you just opened, which is the whole drama of it.
+      const a = (i / count) * Math.PI * 2 + this.rng.next() * 0.4;
+      const r = this.rng.range(TUNABLE.cacheRingMin, TUNABLE.cacheRingMax);
       this.queueSpawn(
         this.harden(entry.enemy),
-        origin.x,
-        origin.y,
-        entry.spread,
+        clamp(cx + pcos(a) * r, 40, this.arena.width - 40),
+        clamp(cy + psin(a) * r, 40, this.arena.height - 40),
+        60,
         this.rng.next() * 0.8,
         true,
         true,
@@ -2288,6 +2307,17 @@ export class World {
     return n;
   }
 
+  /** §11.4 — is the player standing in an active Containment shape? */
+  get insideContainment(): boolean {
+    for (const c of this.containment) {
+      if (!c.alive || c.age < c.telegraph) continue;
+      const dx = this.player.x - c.x;
+      const dy = this.player.y - c.y;
+      if (dx * dx + dy * dy < c.radius * c.radius) return true;
+    }
+    return false;
+  }
+
   /** §11.2 — is the player inside a Suppressor's zone? Triggers do not fire there. */
   get suppressed(): boolean {
     for (const e of this.enemies) {
@@ -2427,6 +2457,7 @@ export class World {
     if (def.deathBlast) {
       const blast = def.deathBlast;
       this.pushFx('burst', enemy.hue, enemy.x, enemy.y, blast.radius, [], 0.3);
+      this.emit({ type: 'glutton', depth, x: enemy.x, y: enemy.y, hue: enemy.hue });
       const dx = this.player.x - enemy.x;
       const dy = this.player.y - enemy.y;
       const reach = blast.radius + TUNABLE.playerRadius;
@@ -2443,6 +2474,7 @@ export class World {
 
     if (enemy.affixes.includes('volatile')) {
       this.pushFx('burst', enemy.hue, enemy.x, enemy.y, TUNABLE.affixVolatileRadius, [], 0.3);
+      this.emit({ type: 'glutton', depth, x: enemy.x, y: enemy.y, hue: enemy.hue });
       const dx = this.player.x - enemy.x;
       const dy = this.player.y - enemy.y;
       const reach = TUNABLE.affixVolatileRadius + TUNABLE.playerRadius;
@@ -2499,7 +2531,6 @@ export class World {
       }
     }
 
-    this.killsThisTick++;
     this.emit({
       type: 'kill',
       depth: depth + 1,
@@ -2566,8 +2597,10 @@ export class World {
 
     if (input.dash && p.dashCooldown <= 0 && p.dashTimer <= 0) {
       p.dashTimer = TUNABLE.dashDuration;
-      p.dashCooldown = TUNABLE.dashCooldown;
-      p.iframes = Math.max(p.iframes, TUNABLE.dashIFrames);
+      // §4.1 — Capacitor Bank. Multiplicative so stacking it has diminishing
+      // returns rather than reaching zero.
+      p.dashCooldown = TUNABLE.dashCooldown / (1 + this.bonuses.dashHaste);
+      p.iframes = Math.max(p.iframes, TUNABLE.dashIFrames + this.bonuses.dashHaste * 0.2);
       this.emit({ type: 'dash', depth: 0, x: p.x, y: p.y });
     }
 
@@ -2809,7 +2842,7 @@ export class World {
       return;
     }
     if (def.contactDamage > 0) {
-      this.hurtPlayer(def.contactDamage, {
+      this.hurtPlayer(def.contactDamage * (e.hardened ? TUNABLE.hardenedDamage : 1), {
         id: def.id,
         label: def.name,
         enemyId: def.id,
@@ -3480,6 +3513,13 @@ export class World {
         if (s.hardened) {
           const pool: EliteAffix[] = ['volatile', 'phasing', 'anchored'];
           e.affixes.push(pool[this.rng.int(pool.length)]!);
+          // Opt-in difficulty is the one place a straight multiplier is honest:
+          // the player pressed the button and already holds the card. Reported
+          // as "everything died instantly" the first time, because a hardened
+          // Mote was still a one-hit Mote.
+          e.maxHp *= TUNABLE.hardenedHp;
+          e.hp = e.maxHp;
+          e.hardened = true;
         }
       }
     }

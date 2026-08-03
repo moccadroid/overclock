@@ -6,3 +6,4 @@ dist/
 coverage/
 harness-out/
 runs/
+firebase-debug.log

@@ -7,7 +7,7 @@
     "listens": "clock",
     "interval": 1.2,
     "payload": 12,
-    "description": "Every 1.2s, reliably, and it hits hard because it is so rare. The metronome everything else is measured against."
+    "description": "Fires every 1.2s. x12 output."
   },
   {
     "id": "on_hit",
@@ -16,7 +16,7 @@
     "cycleCost": 1,
     "listens": "hit",
     "payload": 0.35,
-    "description": "Whenever your effects damage an enemy. Constant — measured at 188 a second — so each one is worth a fraction."
+    "description": "Fires when any of your effects damages an enemy. x0.35 output. Fires about 190 times a second in a busy run."
   },
   {
     "id": "on_kill",
@@ -25,7 +25,7 @@
     "cycleCost": 1,
     "listens": "kill",
     "payload": 1.6,
-    "description": "Whenever an enemy dies to your effects. The classic cascade seed."
+    "description": "Fires when an enemy dies to your effects. x1.6 output."
   },
   {
     "id": "on_pickup",
@@ -34,7 +34,7 @@
     "cycleCost": 1,
     "listens": "pickup",
     "payload": 4,
-    "description": "Whenever you collect XP. Turns movement into firepower, and a Magnet into a barrage."
+    "description": "Fires when you collect an XP shard. x4 output. A Magnet sweep fires it once per shard."
   },
   {
     "id": "on_crit",
@@ -43,7 +43,7 @@
     "cycleCost": 1,
     "listens": "crit",
     "payload": 3,
-    "description": "When a hit crits. Rare, so it hits x3. Scales hard with crit chance."
+    "description": "Fires when one of your hits crits. x3 output. Base crit chance is 10%."
   },
   {
     "id": "on_dash",
@@ -52,7 +52,7 @@
     "cycleCost": 2,
     "listens": "dash",
     "payload": 20,
-    "description": "When you dash. x20 on a 3s cooldown — mobility as a weapon."
+    "description": "Fires when you dash. x20 output."
   },
   {
     "id": "on_wound",
@@ -61,7 +61,7 @@
     "cycleCost": 2,
     "listens": "wound",
     "payload": 40,
-    "description": "When you take damage. Rare and unwanted, so it pays x40. Pairs with Leech."
+    "description": "Fires when you take damage. x40 output."
   },
   {
     "id": "on_wave",
@@ -70,7 +70,7 @@
     "cycleCost": 3,
     "listens": "wave",
     "payload": 50,
-    "description": "When a new composition arrives. Once or twice a minute, x50. The burst archetype."
+    "description": "Fires when a new wave composition arrives, roughly every 40s. x50 output."
   },
   {
     "id": "on_overheat",
@@ -79,7 +79,7 @@
     "cycleCost": 3,
     "listens": "overheat",
     "payload": 60,
-    "description": "When Heat hits 100. x60 — weaponises the penalty. Build around it."
+    "description": "Fires when Heat reaches 100. x60 output."
   },
   {
     "id": "on_convert",
@@ -88,16 +88,16 @@
     "cycleCost": 2,
     "listens": "convert",
     "payload": 6,
-    "description": "When a conversion resolves. x6 — the economy-engine payoff."
+    "description": "Fires when a Convert action resolves. x6 output."
   },
   {
-    "id": "on_lull",
-    "name": "On Lull",
+    "id": "on_idle",
+    "name": "On Idle",
     "kind": "trigger",
     "cycleCost": 2,
-    "listens": "lull",
+    "listens": "idle",
     "payload": 30,
-    "description": "When nothing has died for two seconds. x30 — the only Trigger that pays you for a quiet arena, and the answer to a build that stalls."
+    "description": "Fires when THIS row has not fired for 2s. x30 output. A metronome that only runs when the rest of the row is idle."
   },
   {
     "id": "on_threshold",
@@ -106,7 +106,7 @@
     "cycleCost": 2,
     "listens": "threshold",
     "payload": 25,
-    "description": "When Heat crosses into a new Instability tier, climbing. x25 — Heat as a source instead of only a tax."
+    "description": "Fires when Heat crosses into a higher Instability tier: 40, 70 or 100. x25 output."
   },
   {
     "id": "on_depth",
@@ -115,7 +115,7 @@
     "cycleCost": 3,
     "listens": "depth",
     "payload": 14,
-    "description": "When one of your cascades runs five deep. x14 — the Engine listening to itself."
+    "description": "Fires when one of your cascades reaches depth 5. x14 output. Once per row per tick."
   },
   {
     "id": "on_sweep",
@@ -124,7 +124,7 @@
     "cycleCost": 2,
     "listens": "sweep",
     "payload": 45,
-    "description": "When a Magnet pulls the floor in. x45, once every minute or two. Rare, enormous, and you choose when."
+    "description": "Fires when you collect a Magnet. x45 output."
   },
   {
     "id": "on_glutton",
@@ -132,8 +132,8 @@
     "kind": "trigger",
     "cycleCost": 2,
     "listens": "glutton",
-    "payload": 35,
-    "description": "When a gorged Interceptor detonates. x35 — your own projectile spam, paid back."
+    "payload": 18,
+    "description": "Fires when any enemy detonates: a gorged Interceptor, a Volatile elite, or a Charged variant. x18 output."
   },
   {
     "id": "on_enter",
@@ -141,7 +141,7 @@
     "kind": "trigger",
     "cycleCost": 2,
     "listens": "enter",
-    "payload": 30,
-    "description": "When you cross into a suppression field. x30 — it fires as you enter, before the field switches you off."
+    "payload": 22,
+    "description": "Fires when you enter a hazard: a suppression field or a Containment boundary. x22 output."
   }
 ]

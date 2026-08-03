@@ -35,7 +35,7 @@ const EVENT_TYPES = [
   'wave',
   'overheat',
   'convert',
-  'lull',
+  'idle',
   'threshold',
   'depth',
   'sweep',
@@ -186,6 +186,8 @@ const modifierSchema: Schema = {
       },
     },
   },
+  /** The field the card is *for*. See inertFields. */
+  keyField: { type: 'string' },
   description: { type: 'string', required: true },
   poolWeight: { type: 'number', min: 0 },
 };

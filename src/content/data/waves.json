@@ -326,5 +326,172 @@
       }
     ],
     "description": "Cascade fuel at scale."
+  },
+  {
+    "id": "ghost_tide",
+    "minThreat": 9,
+    "maxThreat": 99,
+    "weight": 8,
+    "entries": [
+      {
+        "enemy": "mote_ghost",
+        "count": 10,
+        "spread": 260
+      },
+      {
+        "enemy": "drifter",
+        "count": 3,
+        "spread": 200
+      }
+    ],
+    "description": "Half of it is not there when you fire."
+  },
+  {
+    "id": "powder_keg",
+    "minThreat": 7,
+    "maxThreat": 99,
+    "weight": 8,
+    "entries": [
+      {
+        "enemy": "mote_charged",
+        "count": 9,
+        "spread": 300
+      },
+      {
+        "enemy": "charger_charged",
+        "count": 2,
+        "spread": 220
+      }
+    ],
+    "description": "Everything here detonates. Kill it at range."
+  },
+  {
+    "id": "shield_wall",
+    "minThreat": 6,
+    "maxThreat": 99,
+    "weight": 8,
+    "entries": [
+      {
+        "enemy": "drifter_shielded",
+        "count": 4,
+        "spread": 180
+      },
+      {
+        "enemy": "mote_shielded",
+        "count": 8,
+        "spread": 260
+      }
+    ],
+    "description": "A front you cannot shoot through. Go around."
+  },
+  {
+    "id": "brood_nest",
+    "minThreat": 6,
+    "maxThreat": 99,
+    "weight": 7,
+    "entries": [
+      {
+        "enemy": "drifter_brood",
+        "count": 5,
+        "spread": 240
+      },
+      {
+        "enemy": "mote",
+        "count": 6,
+        "spread": 300
+      }
+    ],
+    "description": "Killing them is how it grows."
+  },
+  {
+    "id": "cavalry",
+    "minThreat": 10,
+    "maxThreat": 99,
+    "weight": 7,
+    "entries": [
+      {
+        "enemy": "charger_crowned",
+        "count": 3,
+        "spread": 300
+      },
+      {
+        "enemy": "charger",
+        "count": 4,
+        "spread": 260
+      }
+    ],
+    "description": "Committed, telegraphed, and it will not stop."
+  },
+  {
+    "id": "thorn_field",
+    "minThreat": 11,
+    "maxThreat": 99,
+    "weight": 7,
+    "entries": [
+      {
+        "enemy": "drifter_spined",
+        "count": 5,
+        "spread": 280
+      },
+      {
+        "enemy": "leech",
+        "count": 3,
+        "spread": 240
+      }
+    ],
+    "description": "Nothing here is safe to stand next to."
+  },
+  {
+    "id": "interference",
+    "minThreat": 9,
+    "maxThreat": 99,
+    "weight": 7,
+    "entries": [
+      {
+        "enemy": "suppressor",
+        "count": 1,
+        "spread": 120
+      },
+      {
+        "enemy": "mote_ghost",
+        "count": 8,
+        "spread": 300
+      },
+      {
+        "enemy": "interceptor",
+        "count": 3,
+        "spread": 240
+      }
+    ],
+    "description": "Your Engine goes quiet, and the things that eat your shots arrive."
+  },
+  {
+    "id": "menagerie",
+    "minThreat": 13,
+    "maxThreat": 99,
+    "weight": 9,
+    "entries": [
+      {
+        "enemy": "mote_charged",
+        "count": 6,
+        "spread": 320
+      },
+      {
+        "enemy": "drifter_shielded",
+        "count": 3,
+        "spread": 260
+      },
+      {
+        "enemy": "charger_crowned",
+        "count": 2,
+        "spread": 300
+      },
+      {
+        "enemy": "mote_ghost",
+        "count": 5,
+        "spread": 320
+      }
+    ],
+    "description": "One of everything, and none of it plain."
   }
 ]

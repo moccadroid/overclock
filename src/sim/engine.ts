@@ -274,7 +274,22 @@ export function inertFields(modifierId: string, actionId: string | null): FireFi
     if (UNIVERSAL_FIELDS.includes(op.target)) continue;
     if (!supported.includes(op.target) && !dead.includes(op.target)) dead.push(op.target);
   }
-  // A modifier counts as inert only if *nothing* it writes lands.
+
+  // `keyField` is the thing the card is *for*, and if that does not land the
+  // modifier is inert however much of its small print does.
+  //
+  // This is not a refinement, it is a correction. Fork writes +2 jumps and -20%
+  // output; on a Bolt the jumps are ignored and the penalty is not, so the old
+  // "inert only if *nothing* lands" rule called it useful and the draft offered
+  // it. A recorded run took it twice with no chain in the Engine — a card that
+  // was strictly, silently a downside. Slug had the mirror-image bug: its speed
+  // penalty is meaningless on a Nova, so it read as a free +90% output.
+  if (mod.keyField) {
+    if (UNIVERSAL_FIELDS.includes(mod.keyField)) return [];
+    return supported.includes(mod.keyField) ? [] : dead.length > 0 ? dead : [mod.keyField];
+  }
+
+  // Without one, the old rule stands: inert if nothing it writes lands.
   const writes = mod.ops.filter((op) => !UNIVERSAL_FIELDS.includes(op.target)).length;
   return dead.length > 0 && dead.length === new Set(mod.ops.map((o) => o.target)).size && writes > 0
     ? dead
@@ -300,7 +315,7 @@ export function inertFields(modifierId: string, actionId: string | null): FireFi
  * collide with both, and a glyph survives the draft card, the chip and the HUD
  * strip identically.
  */
-export type Tag = 'travels' | 'area' | 'lingers';
+export type Tag = 'travels' | 'area' | 'lingers' | 'chains';
 
 /**
  * Words, not symbols — and *nouns*, not verbs.
@@ -320,12 +335,14 @@ export const TAG_GLYPH: Record<Tag, string> = {
   travels: 'flight',
   area: 'area',
   lingers: 'duration',
+  chains: 'chain',
 };
 
 export const TAG_LABEL: Record<Tag, string> = {
-  travels: 'flight — it crosses ground, so Pierce and Ricochet work',
-  area: 'area — it covers ground, so Enlarge works',
-  lingers: 'duration — it stays, so Sustain works',
+  travels: 'flight — Pierce, Ricochet, Seeker, Slug and Conduct apply',
+  area: 'area — Enlarge and Bloom apply',
+  lingers: 'duration — Sustain applies',
+  chains: 'chain — Fork and Conduct apply',
 };
 
 /** Which fire-context field marks each tag. */
@@ -333,6 +350,9 @@ const TAG_FIELDS: Record<Tag, readonly FireField[]> = {
   travels: ['pierce', 'bounce'],
   area: ['area'],
   lingers: ['duration'],
+  // Arc had no tag at all, so nothing on a Fork card said which Action it
+  // belonged to. A modifier for exactly one Action in the game has to say so.
+  chains: ['jumps'],
 };
 
 /** What an Action *is*, in the only terms that change what modifiers do to it. */
@@ -349,10 +369,19 @@ export function tagsOf(actionId: string | null): Tag[] {
 export function tagRequiredBy(modifierId: string): Tag | null {
   const mod = MODIFIER_BY_ID.get(modifierId);
   if (!mod) return null;
+  // The key field decides it when there is one: Fork writes `jumps` *and*
+  // `output`, and requiring every target to ride the tag left it unmarked — a
+  // chain-only card with nothing on it saying so.
+  if (mod.keyField) {
+    for (const tag of Object.keys(TAG_FIELDS) as Tag[]) {
+      if (TAG_FIELDS[tag].includes(mod.keyField)) return tag;
+    }
+    return null;
+  }
   const targets = mod.ops.map((o) => o.target).filter((t) => !UNIVERSAL_FIELDS.includes(t));
   if (targets.length === 0) return null;
-  // Only a modifier whose *entire* effect rides one tag is worth marking. Split
-  // writes `count`, which every Action reads; marking it would be noise.
+  // Otherwise only a modifier whose *entire* effect rides one tag is worth
+  // marking. Split writes `count`, which every Action reads; marking it is noise.
   for (const tag of Object.keys(TAG_FIELDS) as Tag[]) {
     if (targets.every((t) => TAG_FIELDS[tag].includes(t))) return tag;
   }

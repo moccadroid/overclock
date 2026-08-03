@@ -10,7 +10,7 @@
         "add": 0.5
       }
     ],
-    "description": "+50% output (flat, applied where it sits in the chain)."
+    "description": "Output +50%, added where this card sits in the chain."
   },
   {
     "id": "split",
@@ -27,7 +27,7 @@
         "mul": 0.65
       }
     ],
-    "description": "x3 copies, each -35% output."
+    "description": "Fires 3 copies. Each copy deals 35% less."
   },
   {
     "id": "echo",
@@ -40,7 +40,7 @@
         "add": 1
       }
     ],
-    "description": "Repeats everything before it once, 0.2s later, at 70% output."
+    "description": "Repeats everything to its LEFT once, 0.2s later, at 70% output. Put it last for the strongest copy."
   },
   {
     "id": "accelerate",
@@ -53,7 +53,7 @@
         "add": 0.3
       }
     ],
-    "description": "-30% trigger interval. The row fires more often."
+    "description": "This row fires 30% more often."
   },
   {
     "id": "enlarge",
@@ -66,7 +66,8 @@
         "add": 0.6
       }
     ],
-    "description": "+60% area. Affects bursts, fields, mines and shoves - not projectiles."
+    "description": "Radius +60%. Bursts, fields, mines, vortices and shoves only.",
+    "keyField": "area"
   },
   {
     "id": "pierce",
@@ -79,7 +80,8 @@
         "add": 2
       }
     ],
-    "description": "Projectiles pass through 2 more enemies. Only affects projectiles."
+    "description": "Projectiles pass through 2 more enemies before stopping. Projectiles only.",
+    "keyField": "pierce"
   },
   {
     "id": "ricochet",
@@ -92,7 +94,8 @@
         "add": 1
       }
     ],
-    "description": "Projectiles bounce once to a new target. Only affects projectiles."
+    "description": "Projectiles bounce once to a new target after hitting. Projectiles only.",
+    "keyField": "bounce"
   },
   {
     "id": "focus",
@@ -113,7 +116,7 @@
         "add": 1.2
       }
     ],
-    "description": "Fires once instead of many, each shot far harder. Before a Split the two multiply; after one, it cancels it."
+    "description": "Copy count set to 1. Output +120%. Placed BEFORE Split, both apply: 1 copy becomes 3 at the higher output."
   },
   {
     "id": "sustain",
@@ -126,7 +129,8 @@
         "add": 0.8
       }
     ],
-    "description": "+80% duration. Affects anything that lingers: fields, mines, orbitals, buffs."
+    "description": "Duration +80%. Fields, mines, orbitals, vortices and buffs only.",
+    "keyField": "duration"
   },
   {
     "id": "leech",
@@ -139,7 +143,7 @@
         "add": 0.03
       }
     ],
-    "description": "3% of damage dealt returns to you as Integrity."
+    "description": "You heal 3% of the damage this row deals."
   },
   {
     "id": "volatile",
@@ -152,7 +156,8 @@
         "add": 0.5
       }
     ],
-    "description": "Effects detonate at the end of their life for 50% output."
+    "description": "Anything this row leaves behind detonates when its life ends, for 50% of its damage. Projectiles, fields, mines, orbitals, vortices, ruptures.",
+    "keyField": "volatile"
   },
   {
     "id": "quantize",
@@ -165,7 +170,7 @@
         "add": 1
       }
     ],
-    "description": "Locks this row to the engine pulse. Fires landing on the beat hit 25% harder."
+    "description": "This row fires only on the beat grid. Fires that land on the beat deal 25% more."
   },
   {
     "id": "overdrive",
@@ -182,7 +187,7 @@
         "add": 1
       }
     ],
-    "description": "+100% output, and every fire adds Heat directly. The Cycles it costs are the price of skipping the budget."
+    "description": "Output +100%. Each fire adds 1.5 Heat, ignoring the Cycle budget."
   },
   {
     "id": "resonate",
@@ -212,7 +217,7 @@
         "mul": 0.8
       }
     ],
-    "description": "The row above reserves 30% fewer Cycles. This row outputs 20% less."
+    "description": "The row directly above costs 30% fewer Cycles. This row deals 20% less."
   },
   {
     "id": "fork",
@@ -229,7 +234,8 @@
         "mul": 0.8
       }
     ],
-    "description": "+2 chain jumps, -20% output. Arc had no modifier of its own until this one."
+    "description": "Chain jumps +2. Output -20%. Chains only (Arc).",
+    "keyField": "jumps"
   },
   {
     "id": "conduct",
@@ -242,7 +248,8 @@
         "add": 0.8
       }
     ],
-    "description": "+80% range: shots fly further, beams and chains stretch. Range as a row decision."
+    "description": "Range +80%. Projectile flight distance, beam length and chain jump distance.",
+    "keyField": "range"
   },
   {
     "id": "seeker",
@@ -259,7 +266,8 @@
         "mul": 0.75
       }
     ],
-    "description": "Projectiles steer toward what they were aimed at, and fly 25% slower for it."
+    "description": "Projectiles steer toward their target. Projectile speed -25%. Projectiles only.",
+    "keyField": "seek"
   },
   {
     "id": "slug",
@@ -276,7 +284,8 @@
         "add": 0.9
       }
     ],
-    "description": "Half speed, +90% output. A shot that takes its time and lands like a wall."
+    "description": "Projectile speed -50%. Output +90%. Projectiles only.",
+    "keyField": "speed"
   },
   {
     "id": "bloom",
@@ -289,7 +298,8 @@
         "add": 0.4
       }
     ],
-    "description": "Area effects detonate a second time, smaller, right after the first. Bursts, fields, mines, shoves."
+    "description": "Area effects detonate a second time 0.16s later, at 40% damage and 70% radius. Bursts, fields, mines and shoves.",
+    "keyField": "bloom"
   },
   {
     "id": "insulate",
@@ -306,7 +316,7 @@
         "mul": 0.75
       }
     ],
-    "description": "This row makes no Heat at all, and pays 25% of its output for it. The cold half of a hot build."
+    "description": "This row produces no Heat at all. Output -25%."
   },
   {
     "id": "grounding_rod",
@@ -319,7 +329,7 @@
         "add": 1
       }
     ],
-    "description": "Events from this row start a fresh cascade at depth 0 — no depth falloff, no Heat from how deep it was."
+    "description": "Events from this row are treated as cascade depth 0: no depth output penalty, and no Heat from depth. Everything it triggers starts a fresh chain."
   },
   {
     "id": "stagger",
@@ -332,7 +342,7 @@
         "add": 0.35
       }
     ],
-    "description": "Everything this row does lands 0.35s late. Pairs with Resonate: the row above fires, this one answers."
+    "description": "Everything this row does happens 0.35s later."
   },
   {
     "id": "mirror",
@@ -345,7 +355,7 @@
         "add": 1
       }
     ],
-    "description": "This row uses the Action of the row above it, whatever that becomes. Its own Action is ignored."
+    "description": "This row uses the Action of the row above it. Its own Action is ignored."
   },
   {
     "id": "governor",
@@ -358,6 +368,6 @@
         "add": 2
       }
     ],
-    "description": "Half the Cycles, and this row's output is capped at 2x its base. How a full Engine finds room for one more."
+    "description": "This row costs half its Cycles. Its output multiplier is capped at 2x."
   }
 ]

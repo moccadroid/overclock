@@ -1461,6 +1461,11 @@ export class Renderer {
         g.stroke({ width: 1, color: PALETTE.signal, alpha: BAND.structure * 2 });
       }
 
+      // §12.4 — out of a Cache. Four times the health and a harder hit, so it
+      // gets the crown whatever its family is: the player opted into this and
+      // has to be able to tell which ones they bought.
+      if (e.hardened) ENEMY_MARKS.crown(g, e, r, born, color, world.time, (a) => this.jitter(a));
+
       // §10.4 — variant marks. One table, one entry per mark: the whole reason a
       // new variant is a JSON edit rather than a renderer edit.
       if (def.marks) {
@@ -1766,7 +1771,6 @@ export class Renderer {
 
     // ---- the Heat ring (§19.4) -------------------------------------------
     const ringR = TUNABLE.playerRadius + 12;
-    const ringColor = heat > 0.01 ? mix(PALETTE.structure, PALETTE.signal, heat) : PALETTE.structure;
     const wobble = heat > 0.3 ? this.jitter(heat * 1.6 * VISUAL.degradationIntensity) : 0;
 
     g.circle(p.x + wobble, p.y, ringR).stroke({
@@ -1775,21 +1779,17 @@ export class Renderer {
       alpha: BAND.structure * 1.8,
     });
 
-    // Tier thresholds, as two gaps in the track. Heat tiers are step changes —
-    // misfires at 40, corruption at 70 — and a smooth gauge hides steps.
-    for (const mark of [0.4, 0.7]) {
-      const a = -Math.PI / 2 + mark * Math.PI * 2;
-      g.moveTo(p.x + wobble + Math.cos(a) * (ringR - 4), p.y + Math.sin(a) * (ringR - 4)).lineTo(
-        p.x + wobble + Math.cos(a) * (ringR + 4),
-        p.y + Math.sin(a) * (ringR + 4),
-      );
-    }
-    g.stroke({ width: 1, color: PALETTE.structure, alpha: BAND.structure * 2.4 });
+    // The tier thresholds used to be two tick marks across the track, and they
+    // read as "what are these two lines?" — a mark that has to be explained is
+    // worse than no mark. The *arc itself* changes colour at each tier instead:
+    // one instrument, three states, nothing extra drawn.
 
     const heatArc = heat * Math.PI * 2;
     if (heatArc > 0.001) {
+      const tierColour =
+        heat >= 0.7 ? PALETTE.signal : heat >= 0.4 ? 0xd59a3c : PALETTE.voltaic;
       arcSegment(g, p.x + wobble, p.y, ringR, -Math.PI / 2, -Math.PI / 2 + heatArc);
-      g.stroke({ width: 3, color: ringColor, alpha: BAND.entity });
+      g.stroke({ width: 3, color: tierColour, alpha: BAND.entity });
     }
 
     // Dash: a short arc across the bottom, never a second full ring.
@@ -1802,7 +1802,8 @@ export class Renderer {
     // bar and anything else is visibly partial.
     const dashSpan = Math.PI * 0.66;
     const dashMid = Math.PI / 2;
-    const ready = p.dashCooldown > 0 ? 1 - p.dashCooldown / TUNABLE.dashCooldown : 1;
+    const dashMax = TUNABLE.dashCooldown / (1 + world.bonuses.dashHaste);
+    const ready = p.dashCooldown > 0 ? 1 - p.dashCooldown / dashMax : 1;
     arcSegment(g, p.x, p.y, ringR + 6, dashMid - dashSpan / 2, dashMid + dashSpan / 2);
     g.stroke({ width: 1, color: PALETTE.structure, alpha: BAND.structure * 1.6 });
     if (ready > 0.001) {

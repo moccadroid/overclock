@@ -10,7 +10,7 @@
     "speed": 430,
     "lifetime": 1,
     "pierce": 0,
-    "description": "Single projectile at nearest enemy."
+    "description": "One projectile at the nearest enemy. 430 units of travel."
   },
   {
     "id": "nova",
@@ -21,7 +21,7 @@
     "primitive": "burst",
     "damage": 5,
     "radius": 112,
-    "description": "Radial burst around the avatar."
+    "description": "Burst around the avatar, radius 112."
   },
   {
     "id": "field",
@@ -36,7 +36,7 @@
     "lifetime": 3.2,
     "tickInterval": 0.45,
     "cooldown": 0.5,
-    "description": "Persistent damage zone at the densest nearby enemy cluster."
+    "description": "Damage zone at the densest nearby group of enemies. Radius 140, ticks every 0.45s, lasts 3.2s."
   },
   {
     "id": "mine",
@@ -50,7 +50,7 @@
     "triggerRadius": 46,
     "armTime": 0.35,
     "lifetime": 9,
-    "description": "Drops a proximity charge where you stand. Detonates on contact."
+    "description": "Drops a charge where you stand. Arms in 0.35s, detonates on contact, radius 105, lasts 9s."
   },
   {
     "id": "rupture",
@@ -62,7 +62,7 @@
     "damage": 26,
     "radius": 125,
     "delay": 0.7,
-    "description": "Marks an enemy. Explodes at that spot after a short delay."
+    "description": "Marks an enemy. Detonates at that spot 0.7s later, radius 125."
   },
   {
     "id": "beam",
@@ -74,7 +74,7 @@
     "damage": 11,
     "range": 300,
     "beamWidth": 13,
-    "description": "Instant line to the farthest enemy in range. Hits everything on the way."
+    "description": "Instant line to the farthest enemy within 300 units. Damages everything on the line."
   },
   {
     "id": "orbital",
@@ -88,7 +88,7 @@
     "orbitRadius": 118,
     "orbitSpeed": 2.4,
     "lifetime": 14,
-    "description": "Adds an orbiting body. Persistent, and they stack."
+    "description": "Adds a body orbiting you for 14s. They stack, up to 14."
   },
   {
     "id": "surge",
@@ -101,7 +101,7 @@
     "rateBonus": 0.4,
     "lifetime": 2,
     "cooldown": 1.5,
-    "description": "Self-buff: +40% engine rate for 2s. Speeds up every row you own."
+    "description": "Every row you own fires 40% faster for 2s."
   },
   {
     "id": "pull",
@@ -116,7 +116,7 @@
     "lifetime": 1.6,
     "tickInterval": 0.3,
     "cooldown": 0.4,
-    "description": "Sucks every nearby enemy into a single point for 1.6s. Deals almost no damage \u2014 it exists to bunch the horde up for whatever fires next."
+    "description": "Drags every enemy within 210 units toward one point for 1.6s. Almost no damage — it exists to group them."
   },
   {
     "id": "shove",
@@ -128,7 +128,7 @@
     "damage": 6,
     "radius": 190,
     "knockback": 260,
-    "description": "Radial knockback. Displacement per enemy is capped \u2014 no shove walls."
+    "description": "Pushes every enemy within 190 units away. Displacement per enemy is capped."
   },
   {
     "id": "fragment",
@@ -141,7 +141,7 @@
     "speed": 250,
     "lifetime": 1.6,
     "seek": 4.5,
-    "description": "Releases a mote that hunts on its own and detonates on contact."
+    "description": "Releases a mote that steers toward a target and detonates on contact."
   },
   {
     "id": "siphon",
@@ -154,7 +154,7 @@
     "speed": 380,
     "lifetime": 1.2,
     "siphon": 6,
-    "description": "Projectile that sheds 6 Heat on hit. Sustained cooling."
+    "description": "Projectile that removes 6 Heat when it hits."
   },
   {
     "id": "convert_bleed",
@@ -173,7 +173,7 @@
       "gainAmount": 0.5,
       "duration": 4
     },
-    "description": "Spend 8 Integrity for +50% output, 4s. Health straight into damage."
+    "description": "Spend 8 Integrity: +50% output for 4s."
   },
   {
     "id": "convert_cashout",
@@ -191,7 +191,7 @@
       "gainKind": "xp",
       "gainAmount": 1
     },
-    "description": "Spend 30 Heat for a level's worth of XP. A deep cascade pays twice."
+    "description": "Spend 30 Heat: gain a level worth of XP."
   },
   {
     "id": "convert_coolant",
@@ -209,7 +209,7 @@
       "gainKind": "heat",
       "gainAmount": 30
     },
-    "description": "Spend 6 Integrity to shed 30 Heat. How a hot Engine keeps running."
+    "description": "Spend 6 Integrity: remove 30 Heat."
   },
   {
     "id": "convert_stim",
@@ -228,7 +228,7 @@
       "gainAmount": 0.3,
       "duration": 3
     },
-    "description": "Spend 20 Heat for +30% move speed, 3s. Turns running hot into escape."
+    "description": "Spend 20 Heat: +30% move speed for 3s."
   },
   {
     "id": "arc",
@@ -240,6 +240,6 @@
     "damage": 7,
     "jumps": 3,
     "range": 150,
-    "description": "Chain lightning, jumps up to 3 targets."
+    "description": "Chain lightning. Jumps to 3 targets, 150 units per jump."
   }
 ]
