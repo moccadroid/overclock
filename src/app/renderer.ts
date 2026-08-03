@@ -1102,11 +1102,28 @@ export class Renderer {
     g.clear();
 
     // XP shards: white diamonds, one fill for the lot.
+    //
+    // A shard called in by a Magnet stops bobbing and grows a streak — the same
+    // trick the projectiles use, for the same reason: at 1,600 units a second a
+    // dot is a dot, and what you want to see is the arena draining.
+    let anyStreak = false;
+    for (const item of world.pickups) {
+      if (!item.called || item.kind !== 'xp') continue;
+      if (!this.camera.isVisible(item.x, item.y, 40)) continue;
+      const dx = world.player.x - item.x;
+      const dy = world.player.y - item.y;
+      const d = Math.hypot(dx, dy) || 1;
+      const len = Math.min(46, 12 + d * 0.06);
+      g.moveTo(item.x, item.y).lineTo(item.x - (dx / d) * len, item.y - (dy / d) * len);
+      anyStreak = true;
+    }
+    if (anyStreak) g.stroke({ width: 1.2, color: PALETTE.voltaic, alpha: BAND.inFlight });
+
     let anyXp = false;
     for (const item of world.pickups) {
       if (item.kind !== 'xp') continue;
       if (!this.camera.isVisible(item.x, item.y, 20)) continue;
-      const y = item.y + Math.sin(item.age * 3.4 + item.id) * 1.8;
+      const y = item.called ? item.y : item.y + Math.sin(item.age * 3.4 + item.id) * 1.8;
       // §7.3 consolidation merges drops into fewer, richer ones — so a merged
       // shard has to *look* richer, or a big kill reads as loot going missing.
       const s = pickupScale(item.value);
@@ -1338,6 +1355,23 @@ export class Renderer {
           color: 0x6d7b8c,
           alpha: BAND.structure * 1.4 * born,
         });
+      }
+
+      // §10.2 — a Glutton, full. It has stopped eating and is now a bomb: the
+      // outline doubles and shivers, and a fuse ring shows the blast radius it
+      // will leave when something kills it. The player earned this by spraying
+      // projectiles, so they are owed a way to see it coming.
+      if (e.meals >= TUNABLE.interceptorMaxMeals) {
+        const shiver = this.jitter(2.4);
+        polygonPath(g, shapeOutline(def.shape, e.x + shiver, e.y, e.radius * 1.08, e.spawnAge));
+        g.stroke({ width: 2, color: PALETTE.signal, alpha: BAND.telegraph });
+        const blast = e.radius * TUNABLE.interceptorBlastScale;
+        const segments = 24;
+        for (let i = 0; i < segments; i += 2) {
+          const a0 = (i / segments) * Math.PI * 2 + world.time * 0.9;
+          arcSegment(g, e.x, e.y, blast, a0, a0 + (Math.PI * 2) / segments);
+        }
+        g.stroke({ width: 1, color: PALETTE.signal, alpha: BAND.structure * 2 });
       }
 
       // §10.3 — elites wear their affixes.

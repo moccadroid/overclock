@@ -141,6 +141,13 @@ export interface Pickup extends SpatialItem {
   vx: number;
   vy: number;
   age: number;
+  /**
+   * Called in by a Magnet: it is crossing the arena under its own power and
+   * ignores the collect radius. See sweepShards — the sweep used to be a state
+   * change with no picture, which is the least satisfying possible way to spend
+   * the rarest object in the game.
+   */
+  called?: boolean;
 }
 
 /** §5.4 Mine — a proximity charge left where the player stood. */
@@ -1013,7 +1020,12 @@ export class World {
       dx = this.player.dirX;
       dy = this.player.dirY;
     }
-    const speed = def.speed ?? 400;
+    // Ballistics' other half. The card has always said "+1 Pierce and +20%
+    // projectile speed" and only the Pierce was ever implemented — the speed
+    // term existed in the text and nowhere else. It matters twice over now:
+    // range is speed x lifetime, so this is also the flight-only range stat
+    // sitting next to Reach, which covers everything.
+    const speed = (def.speed ?? 400) * (1 + this.bonuses.travels * 0.2);
     this.projectiles.push({
       id: this.nextId++,
       x,
@@ -2105,6 +2117,35 @@ export class World {
         });
     }
 
+    // §10.2 — a Glutton going up. Everything it ate, coming back out at once:
+    // the biggest non-player explosion in the game, and the reason the cap is a
+    // state rather than a limit. It damages the horde too, which is what makes
+    // popping one *next to* something a play rather than a chore.
+    if (def.behavior === 'intercept' && enemy.meals >= TUNABLE.interceptorMaxMeals) {
+      const radius = enemy.radius * TUNABLE.interceptorBlastScale;
+      this.pushFx('rupture', enemy.hue, enemy.x, enemy.y, radius, [], 0.45);
+      this.cue('kill', enemy.hue, depth, 1);
+      for (const other of this.enemies) {
+        if (!other.alive || other.id === enemy.id) continue;
+        const ox = other.x - enemy.x;
+        const oy = other.y - enemy.y;
+        if (ox * ox + oy * oy > radius * radius) continue;
+        this.damageEnemy(other, TUNABLE.interceptorBlastDamage, depth + 1, programIndex, enemy.hue, 0);
+      }
+      const px = this.player.x - enemy.x;
+      const py = this.player.y - enemy.y;
+      const reach = radius + TUNABLE.playerRadius;
+      if (px * px + py * py < reach * reach) {
+        this.hurtPlayer(TUNABLE.interceptorBlastDamage, {
+          id: def.id,
+          label: def.name,
+          enemyId: def.id,
+          shape: def.shape,
+          mode: 'Glutton detonation',
+        });
+      }
+    }
+
     if (def.splitsInto) {
       for (let i = 0; i < def.splitsInto.count; i++) {
         const a = (i / def.splitsInto.count) * Math.PI * 2;
@@ -2464,16 +2505,44 @@ export class World {
     e.y += e.vy * dt;
     this.resolveRuins(e, e.radius);
 
-    // Eat anything it reaches.
+    // The arena is the arena. A compounding radius used to walk its own centre
+    // to the edge and hang most of its body outside the map, which reads as a
+    // rendering fault rather than as a threat.
+    e.x = clamp(e.x, e.radius, this.arena.width - e.radius);
+    e.y = clamp(e.y, e.radius, this.arena.height - e.radius);
+
+    // Eat anything it reaches — up to a point.
+    //
+    // §23.1: the growth is the design ("+10% per meal", the answer to projectile
+    // spam), the *unboundedness* was an oversight. Compounding 10% has no shape:
+    // at thirty meals it is a seventeen-fold radius with seventeen-fold HP, which
+    // is not a threat, it is terrain — unkillable, wider than the screen, and
+    // doing more damage than everything else in the run combined (measured: 427
+    // of 551 damage taken in a six-minute run).
+    //
+    // So it caps, and the cap is a *state* rather than a wall. A Glutton that has
+    // eaten its fill stops eating, destabilises visibly, and detonates when it
+    // dies. Spraying projectiles still builds the thing that punishes spraying
+    // projectiles — it now builds a bomb with a fuse you can see instead of an
+    // invincible wall, and killing it is a decision about where you are standing.
+    const gorged = e.meals >= TUNABLE.interceptorMaxMeals;
     const eat = e.radius + 10;
-    if (target && bestD2 < eat * eat) {
+    if (target && !gorged && bestD2 < eat * eat) {
       target.alive = false;
       e.meals++;
       const growth = 1 + (def.growthPerMeal ?? 0.1);
       e.radius *= growth;
-      e.maxHp *= growth;
-      e.hp *= growth;
+      // HP grows more slowly than the body. A Glutton should be enormous and
+      // *killable*; matching the radius made it neither.
+      const hpGrowth = 1 + (def.growthPerMeal ?? 0.1) * TUNABLE.interceptorHpGrowthShare;
+      e.maxHp *= hpGrowth;
+      e.hp *= hpGrowth;
       this.pushFx('burst', e.hue, e.x, e.y, e.radius + 8, [], 0.12);
+      if (e.meals >= TUNABLE.interceptorMaxMeals) {
+        // Full. Announced once, loudly.
+        this.pushFx('rupture', e.hue, e.x, e.y, e.radius * 1.6, [], 0.5);
+        this.cue('fire', e.hue, 0, 1);
+      }
     }
 
     const pd = hypot(this.player.x - e.x, this.player.y - e.y);
@@ -2752,6 +2821,26 @@ export class World {
       const dy = p.y - item.y;
       const d = hypot(dx, dy) || 1;
 
+      if (item.called) {
+        // Accelerating homing. Slow to leave, fast to arrive: eight hundred
+        // shards crossing the arena at a constant speed is a wall of dots
+        // arriving together, and the whole point is the stream.
+        const speed = Math.min(1600, 300 + d * 1.7);
+        item.x += (dx / d) * speed * dt;
+        item.y += (dy / d) * speed * dt;
+        item.vx *= 0.86;
+        item.vy *= 0.86;
+        item.x += item.vx * dt;
+        item.y += item.vy * dt;
+        if (d < TUNABLE.playerRadius + 14) {
+          item.alive = false;
+          this.gainXp(item.value);
+          this.cue('pickup', item.hue, 0, 0.2);
+          this.emit({ type: 'pickup', depth: 0, x: p.x, y: p.y, hue: item.hue });
+        }
+        continue;
+      }
+
       const magnet = TUNABLE.collectRadius * (1 + this.bonuses.magnet);
       if (d < magnet) {
         // §17.2 — quadratic magnet ease-in.
@@ -2797,30 +2886,26 @@ export class World {
   }
 
   /**
-   * The Magnet, collected: every XP shard on the map, at once.
+   * The Magnet, collected: every XP shard on the map is *called*.
    *
-   * One `gainXp` for the total rather than one per shard, because the sum is the
-   * only thing that differs and a thousand separate calls would fire a thousand
-   * level checks. The shards still die individually, and each one still emits —
-   * On Pickup builds get the whole burst, which is the loudest moment the
-   * trigger will ever have and exactly the point of it.
+   * Not consumed — called. The first version granted the total and deleted the
+   * shards in one tick, which is correct and completely silent: the rarest
+   * object in the game paid out as a number changing. Now every shard flares
+   * outward and then flies to you, accelerating with distance, so a sweep is a
+   * few seconds of the whole arena draining into the player. Each one still
+   * emits On Pickup as it lands, which turns the burst into a run of cascade
+   * roots and a run of notes rather than one lump.
    */
   private sweepShards(): void {
-    let total = 0;
-    let swept = 0;
     for (const item of this.pickups) {
-      if (!item.alive || item.kind !== 'xp') continue;
-      item.alive = false;
-      total += item.value;
-      swept++;
-      // Bounded: a screen carrying eight hundred shards would otherwise emit
-      // eight hundred cascade roots in one tick, which is the shape of the
-      // freeze that `bigEvent` was capped for.
-      if (swept <= 24) {
-        this.emit({ type: 'pickup', depth: 0, x: item.x, y: item.y, hue: item.hue });
-      }
+      if (!item.alive || item.kind !== 'xp' || item.called) continue;
+      item.called = true;
+      // Thrown outward first, so the flight starts with a flare rather than a
+      // straight line. Costs nothing and it is most of what makes it read.
+      const a = patan2(item.y - this.player.y, item.x - this.player.x);
+      item.vx = pcos(a) * 220;
+      item.vy = psin(a) * 220;
     }
-    if (total > 0) this.gainXp(total);
     this.stats.magnets++;
     this.pushFx('burst', 'voltaic', this.player.x, this.player.y, 420, [], 0.5);
     this.cue('pickup', 'voltaic', 0, 1);

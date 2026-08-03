@@ -82,6 +82,23 @@ export const TUNABLE = {
   affixPhaseDuration: 1,
   affixAnchoredZone: 190,
   /**
+   * §10.2 Interceptor — how many projectiles it may eat before it is full.
+   *
+   * Seventeen meals at +10% compounding is a five-fold radius: a 14-unit body
+   * becomes a 70-unit one, which is the biggest ordinary thing in the arena and
+   * still fits on the screen twice over. Past that it stops eating and becomes a
+   * Glutton, which is a bomb rather than a wall.
+   */
+  interceptorMaxMeals: 17,
+  /**
+   * How much of the radius growth the HP growth gets. Half: a Glutton is
+   * enormous and killable, where matching them made it neither.
+   */
+  interceptorHpGrowthShare: 0.5,
+  /** A Glutton's death radius, as a multiple of its own body. */
+  interceptorBlastScale: 2.2,
+  interceptorBlastDamage: 34,
+  /**
    * §11.2 — how many suppression fields may exist at once, queued included.
    *
    * Two, because a Suppressor does not add damage, it *subtracts the game*: with
@@ -175,7 +192,10 @@ export const TUNABLE = {
    * — because the cooldown is wall-clock rather than per-kill — still roughly
    * one a minute when the Engine is deleting two thousand enemies a second.
    */
-  magnetCooldown: 40,
+  // Halved in frequency after play: one a minute was often enough that the
+  // sweep stopped being an event. Eighty seconds is roughly one every two
+  // level-ups.
+  magnetCooldown: 80,
   magnetDropChance: 0.02,
   /** Radius within which drops of the same kind merge. Local, so piles keep their shape. */
   consolidateRadius: 90,

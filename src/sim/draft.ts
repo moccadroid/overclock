@@ -290,6 +290,16 @@ export function rollDraft(world: World): DraftOffer {
           'magnet',
           'speed',
           'integrity',
+          // Twice, like the class stats and for the same reason: base ranges are
+          // short enough that Reach is a build decision rather than a trim, so
+          // it has to show up often enough to plan around. (And the same bug
+          // caught it as caught the class stats — added to the type, to
+          // STAT_CARDS, and not to this array. Measured across four full runs:
+          // travels 4, area 3, lingers 3, reach 0.)
+          'reach',
+          'reach',
+          'reach',
+          'reach',
           // Weighted up, because these only pay a focused Engine and a card that
           // only sometimes matters has to show up often enough to be planned for.
           'travels',
