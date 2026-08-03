@@ -1,0 +1,42 @@
+name: Preview deploy
+
+on: pull_request
+
+concurrency:
+  group: hosting-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    name: Test, build, preview channel
+    runs-on: ubuntu-latest
+    # Forked PRs cannot read the service-account secret, so skip the deploy
+    # rather than fail the check.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      checks: write
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm test
+
+      - run: pnpm build
+
+      # Posts the temporary preview URL as a PR comment; expires after 7 days.
+      - uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_OVERCLOCK_GAME }}
+          projectId: overclock-game
+          expires: 7d

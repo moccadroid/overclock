@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "packageManager": "pnpm@10.30.1",
   "description": "Bullet-heaven / build-crafting roguelite. Codename only — see src/branding.ts for player-facing naming.",
   "scripts": {
     "dev": "vite",
