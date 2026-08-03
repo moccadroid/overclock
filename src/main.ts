@@ -12,6 +12,7 @@ import { BRANDING } from './branding';
 import { Library } from './meta/profile';
 import { Audio } from './audio/audio';
 import { applyEffects } from './app/visual';
+import { installUserCells } from './meta/cellstore';
 import './app/ui.css';
 
 const params = new URLSearchParams(location.search);
@@ -28,6 +29,10 @@ const audio = new Audio();
 applyEffects(library.snapshot.settings.effects);
 audio.setMuted(library.snapshot.settings.muted);
 audio.setVolume(library.snapshot.settings.volume);
+// §18 — cells the player has written join the pool the arranger chooses from,
+// before anything asks it for an arrangement. Widening the vocabulary, not
+// picking the song: the Engine still decides which of them it wants.
+installUserCells();
 
 /**
  * Playtest hook: `?meltdown=90` brings the Meltdown line forward so the third

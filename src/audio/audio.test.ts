@@ -7,11 +7,11 @@ import { hashWorld } from '../sim/hash';
 import { SIM_DT } from '../sim/tunables';
 import { noteHz } from './voices';
 import { derivePart } from './parts';
-import { DEMOS } from './demos';
 import { CELLS, parseMelodic, parsePerc, validate } from './cells';
 import { arrange, openingArrangement } from './arrange';
-import { ACTION_BY_ID, MODIFIER_BY_ID, TRIGGER_BY_ID } from '../content/index';
-import { AXIOMS } from '../content/index';
+import { explain } from './explain';
+import { emptyLibrary, setUserCells } from './cells';
+import { countCells, parseLibrary } from '../meta/cellstore';
 
 function sourcesIn(dir: string): [string, string][] {
   return readdirSync(dir)
@@ -228,41 +228,104 @@ describe('the Engine is the arrangement (GDD §18.1)', () => {
   });
 });
 
-describe('the audition list (GDD §19.2)', () => {
-  it('every demo names real nodes', () => {
-    // A typo'd action id does not throw — derivePart falls back to a pluck, so
-    // the demo plays *something* and quietly misrepresents what that Engine
-    // sounds like. Which is the one job this screen has.
-    for (const demo of DEMOS) {
-      expect(demo.rows.length, `${demo.id} has no rows`).toBeGreaterThan(0);
-      for (const r of demo.rows) {
-        expect(TRIGGER_BY_ID.has(r.trigger), `${demo.id}: no trigger "${r.trigger}"`).toBe(true);
-        expect(ACTION_BY_ID.has(r.action), `${demo.id}: no action "${r.action}"`).toBe(true);
-        for (const m of r.modifiers) {
-          expect(MODIFIER_BY_ID.has(m), `${demo.id}: no modifier "${m}"`).toBe(true);
-        }
-      }
-    }
+describe('the Music Lab (GDD §18, §19.2)', () => {
+  it('the reason column stays true to the arrangement it describes', () => {
+    // explain.ts restates what arrange.ts knows, which is the price of keeping a
+    // debug concern out of the thing being debugged. This is what stops that
+    // price becoming a lie: every slot it names must exist, and the value it
+    // prints must be the value that is playing.
+    const input = {
+      axiomId: 'circuit',
+      rows: [
+        { triggerId: 'on_hit', primitive: 'chain', hue: 'voltaic' as const, modifiers: ['echo'] },
+        { triggerId: 'clock', primitive: 'burst', hue: 'thermal' as const, modifiers: ['ground'] },
+      ],
+      intensity: 0.6,
+    };
+    const plan = arrange(input);
+    const reasons = explain(input, plan);
+
+    const byslot = new Map(reasons.map((r) => [r.slot, r]));
+    expect(byslot.get('kick')!.value).toContain(plan.kick.id);
+    expect(byslot.get('bass')!.value).toContain(plan.bass.id);
+    expect(byslot.get('harmony')!.value).toContain(plan.harmony.id);
+    expect(byslot.get('echo')!.value).toBe(plan.echo.toFixed(2));
+    // Echo is drafted, so the reason has to say so — a mapping nobody can hear
+    // named is a mapping that may as well be a constant.
+    expect(byslot.get('echo')!.why).toMatch(/Echo/);
+    expect(byslot.get('bass tone')!.why).toMatch(/Ground/);
+    for (const reason of reasons) expect(reason.why.length).toBeGreaterThan(0);
   });
 
-  it('every Axiom is auditionable', () => {
-    for (const a of AXIOMS) {
-      expect(DEMOS.some((d) => d.id === `axiom_${a.id}`), `axiom "${a.id}"`).toBe(true);
-    }
+  it('a cell nobody wrote changes nothing', () => {
+    // The pool seam is the only way a player can touch the soundtrack, and it
+    // must be inert until used. An empty user library has to leave every
+    // arrangement in the game bit-identical.
+    const input = {
+      axiomId: 'ignition',
+      rows: [{ triggerId: 'clock', primitive: 'projectile', hue: 'thermal' as const, modifiers: [] }],
+      intensity: 0.5,
+    };
+    const before = arrange(input);
+    setUserCells(emptyLibrary());
+    const during = arrange(input);
+    setUserCells(null);
+    const after = arrange(input);
+
+    expect(during.kick.id).toBe(before.kick.id);
+    expect(during.bass.id).toBe(before.bass.id);
+    expect(after.signature).toBe(before.signature);
   });
 
-  it('the demos actually sound different from each other', () => {
-    // A list of builds that all used Clock would be one beat with different
-    // timbres on top, which is the failure this list exists to avoid: the
-    // Trigger is what decides a part's rhythm.
-    const triggers = new Set(DEMOS.flatMap((d) => d.rows.map((r) => r.trigger)));
-    expect(triggers.size).toBeGreaterThanOrEqual(6);
+  it('a written cell joins the pool and can be chosen', () => {
+    // And the other half: a cell that *is* written has to be reachable. A
+    // library the arranger never picks from is a text editor, not a feature.
+    const mine = emptyLibrary();
+    // Deliberately extreme, so scoring cannot prefer an authored cell over it.
+    mine.kicks.push({
+      id: 'test-relentless',
+      pattern: 'XXXXXXXXXXXXXXXX',
+      energy: 5,
+      feel: 'rolling',
+      space: 'sparse',
+    });
+    setUserCells(mine);
+    const plan = arrange({
+      axiomId: 'ignition',
+      rows: Array.from({ length: 5 }, () => ({
+        triggerId: 'clock',
+        primitive: 'projectile',
+        hue: 'thermal' as const,
+        modifiers: ['accelerate'],
+      })),
+      intensity: 1,
+    });
+    setUserCells(null);
+    expect(plan.kick.id).toBe('test-relentless');
+  });
 
-    // And no two demos may be the same Engine.
-    const shapes = DEMOS.map((d) =>
-      d.rows.map((r) => `${r.trigger}|${r.modifiers.join(',')}|${r.action}`).join(';'),
+  it('a library is rejected whole, with a reason a person can act on', () => {
+    // Half-loading is how you spend an evening chasing a bar that drifts a
+    // sixteenth. Each of these is a mistake somebody will actually make.
+    const bad = [
+      ['{"kicks":[{"id":"a","pattern":"x...x...x...x..","energy":1,"feel":"straight","space":"mid"}]}', /15 steps/],
+      ['{"kicks":[{"id":"a","pattern":"x...x...q...x...","energy":1,"feel":"straight","space":"mid"}]}', /percussion/],
+      ['{"basslines":[{"id":"b","steps":"3...............","energy":1,"register":"low","space":"mid"}]}', /needsSeventh/],
+      ['{"kicks":[{"pattern":"x...x...x...x..."}]}', /needs an id/],
+      ['not json at all', /not JSON/],
+    ] as const;
+
+    for (const [text, pattern] of bad) {
+      const result = parseLibrary(text);
+      expect('error' in result, `expected "${text.slice(0, 30)}" to fail`).toBe(true);
+      if ('error' in result) expect(result.error).toMatch(pattern);
+    }
+
+    const good = parseLibrary(
+      '{"hats":[{"id":"mine","pattern":"..x...x...x...x.","energy":2,"feel":"straight","space":"mid"}]}',
     );
-    expect(new Set(shapes).size).toBe(DEMOS.length);
+    expect('library' in good).toBe(true);
+    if ('library' in good) expect(countCells(good.library)).toBe(1);
   });
 });
 

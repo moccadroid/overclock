@@ -2099,6 +2099,72 @@ before starting a new one.
 
 ---
 
+## D-100 · SETTLED · The Music Lab, and the one seam a player may touch
+
+"How many dials of our music engine can we expose?" Nineteen, which is all of
+them — the `Arrangement` interface *is* the dial list. Three surfaces under the
+Music pane, in the order you would use them.
+
+**Studio.** Build an Engine by hand and hear it, with a column stating the reason
+for every slot. This is the first place §18.1 is *demonstrable* rather than
+asserted: add a fourth row and watch the bassline get out of its way, swap a Bolt
+for an Arc and watch the whole kit turn voltaic. It replaces the seven canned
+demo Engines, which were a worse version of the same thing — a list implies
+choosing from it, and there is nothing here to choose.
+
+**The Desk.** Seven cell slots, six voices, six numbers. Overrides sit on top of
+whatever the Studio's Engine selected, so an untouched dial still says "from your
+Engine" and a touched one says what the Engine wanted instead. Setting a dial
+back to the Engine's choice stops being an override, which keeps the count
+honest. Changes are audible immediately rather than at the next sixteen-bar
+boundary — the one way this differs from a run, because a dial you cannot hear
+you turn is not a dial.
+
+**Cells.** Write fragments in the notation and they join the pool.
+
+That last one is the only way a player can touch the soundtrack, and the
+restraint is the design. A screen that let you pick your bassline would make
+§18.1 false — your run would stop sounding like your run and start sounding like
+whatever you left in a dropdown. Widening the pool keeps the relationship: you
+did not choose the song, you chose what the game is *able to say*. Same deal the
+Library strikes with the draft.
+
+It works at all because cell notes are chord degrees rather than pitches. `0` is
+not A, it is whatever the root is right now, so a cell physically cannot play a
+wrong note and somebody with no theory can type `x..x..x...x.X...` and have it
+land in key and in time. The validator catches the two failures that are
+otherwise silent — a bar that is not sixteen steps, and a seventh over a triad —
+and rejects a library whole rather than half-loading it.
+
+Three seams, all additive, all inert when unused:
+
+- `cells.ts` gained `pool()`, which is `CELLS` until somebody writes something.
+- `audio.ts` gained `auditArrangement()`, which adopts a hand-built plan. Nothing
+  in a run reaches it.
+- `explain.ts` is new and separate — it reads the input and the output rather
+  than the arranger gaining a `reasons` field. The arranger does not need to know
+  it is being watched, and a run should not allocate a paragraph of English every
+  recompile. The cost is that it restates knowledge `arrange.ts` owns and can
+  drift from it; a test pins the pairs that matter.
+
+Player cells live under their own storage key rather than in the Library, because
+§15.1's guard scans `LibraryData` for numbers that could become multipliers and a
+cell carries three. These are content, not progression.
+
+**Not built: synth design.** Envelopes, filter curves, FM ratios. It is the
+biggest build and the least of the payoff — what makes this sound like music is
+the arrangement, not the timbres — and every voice has hand-tuned proportions
+that keep it sitting in the mix (`deep` has almost no click *so that* sixteenths
+can live above it). It is also exactly how D-96's rule gets broken by accident,
+and a limiter cannot fix it, because a limiter holds peak and not RMS. If more
+timbral range is wanted, the honest version is a fourth kick, not a slider.
+
+One incidental fix: the menu's key handler fired on every keydown, so an `H` in
+the seed field opened the primer and Enter started the run. Typing is not a
+shortcut.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

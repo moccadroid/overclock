@@ -20,10 +20,7 @@ import { inspector } from './overlays';
 import { renderPrimer } from './primer';
 import { applyEffects, VIEW_EFFECTS } from './visual';
 import type { Audio } from '../audio/audio';
-import { DEMOS, type Demo } from '../audio/demos';
-import { derivePart, type Part } from '../audio/parts';
-import type { ArrangeInput } from '../audio/arrange';
-import { ACTION_BY_ID } from '../content/index';
+import { MusicLab } from './lab';
 
 type Pane = 'setup' | 'library' | 'codex' | 'music' | 'settings' | 'primer';
 
@@ -48,8 +45,7 @@ export class TitleScreen {
   private seed = randomSeed();
   private axiomId = 'ignition';
   private resolve: ((r: SetupResult) => void) | null = null;
-  /** Which demo is auditioning, for the ▶ marker. */
-  private playing: string | null = null;
+  private readonly lab: MusicLab;
   private readonly onKey = (ev: KeyboardEvent): void => this.handleKey(ev);
 
   constructor(
@@ -61,6 +57,7 @@ export class TitleScreen {
     this.el.id = 'title';
     this.el.className = 'overlay';
     root.appendChild(this.el);
+    this.lab = new MusicLab(audio);
   }
 
   /** Resolves when the player starts a run. */
@@ -93,6 +90,15 @@ export class TitleScreen {
   }
 
   private handleKey(ev: KeyboardEvent): void {
+    // Typing is not a shortcut. Without this, an H in the seed field opens the
+    // primer, Tab leaves the pane and Enter starts the run — which was already
+    // true of the seed field and would be unusable in the cell editor.
+    const target = ev.target as HTMLElement | null;
+    if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) {
+      // Escape still gets you out of a field you are stuck in.
+      if (ev.key === 'Escape') target.blur();
+      return;
+    }
     if (ev.key === 'Enter') {
       ev.preventDefault();
       this.start();
@@ -177,22 +183,6 @@ export class TitleScreen {
     });
     panel.querySelector('.go')?.addEventListener('click', () => this.start());
 
-    for (const row of panel.querySelectorAll<HTMLElement>('[data-demo]')) {
-      row.addEventListener('click', () => {
-        const demo = DEMOS.find((d) => d.id === row.dataset.demo);
-        if (!demo) return;
-        this.playing = demo.id;
-        this.audio.preview(demoInput(demo), demoParts(demo));
-        this.render();
-      });
-    }
-
-    panel.querySelector('.track-stop')?.addEventListener('click', () => {
-      this.playing = null;
-      this.audio.silence();
-      this.render();
-    });
-
     for (const slider of panel.querySelectorAll<HTMLInputElement>('[data-setting]')) {
       slider.addEventListener('input', () => {
         const value = Number(slider.value) / 100;
@@ -232,6 +222,8 @@ export class TitleScreen {
     field?.addEventListener('input', () => {
       this.seed = field.value.trim() || randomSeed();
     });
+
+    if (this.pane === 'music') this.lab.bind(panel, () => this.render());
   }
 
   private renderSetup(): string {
@@ -342,45 +334,18 @@ export class TitleScreen {
   /**
    * §18 — the Music pane.
    *
-   * It used to list styles, which stopped being true the moment a Program
-   * became a part: there is no "style" to choose any more, because the track is
-   * written by whatever Engine you build. So it lists **Engines**, shown as the
-   * chains they actually are, and plays exactly what each one would sound like.
+   * It listed styles, then a fixed set of example Engines, and both were the
+   * same mistake one step apart: a *list* implies choosing from it, and there is
+   * nothing here to choose. The track is written by whatever Engine you build.
    *
-   * That makes it a listening room rather than a jukebox — and incidentally a
-   * decent build-inspiration screen, which is a better use of the space than a
-   * column of adjectives was.
+   * So the pane is now the three things you can actually do — build an Engine
+   * and hear it, take the arrangement apart, or write cells for the pool. Seven
+   * canned examples were a worse version of the first of those.
    */
   private renderMusic(): string {
-    const rows = DEMOS.map((demo) => {
-      const on = this.playing === demo.id;
-      const chains = demo.rows
-        .map(
-          (r) =>
-            `<span class="dm-chain">` +
-            [
-              `<span class="k-trigger">${esc(nodeName(r.trigger))}</span>`,
-              ...r.modifiers.map((m) => `<span class="k-modifier">${esc(nodeName(m))}</span>`),
-              `<span class="k-action">${esc(nodeName(r.action))}</span>`,
-            ].join('<span class="k-sep"> › </span>') +
-            `</span>`,
-        )
-        .join('');
-
-      return (
-        `<div class="demo${on ? ' playing' : ''}" ` +
-        `data-demo="${demo.id}">` +
-        `<span class="dm-mark">${on ? '▶' : '▢'}</span>` +
-        `<span class="dm-name">${esc(demo.name)}</span>` +
-        `<span class="dm-rows">${chains}</span>` +
-        `<span class="dm-note">${esc(demo.note)}</span>` +
-        `</div>`
-      );
-    }).join('');
-
     return (
       `<div class="music">` +
-      `<div class="k">engines — click one to hear what it plays</div>` +
+      `<div class="k">the soundtrack is the engine</div>` +
       `<div class="mu-lead">There is no soundtrack to pick. Every Program in your ` +
       `Engine is a part: the <span class="k-action">action</span> chooses the ` +
       `instrument, the <span class="k-trigger">trigger</span> chooses its rhythm, ` +
@@ -388,12 +353,7 @@ export class TitleScreen {
       `are four interlocking lines. The bed underneath is chosen the same way: ` +
       `the kit from your dominant hue, the chords from your triggers, the ` +
       `bassline from how full the Engine already is.</div>` +
-      rows +
-      `<div class="mu-ops">` +
-      `<button class="btn track-stop">STOP</button>` +
-      `<span class="poolnote">nothing here is chosen — every part of this is ` +
-      `selected from your Engine as you build it</span>` +
-      `</div>` +
+      this.lab.render() +
       `</div>`
     );
   }
@@ -502,42 +462,6 @@ function threatOf(e: EnemyDef): string {
   if (e.shieldArc) parts.push('front shield');
   if (e.elite) parts.push('ELITE');
   return parts.join(' · ');
-}
-
-/** The Engine a demo represents, in the shape the arranger reads. */
-function demoInput(demo: Demo): ArrangeInput {
-  return {
-    axiomId: demo.bed,
-    rows: demo.rows.flatMap((r) => {
-      const action = ACTION_BY_ID.get(r.action);
-      if (!action) return [];
-      return [
-        {
-          triggerId: r.trigger,
-          primitive: action.primitive,
-          hue: action.hue,
-          modifiers: r.modifiers,
-        },
-      ];
-    }),
-    intensity: 0.72,
-  };
-}
-
-/** Build a demo's arrangement the same way a real run builds its own. */
-function demoParts(demo: Demo): (Part | null)[] {
-  return demo.rows.map((r, i) => {
-    const action = ACTION_BY_ID.get(r.action);
-    return derivePart(
-      { triggerId: r.trigger, modifierIds: r.modifiers, actionId: r.action, live: true },
-      action ? { primitive: action.primitive, hue: action.hue } : null,
-      i,
-    );
-  });
-}
-
-function esc(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 function chainOf(row: { trigger: string; modifiers: readonly string[]; action: string }): string {

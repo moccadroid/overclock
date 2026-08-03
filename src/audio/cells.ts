@@ -197,6 +197,74 @@ export function validate(library: CellLibrary): void {
   }
 }
 
+// ---------------------------------------------------------------- the pool
+//
+// The arranger reads `pool()`, not `CELLS`. They are the same object until
+// somebody writes a cell of their own, at which point theirs are appended and
+// the arranger simply has more to choose between.
+//
+// That is deliberately the *only* way a player can touch the soundtrack. §18.1
+// says the Engine is the arrangement, and a screen that let you pick your own
+// bassline would make that false — your run would stop sounding like your run
+// and start sounding like whatever you left in a dropdown. Widening the pool
+// keeps the relationship intact: you did not choose the song, you chose what the
+// game is able to say. It is the same deal the Library strikes with the draft.
+
+export const GROUPS = [
+  'kicks',
+  'backbeats',
+  'hats',
+  'basslines',
+  'motifs',
+  'stabs',
+  'harmonies',
+] as const;
+export type CellGroup = (typeof GROUPS)[number];
+
+let extra: CellLibrary | null = null;
+
+/**
+ * Register a library of player-written cells, or `null` to clear.
+ *
+ * Validated against the same rules as the authored ones and rejected whole if
+ * any cell fails — a half-loaded library is how you end up debugging a bar that
+ * drifts a sixteenth every four bars.
+ */
+export function setUserCells(library: CellLibrary | null): void {
+  if (library) validate(library);
+  extra = library;
+}
+
+export function userCells(): CellLibrary | null {
+  return extra;
+}
+
+/** Everything the arranger may choose from, authored plus player-written. */
+export function pool(): CellLibrary {
+  if (!extra) return CELLS;
+  return {
+    kicks: [...CELLS.kicks, ...extra.kicks],
+    backbeats: [...CELLS.backbeats, ...extra.backbeats],
+    hats: [...CELLS.hats, ...extra.hats],
+    basslines: [...CELLS.basslines, ...extra.basslines],
+    motifs: [...CELLS.motifs, ...extra.motifs],
+    stabs: [...CELLS.stabs, ...extra.stabs],
+    harmonies: [...CELLS.harmonies, ...extra.harmonies],
+  };
+}
+
+export function emptyLibrary(): CellLibrary {
+  return {
+    kicks: [],
+    backbeats: [],
+    hats: [],
+    basslines: [],
+    motifs: [],
+    stabs: [],
+    harmonies: [],
+  };
+}
+
 // ------------------------------------------------------------- the library
 //
 // Seeded from the three hand-authored tracks this replaces, so nothing that

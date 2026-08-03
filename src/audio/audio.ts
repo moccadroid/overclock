@@ -500,6 +500,24 @@ export class Audio {
   }
 
   /**
+   * Play an arrangement that was handed over rather than selected.
+   *
+   * Only the Lab uses this. It exists because an editor has to be able to put a
+   * cell somewhere the arranger would never have chosen it — that is the entire
+   * point of an editor — and because a dial you turn has to be audible *now*
+   * rather than at the next sixteen-bar boundary. Nothing in a run reaches this.
+   */
+  auditArrangement(plan: Arrangement, parts: (Part | null)[] = [], intensity = 0.72): void {
+    this.start();
+    this.resumeBusses();
+    this.adopt(plan);
+    this.setParts(parts);
+    this.smoothed = intensity;
+    this.state = { intensity, dominant: 'thermal', heat: 0, stalled: false, meltdown: 0 };
+    if (this.clock) this.clock.bpm = 112;
+  }
+
+  /**
    * The chord under the current bar, as absolute semitones.
    *
    * Held for `barsPerChord`, so a two-chord track turns over every eight or

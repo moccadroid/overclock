@@ -1299,60 +1299,12 @@
   border-style: dotted;
 }
 
-/* Music — a list of Engines, not of styles. */
+/* Music. Not a list of anything — see menu.ts. */
 .mu-lead {
   max-width: 82ch;
   margin: -2px 0 16px;
   color: #56708c;
   line-height: 1.65;
-}
-.demo {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  padding: 9px 10px;
-  border: 1px solid transparent;
-  border-bottom-color: rgba(42, 58, 82, 0.55);
-  cursor: pointer;
-}
-.demo:hover {
-  border-color: var(--structure);
-}
-.demo.on {
-  background: rgba(0, 229, 255, 0.04);
-}
-.demo.playing {
-  border-color: var(--voltaic);
-}
-.dm-mark {
-  flex: none;
-  color: #2f4258;
-}
-.demo.playing .dm-mark {
-  color: #4fbf87;
-}
-.dm-name {
-  flex: 0 0 110px;
-  color: var(--ink-bright);
-  letter-spacing: 0.1em;
-}
-.dm-rows {
-  flex: 1 1 46%;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.dm-chain {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  line-height: 1.6;
-}
-.dm-note {
-  flex: 1 1 34%;
-  min-width: 0;
-  color: #56708c;
 }
 .mu-ops {
   display: flex;
@@ -1373,6 +1325,208 @@
 .mu-ops button.on {
   border-color: var(--voltaic);
   color: var(--voltaic);
+}
+
+/* ---- §18 the Music Lab: Studio, the Desk, Cells ----
+   Sits under the Engine list, behind its own tabs. Everything here is the same
+   document as the rest of the menu — a control that looked like a DAW would be
+   a hole in §16 the size of a mixing desk. */
+.lab {
+  margin-top: 26px;
+  border-top: 1px solid var(--structure);
+  padding-top: 16px;
+}
+.subtabs {
+  display: flex;
+  gap: 22px;
+  margin-bottom: 14px;
+}
+.subtab {
+  color: #3f5570;
+  letter-spacing: 0.22em;
+  font-size: 10px;
+  cursor: pointer;
+  padding-bottom: 3px;
+  border-bottom: 1px solid transparent;
+}
+.subtab:hover {
+  color: var(--ink);
+}
+.subtab.on {
+  color: var(--voltaic);
+  border-bottom-color: var(--voltaic);
+}
+
+/* A select that reads as a value you can change, not as a form control. */
+.lab-sel {
+  appearance: none;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid transparent;
+  border-bottom: 1px solid var(--structure);
+  color: var(--ink-bright);
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 4px;
+  cursor: pointer;
+  max-width: 15ch;
+}
+.lab-sel:hover,
+.lab-sel:focus {
+  border-color: var(--voltaic);
+  color: var(--voltaic);
+  outline: none;
+}
+.lab-sel option {
+  background: #0a1018;
+  color: var(--ink-bright);
+}
+
+.lab-engine {
+  border: 1px solid var(--structure);
+  padding: 10px 12px;
+}
+.lab-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+}
+.lab-n {
+  flex: none;
+  width: 14px;
+  color: #2f4258;
+}
+.lab-ops {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+.btn.tiny {
+  padding: 2px 7px;
+  font-size: 10px;
+  margin-left: auto;
+}
+.btn.play {
+  border-color: var(--voltaic);
+  color: var(--voltaic);
+}
+.lab-slider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #46586e;
+}
+.lab-slider input {
+  width: 110px;
+}
+
+/* The reason column. This is the whole point of the Studio — without it the
+   screen is a toy, and with it the mapping is learnable. */
+.why {
+  margin-top: 18px;
+  border-left: 1px solid var(--structure);
+  padding-left: 14px;
+}
+.why-row {
+  display: flex;
+  gap: 12px;
+  padding: 3px 0;
+  line-height: 1.6;
+}
+.why-slot {
+  flex: 0 0 86px;
+  color: #3f5570;
+  letter-spacing: 0.14em;
+}
+.why-val {
+  flex: 0 0 24ch;
+  color: var(--ink-bright);
+  white-space: nowrap;
+}
+.why-txt {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: #56708c;
+}
+
+.desk {
+  display: flex;
+  gap: 34px;
+  align-items: flex-start;
+}
+.desk-col {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.dial {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 0;
+}
+.dial-k {
+  flex: 0 0 96px;
+  color: #46586e;
+}
+.dial input[type='range'] {
+  width: 120px;
+}
+.dial .set-val {
+  flex: 0 0 5ch;
+  color: var(--ink-bright);
+}
+.dial-note {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: #2f4258;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dial.over .dial-note {
+  color: var(--thermal);
+}
+.dial.over .dial-k {
+  color: var(--thermal);
+}
+
+.cell-edit {
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--structure);
+  color: var(--ink-bright);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.55;
+  padding: 10px 12px;
+  resize: vertical;
+  tab-size: 2;
+}
+.cell-edit:focus {
+  outline: none;
+  border-color: var(--voltaic);
+}
+.cell-note {
+  margin-top: 10px;
+  padding: 7px 10px;
+  border-left: 2px solid;
+  line-height: 1.6;
+}
+.cell-note.ok {
+  border-color: #4fbf87;
+  color: #4fbf87;
+}
+.cell-note.bad {
+  border-color: var(--thermal);
+  color: var(--thermal);
+}
+.mu-lead code {
+  color: var(--ink-bright);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 0 3px;
 }
 
 /* One button. Every clickable surface routes through this — the raw browser

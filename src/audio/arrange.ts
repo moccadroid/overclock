@@ -21,7 +21,7 @@
  * dictates.
  */
 import {
-  CELLS,
+  pool,
   type Feel,
   type HarmonyCell,
   type MelodicCell,
@@ -198,6 +198,10 @@ export function arrange(input: ArrangeInput): Arrangement {
     `${input.axiomId}|` +
     rows.map((r) => `${r.triggerId}:${r.primitive}:${r.hue}:${r.modifiers.join(',')}`).join(';');
   const seed = hash(signature);
+
+  // Authored cells plus whatever the player has written. Read once, so a cell
+  // added mid-audition cannot change the arrangement halfway through building it.
+  const CELLS = pool();
 
   const hue = dominantHue(rows);
   const modifiers = rows.flatMap((r) => r.modifiers);
