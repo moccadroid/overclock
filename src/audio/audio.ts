@@ -45,8 +45,22 @@ import {
   type UiSound,
   type VoiceCtx,
 } from './voices';
-import { CHORD_TONES, TRACKS, trackForAxiom, type Track } from './tracks';
+import {
+  parseMelodic,
+  parsePerc,
+  type MelodicStep,
+  type PercStep,
+} from './cells';
+import { arrange, openingArrangement, type ArrangeInput, type Arrangement } from './arrange';
 import type { Part } from './parts';
+
+/** Chord tones as semitones from the chord root. */
+const CHORD_TONES: Record<string, number[]> = {
+  min: [0, 3, 7],
+  maj: [0, 4, 7],
+  sus: [0, 5, 7],
+  min7: [0, 3, 7, 10],
+};
 
 /**
  * §18.4 — polyphony cap. Three, not ten: the point of an accent is that it is
@@ -101,6 +115,49 @@ export interface AudioState {
   stalled: boolean;
   /** §13.2 — Meltdown detunes, dirties, and finally moves the tempo. */
   meltdown: number;
+}
+
+/**
+ * A selected arrangement, parsed once.
+ *
+ * Cells are strings so a human can read and edit them; the sequencer needs
+ * arrays. Parsing happens when an arrangement is adopted — once every sixteen
+ * bars at worst — rather than on every one of the sixteen steps in every bar.
+ */
+interface CompiledCells {
+  kick: (PercStep | null)[];
+  backbeat: (PercStep | null)[];
+  hats: (PercStep | null)[];
+  stab: (PercStep | null)[];
+  bass: (MelodicStep | null)[];
+  motif: (MelodicStep | null)[];
+}
+
+function compile(plan: Arrangement): CompiledCells {
+  return {
+    kick: parsePerc(plan.kick.pattern),
+    backbeat: parsePerc(plan.backbeat.pattern),
+    hats: parsePerc(plan.hats.pattern),
+    stab: parsePerc(plan.stab.pattern),
+    bass: parseMelodic(plan.bass),
+    motif: parseMelodic(plan.motif),
+  };
+}
+
+/**
+ * Read a cell at the global step count rather than the bar index.
+ *
+ * A 32-step cell is two bars of material, and indexing it by position-in-bar
+ * would play only its first half forever. This is what lets a motif be a line
+ * rather than a cell that repeats.
+ */
+function step<T>(cell: (T | null)[], count: number): T | null {
+  return cell[count % cell.length] ?? null;
+}
+
+/** Which absolute semitone a melodic step lands on, over the current chord. */
+function tone(tones: number[], s: MelodicStep): number {
+  return tones[s.tone % tones.length]! + s.octave * 12;
 }
 
 export class Audio {
@@ -165,7 +222,19 @@ export class Audio {
   private occasions: AudioCue[] = [];
   private muted = false;
   private volume = 0.7;
-  private track: Track = TRACKS[0]!;
+  /**
+   * What is playing. Selected by `arrange` from the Engine, never authored.
+   *
+   * `pending` holds a newly selected arrangement until the next 16-bar boundary.
+   * A build changes the moment you take a Draft, and swapping the bassline
+   * mid-phrase reads as a glitch rather than as a response — which is also just
+   * how anyone mixing two records does it.
+   */
+  private plan: Arrangement = openingArrangement('ignition');
+  private pendingPlan: Arrangement | null = null;
+  /** Set by `beginRun`; makes the next `setEngine` skip the phrase boundary. */
+  private freshRun = true;
+  private cells = compile(openingArrangement('ignition'));
   /** Bars elapsed, for walking the progression. */
   private bar = 0;
   private silenced = false;
@@ -175,6 +244,8 @@ export class Audio {
   private lastBassHz = 0;
   private lastLeadHz = 0;
   private lastHover = 0;
+  /** Steps still owed to a big event. See `bigEvent`. */
+  private claim = 0;
   /**
    * §18.1 — one part per live Program. This is the arrangement, and it is
    * literally the player's Engine. See parts.ts.
@@ -327,8 +398,9 @@ export class Audio {
     );
   }
 
-  get trackId(): string {
-    return this.track.id;
+  /** What the arrangement currently is, for the Music screen. */
+  get arrangement(): Arrangement {
+    return this.plan;
   }
 
   /** True while the arrangement is running — the Music pane shows a ▶ for it. */
@@ -362,8 +434,36 @@ export class Audio {
     this.clock?.start();
   }
 
-  setTrack(track: Track): void {
-    this.track = track;
+  /**
+   * Hand over the Engine. Selection is cheap and deterministic, so this can be
+   * called whenever the build changes without any bookkeeping about whether it
+   * really did.
+   */
+  setEngine(input: ArrangeInput): void {
+    const next = arrange(input);
+    if (next.signature === this.plan.signature && next.harmony.id === this.plan.harmony.id) return;
+    // The first arrangement of a run lands immediately; every later one waits
+    // for a phrase boundary. The bar counter cannot stand in for "first" — it
+    // runs off a step count that never resets, so the second run of a session
+    // would open on the previous run's bed for up to half a minute.
+    if (this.freshRun) this.adopt(next);
+    else this.pendingPlan = next;
+    this.freshRun = false;
+  }
+
+  /**
+   * A new run is starting. Only tells the arranger to stop waiting for a phrase
+   * boundary — the music itself keeps running, because cutting it dead between
+   * the menu and the arena is worse than one abrupt change of bed.
+   */
+  beginRun(): void {
+    this.freshRun = true;
+  }
+
+  private adopt(plan: Arrangement): void {
+    this.plan = plan;
+    this.cells = compile(plan);
+    this.pendingPlan = null;
   }
 
   /**
@@ -378,19 +478,14 @@ export class Audio {
     this.lastPartHz = parts.map(() => 0);
   }
 
-  /** The Axiom you started with is the song you hear. */
-  setTrackForAxiom(axiomId: string): void {
-    this.track = trackForAxiom(axiomId);
-  }
-
   /**
-   * Menu preview: run the arrangement with no game behind it, at a fixed
-   * intensity high enough to hear every layer the track has.
+   * Menu preview: run an Engine's arrangement with no game behind it, at a fixed
+   * intensity high enough to hear every layer it has earned.
    */
-  preview(track: Track, parts: (Part | null)[] = [], intensity = 0.72): void {
+  preview(input: ArrangeInput, parts: (Part | null)[] = [], intensity = 0.72): void {
     this.start();
     this.resumeBusses();
-    this.track = track;
+    this.adopt(arrange({ ...input, intensity }));
     this.setParts(parts);
     this.bar = 0;
     this.smoothed = intensity;
@@ -412,11 +507,11 @@ export class Audio {
    * a change anybody notices.
    */
   private chordTones(): number[] {
-    const prog = this.track.progression;
-    const index = Math.floor(this.bar / this.track.barsPerChord) % prog.length;
-    const c = prog[index]!;
-    const base = this.track.key + c.root;
-    return CHORD_TONES[c.quality].map((t) => base + t);
+    const harmony = this.plan.harmony;
+    const index = Math.floor(this.bar / harmony.barsPerChord) % harmony.chords.length;
+    const c = harmony.chords[index]!;
+    const base = this.plan.key + c.root;
+    return (CHORD_TONES[c.quality] ?? CHORD_TONES.min!).map((t) => base + t);
   }
 
   /** 0..1 across a 16-bar phrase. The genre's actual sense of going somewhere. */
@@ -442,7 +537,7 @@ export class Audio {
     // Meltdown — a once-per-run, permanent, announced event — shifts it.
     this.clock.bpm = 112 + state.meltdown * 12;
     this.delay.delayTime.setTargetAtTime((60 / this.clock.bpm) * 0.75, this.ctx.currentTime, 0.2);
-    this.echoSend.gain.setTargetAtTime(this.track.echo, this.ctx.currentTime, 0.3);
+    this.echoSend.gain.setTargetAtTime(this.plan.echo, this.ctx.currentTime, 0.3);
 
     // Busier means dirtier, not louder. Drive climbs with intensity while the
     // trim comes down to pay for the layers that intensity added.
@@ -498,11 +593,16 @@ export class Audio {
     if (!this.ctx) return;
     const punch = this.voice(this.punchBus);
     const music = this.voice(this.musicBus);
-    const t = this.track;
+    const plan = this.plan;
+    const cells = this.cells;
     const i = this.smoothed;
     const beat = 60 / (this.clock?.bpm ?? 112);
 
-    if (index === 0) this.bar = Math.floor(count / 16);
+    if (index === 0) {
+      this.bar = Math.floor(count / 16);
+      // A new arrangement lands on a phrase boundary and nowhere else.
+      if (this.pendingPlan && this.bar % PHRASE_BARS === 0) this.adopt(this.pendingPlan);
+    }
     const tones = this.chordTones();
     this.tones = tones;
 
@@ -520,77 +620,78 @@ export class Audio {
 
     // Swing: delay the offbeat sixteenths. A little of this is the whole
     // difference between a machine and a groove.
-    const swung = index % 2 === 1 ? at + beat * 0.25 * t.swing : at;
+    const swung = index % 2 === 1 ? at + beat * 0.25 * plan.swing : at;
 
-    if (t.kick[index]) {
-      kick(punch, at, 0.95, t.kickVoice);
+    // A big detonation owns the next sixteenth. See `bigEvent`.
+    const claimed = this.claim > 0;
+    if (claimed) this.claim--;
+
+    const kickStep = step(cells.kick, count);
+    if (kickStep) {
+      kick(punch, at, 0.95 * kickStep.gain, plan.kickVoice);
       this.duck(at);
     }
-    // The backbeat on 2 and 4 - with the kick, the thing the body counts. It
+
+    // The backbeat on 2 and 4 — with the kick, the thing the body counts. It
     // drops for the last bar of a phrase, which is what makes the next downbeat
     // land.
-    if (t.clap[index] && this.bar % PHRASE_BARS !== PHRASE_BARS - 1) {
-      perc(punch, at, 0.75, t.percVoice);
+    const percStep = step(cells.backbeat, count);
+    if (percStep && this.bar % PHRASE_BARS !== PHRASE_BARS - 1) {
+      perc(punch, at, 0.75 * percStep.gain, plan.percVoice);
     }
 
-    const d = i * t.drive;
-    if (d > 0.08 && index % 4 === 2) hat(music, swung, 0.8);
-    if (d > 0.4 && index % 2 === 1) hat(music, swung, 0.35);
-    if ((d > 0.7 || phrase > 0.6) && index % 8 === 6) hat(music, swung, 0.55, true);
+    const hatStep = step(cells.hats, count);
+    const drive = i * plan.drive;
+    if (hatStep && drive > 0.08) {
+      hat(music, swung, 0.8 * hatStep.gain, hatStep.open);
+    }
 
-    // The bassline walks the chord: pattern values index into its tones, so the
+    // The bassline walks the chord: cell values index into its tones, so the
     // bass is always playing the harmony rather than a line beside it.
-    if (i > 0.03) {
-      const pattern = t.bass[i > 0.7 ? 2 : i > 0.3 ? 1 : 0]!;
-      const tone = pattern[index]!;
-      if (tone >= 0) {
-        const hz = semiHz(tones[tone % tones.length]! - 12);
-        bass(music, swung, hz, 0.85, {
-          voice: t.bassVoice,
-          q: t.bassQ,
-          brightness: t.bassBrightness * colour,
-          accent: t.accents?.includes(index) ?? false,
-          // Slide from the previous note when they are adjacent sixteenths.
-          // Glide is what makes a 303 line sound played rather than stepped.
-          glideFrom: this.lastBassHz > 0 && pattern[(index + 15) % 16]! >= 0 ? this.lastBassHz : 0,
-        });
-        this.lastBassHz = hz;
-      } else {
-        this.lastBassHz = 0;
-      }
+    const bassStep = step(cells.bass, count);
+    if (bassStep && !bassStep.hold && i > 0.03 && !claimed) {
+      const hz = semiHz(tone(tones, bassStep) - 12);
+      bass(music, swung, hz, 0.85, {
+        voice: plan.bassVoice,
+        q: plan.bassQ,
+        brightness: plan.bassBrightness * colour,
+        accent: bassStep.accent,
+        glideFrom: bassStep.slide ? this.lastBassHz : 0,
+      });
+      this.lastBassHz = hz;
+    } else if (!bassStep) {
+      this.lastBassHz = 0;
     }
 
     if (index === 0) sub(punch, at, semiHz(tones[0]! - 24), 0.7, beat * 2);
 
     // The stab. Enters a quarter of the way into a phrase and is most of what
     // reads as melody in this genre.
-    if (t.stab[index] && (phrase > 0.24 || i > 0.5)) {
-      stab(music, swung, tones, 0.9, t.stabVoice);
-      if (t.echo > 0.01) stab(this.voice(this.echoSend), swung, tones, 0.9, t.stabVoice);
-    }
-
-    // The motif: one or two bars, repeated unchanged. The hook is repetition,
-    // not development - so it arrives on a phrase boundary and then never varies.
-    // The motif walks its own length, so a 32-step line reads as two bars of
-    // tune rather than the same bar twice.
-    if (phrase > 0.48 || i > 0.65) {
-      const step = t.motif[count % t.motif.length]!;
-      if (step >= 0) {
-        const octave = step >= 3 ? 12 : 0;
-        const hz = semiHz(tones[step % 3]! + 24 + octave);
-        motif(music, swung, hz, 0.9, t.leadVoice, this.lastLeadHz);
-        if (t.echo > 0.01) motif(this.voice(this.echoSend), swung, hz, 0.9, t.leadVoice);
-        this.lastLeadHz = hz;
-      } else {
-        this.lastLeadHz = 0;
+    const stabStep = step(cells.stab, count);
+    if (stabStep && (phrase > 0.24 || i > 0.5)) {
+      stab(music, swung, tones, 0.9 * stabStep.gain, plan.stabVoice);
+      if (plan.echo > 0.01) {
+        stab(this.voice(this.echoSend), swung, tones, 0.9 * stabStep.gain, plan.stabVoice);
       }
     }
 
-    // The chord, chopped onto the grid. The old sustained pad swelled for two
-    // seconds with no relationship to the beat, which is what made it sound
-    // ethereal and disconnected; harmony in this genre is carried rhythmically.
+    // The motif: one or two bars, repeated unchanged. The hook is repetition,
+    // not development — so it arrives on a phrase boundary and then never varies.
+    const motifStep = step(cells.motif, count);
+    if (motifStep && !motifStep.hold && (phrase > 0.48 || i > 0.65)) {
+      const hz = semiHz(tone(tones, motifStep) + 24);
+      motif(music, swung, hz, 0.9, plan.leadVoice, this.lastLeadHz);
+      if (plan.echo > 0.01) motif(this.voice(this.echoSend), swung, hz, 0.9, plan.leadVoice);
+      this.lastLeadHz = hz;
+    } else if (!motifStep) {
+      this.lastLeadHz = 0;
+    }
+
+    // The chord, chopped onto the grid. A sustained pad swells with no
+    // relationship to the beat, which is what made the old one sound ethereal
+    // and disconnected; harmony in this genre is carried rhythmically.
     if (i > 0.3 && index % 8 === 4) {
-      gatedChord(music, swung, tones, 0.85, beat * 0.45, t.padWave);
+      gatedChord(music, swung, tones, 0.85, beat * 0.45, plan.padWave);
     }
 
     this.playParts(music, swung, index, tones);
@@ -598,12 +699,36 @@ export class Audio {
   }
 
   /**
+   * A detonation big enough to be the loudest thing on screen.
+   *
+   * The best moments this soundtrack produces are the ones where a Nova lands
+   * exactly on a note, and until now that was luck — the audio layer knew what
+   * the simulation did but nothing about what the *screen* was doing. This is
+   * the channel that makes it deliberate: a large burst claims the next
+   * sixteenth, the bass gets out of the way for it, and the chord hits with it.
+   *
+   * Quantized like everything else, because an accent off the grid is a mistake
+   * rather than an accent.
+   */
+  bigEvent(hue: Hue): void {
+    if (!this.ctx || !this.clock) return;
+    const at = this.clock.quantize(this.ctx.currentTime);
+    const tones = this.tones;
+    const voice = this.voice(this.punchBus);
+    sub(voice, at, semiHz(tones[0]! - 24), 0.9, 0.45);
+    gatedChord(this.voice(this.musicBus), at, tones, 1, 0.4, this.plan.padWave);
+    playHue(this.voice(this.engineBus), hue, at, semiHz(tones[0]! + 24), 0.8);
+    // Two steps of room. Any longer and the groove notices the hole.
+    this.claim = 2;
+  }
+
+  /**
    * The Engine, playing. One line per live Program.
    *
-   * This is §18.1's claim made literal: four rows are four interlocking
-   * sequences, and rebuilding your Engine rewrites the track. Parts fan out
-   * across the chord by index so two rows never land on the same note, which is
-   * the difference between harmony and four copies of one line.
+   * These are the parts derived in `parts.ts` — the layer that responds to your
+   * build second by second, over the arrangement `arrange.ts` selected for it.
+   * Parts fan out across the chord by index so two rows never land on the same
+   * note, which is the difference between harmony and four copies of one line.
    */
   private playParts(music: VoiceCtx, swung: number, index: number, tones: number[]): void {
     for (let p = 0; p < this.parts.length; p++) {
@@ -612,24 +737,20 @@ export class Audio {
         if (part) this.lastPartHz[p] = 0;
         continue;
       }
-      // Fixed level. A part is either in the arrangement or it is not — fading
-      // it up with intensity is the same "louder when busy" mistake in miniature,
-      // and four parts all swelling at once is the version that hurts.
-      const level = part.gain;
       const hz = semiHz(tones[part.tone % tones.length]! + 24 + part.register);
       playPart(
         music,
         part.voice,
         swung,
         hz,
-        level,
+        part.gain,
         part.length,
         part.bite,
         part.glide ? (this.lastPartHz[p] ?? 0) : 0,
       );
       if (part.echo > 0.01) {
         const send = this.voice(this.echoSend);
-        playPart(send, part.voice, swung, hz, level * part.echo, part.length, part.bite);
+        playPart(send, part.voice, swung, hz, part.gain * part.echo, part.length, part.bite);
       }
       this.lastPartHz[p] = hz;
     }
@@ -727,7 +848,7 @@ export class Audio {
   /** An occasion chord: three hits on the beat, so it lands in the track. */
   private hitChord(voice: VoiceCtx, at: number, tones: number[], gain: number, beat: number): void {
     for (let i = 0; i < 3; i++) {
-      gatedChord(voice, at + beat * i * 0.5, tones, gain * (1 - i * 0.18), beat * 0.42, this.track.padWave);
+      gatedChord(voice, at + beat * i * 0.5, tones, gain * (1 - i * 0.18), beat * 0.42, this.plan.padWave);
     }
   }
 

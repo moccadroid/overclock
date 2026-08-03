@@ -20,9 +20,9 @@ import { inspector } from './overlays';
 import { renderPrimer } from './primer';
 import { applyEffects, VIEW_EFFECTS } from './visual';
 import type { Audio } from '../audio/audio';
-import { TRACK_BY_ID, trackForAxiom } from '../audio/tracks';
 import { DEMOS, type Demo } from '../audio/demos';
 import { derivePart, type Part } from '../audio/parts';
+import type { ArrangeInput } from '../audio/arrange';
 import { ACTION_BY_ID } from '../content/index';
 
 type Pane = 'setup' | 'library' | 'codex' | 'music' | 'settings' | 'primer';
@@ -181,21 +181,12 @@ export class TitleScreen {
       row.addEventListener('click', () => {
         const demo = DEMOS.find((d) => d.id === row.dataset.demo);
         if (!demo) return;
-        // Playing a demo also adopts its bed — the drums and key are the only
-        // part of a track this screen can still meaningfully *choose*, since the
-        // rest is written by whatever Engine you go on to build.
-        this.library.setTrack(demo.bed);
         this.playing = demo.id;
-        this.audio.preview(trackForAxiom(demo.bed), demoParts(demo));
+        this.audio.preview(demoInput(demo), demoParts(demo));
         this.render();
       });
     }
-    panel.querySelector('.track-auto')?.addEventListener('click', () => {
-      this.library.setTrack('');
-      this.playing = null;
-      this.audio.silence();
-      this.render();
-    });
+
     panel.querySelector('.track-stop')?.addEventListener('click', () => {
       this.playing = null;
       this.audio.silence();
@@ -361,9 +352,6 @@ export class TitleScreen {
    * column of adjectives was.
    */
   private renderMusic(): string {
-    const stored = this.library.snapshot.settings.track;
-    const bed = TRACK_BY_ID.has(stored) ? stored : '';
-
     const rows = DEMOS.map((demo) => {
       const on = this.playing === demo.id;
       const chains = demo.rows
@@ -380,7 +368,7 @@ export class TitleScreen {
         .join('');
 
       return (
-        `<div class="demo${on ? ' playing' : ''}${bed === demo.bed ? ' on' : ''}" ` +
+        `<div class="demo${on ? ' playing' : ''}" ` +
         `data-demo="${demo.id}">` +
         `<span class="dm-mark">${on ? '▶' : '▢'}</span>` +
         `<span class="dm-name">${esc(demo.name)}</span>` +
@@ -397,14 +385,14 @@ export class TitleScreen {
       `Engine is a part: the <span class="k-action">action</span> chooses the ` +
       `instrument, the <span class="k-trigger">trigger</span> chooses its rhythm, ` +
       `the <span class="k-modifier">modifiers</span> process it. Four live rows ` +
-      `are four interlocking lines. What you *can* choose is the bed underneath — ` +
-      `the drums, the key, the chord — and that comes from your Axiom.</div>` +
+      `are four interlocking lines. The bed underneath is chosen the same way: ` +
+      `the kit from your dominant hue, the chords from your triggers, the ` +
+      `bassline from how full the Engine already is.</div>` +
       rows +
       `<div class="mu-ops">` +
-      `<button class="btn track-auto${bed === '' ? ' on' : ''}">` +
-      `BED: FOLLOW MY AXIOM</button>` +
       `<button class="btn track-stop">STOP</button>` +
-      `<span class="poolnote">${bed === '' ? 'using ' + trackForAxiom(this.axiomId).name : 'bed pinned to ' + (TRACK_BY_ID.get(bed)?.name ?? bed)}</span>` +
+      `<span class="poolnote">nothing here is chosen — every part of this is ` +
+      `selected from your Engine as you build it</span>` +
       `</div>` +
       `</div>`
     );
@@ -514,6 +502,26 @@ function threatOf(e: EnemyDef): string {
   if (e.shieldArc) parts.push('front shield');
   if (e.elite) parts.push('ELITE');
   return parts.join(' · ');
+}
+
+/** The Engine a demo represents, in the shape the arranger reads. */
+function demoInput(demo: Demo): ArrangeInput {
+  return {
+    axiomId: demo.bed,
+    rows: demo.rows.flatMap((r) => {
+      const action = ACTION_BY_ID.get(r.action);
+      if (!action) return [];
+      return [
+        {
+          triggerId: r.trigger,
+          primitive: action.primitive,
+          hue: action.hue,
+          modifiers: r.modifiers,
+        },
+      ];
+    }),
+    intensity: 0.72,
+  };
 }
 
 /** Build a demo's arrangement the same way a real run builds its own. */

@@ -22,8 +22,8 @@ import { VISUAL } from './visual';
 import { Library } from '../meta/profile';
 import { Stinger } from './stinger';
 import type { Audio } from '../audio/audio';
-import { TRACK_BY_ID } from '../audio/tracks';
 import { derivePart } from '../audio/parts';
+import type { EngineRow } from '../audio/arrange';
 import { ACTION_BY_ID } from '../content/index';
 
 type Mode =
@@ -64,6 +64,8 @@ export class Game {
   private muted = false;
   /** Last Engine shape handed to the audio layer, so parts rebuild only on change. */
   private arrangementSignature = '';
+  /** Highest FX id already considered for a big-event accent. */
+  private lastBigFx = 0;
 
   /**
    * §15.2 — the Library is the only thing here that outlives the run. Audio is
@@ -112,13 +114,8 @@ export class Game {
     this.muted = this.library.snapshot.settings.muted;
     this.audio.setMuted(this.muted);
     this.audio.setVolume(this.library.snapshot.settings.volume);
-    // A chosen track wins; otherwise the Axiom decides, so the Program you
-    // start with is also the sound you start with.
-    const chosen = this.library.snapshot.settings.track;
-    const track = chosen ? TRACK_BY_ID.get(chosen) : undefined;
-    if (track) this.audio.setTrack(track);
-    else this.audio.setTrackForAxiom(this.world.config.axiomId);
     this.audio.start();
+    this.audio.beginRun();
 
     this.lastFrame = performance.now();
     requestAnimationFrame((t) => this.frame(t));
@@ -341,6 +338,14 @@ export class Game {
     if (signature === this.arrangementSignature) return;
     this.arrangementSignature = signature;
 
+    // §18.1 — the same Engine, twice: once as parts that play, once as the
+    // arrangement they play over. Both derived, neither authored.
+    this.audio.setEngine({
+      axiomId: w.config.axiomId,
+      rows: this.engineRows(),
+      intensity: Math.min(1, Math.log10(1 + w.eps) / 2.4),
+    });
+
     this.audio.setParts(
       w.engine.programs.map((program, i) => {
         const action = program.actionId ? ACTION_BY_ID.get(program.actionId) : null;
@@ -356,6 +361,24 @@ export class Game {
         );
       }),
     );
+  }
+
+  /** The live Programs, reduced to what the arranger needs. */
+  private engineRows(): EngineRow[] {
+    const w = this.world;
+    const rows: EngineRow[] = [];
+    w.engine.programs.forEach((program, i) => {
+      if (!w.engine.compiled[i]?.live || !program.triggerId || !program.actionId) return;
+      const action = ACTION_BY_ID.get(program.actionId);
+      if (!action) return;
+      rows.push({
+        triggerId: program.triggerId,
+        primitive: action.primitive,
+        hue: action.hue,
+        modifiers: program.modifierIds.filter((m): m is string => m !== null),
+      });
+    });
+    return rows;
   }
 
   /**
@@ -385,6 +408,24 @@ export class Game {
       );
     }
     cues.length = 0;
+    this.reportBigEvents();
+  }
+
+  /**
+   * Tell the audio layer when something enormous just happened *on screen*.
+   *
+   * The sim's cues describe what the Engine did; they say nothing about scale.
+   * A Nova and a Bolt are both one fire event, but only one of them fills the
+   * arena with light — and the moments this soundtrack is best at are the ones
+   * where that light lands on a note. This is the only place the audio layer
+   * learns anything from the presentation side, and it is worth the seam.
+   */
+  private reportBigEvents(): void {
+    for (const fx of this.world.fx) {
+      if (!fx.alive || fx.id <= this.lastBigFx) continue;
+      this.lastBigFx = Math.max(this.lastBigFx, fx.id);
+      if (fx.kind === 'burst' && fx.radius >= 110) this.audio.bigEvent(fx.hue);
+    }
   }
 
   /**

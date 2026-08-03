@@ -84,7 +84,6 @@ export interface LibraryData {
   settings: {
     muted: boolean;
     volume: number;
-    track: string;
     /**
      * §20.1 — which visual effects are on. Ids, like everything else here: the
      * numbers live in `visual.ts` where they can be tuned together, and §15.1's
@@ -103,7 +102,7 @@ function emptyData(): LibraryData {
     bestScore: 0,
     bestDepth: 0,
     bestTime: 0,
-    settings: { muted: false, volume: 0.7, track: '', effects: ['lighting', 'bloom'] },
+    settings: { muted: false, volume: 0.7, effects: ['lighting', 'bloom'] },
   };
 }
 
@@ -136,9 +135,6 @@ export class Library {
         settings: {
           muted: parsed.settings?.muted === true,
           volume: number(parsed.settings?.volume) ?? base.settings.volume,
-          // '' means "let the seed choose", which is the default and the one
-          // that keeps a shared seed sounding the same for everyone.
-          track: typeof parsed.settings?.track === 'string' ? parsed.settings.track : '',
           effects: array(parsed.settings?.effects) ?? base.settings.effects,
         },
       };
@@ -223,11 +219,6 @@ export class Library {
 
   setAudio(muted: boolean, volume: number): void {
     this.data.settings = { ...this.data.settings, muted, volume };
-    this.save();
-  }
-
-  setTrack(track: string): void {
-    this.data.settings = { ...this.data.settings, track };
     this.save();
   }
 

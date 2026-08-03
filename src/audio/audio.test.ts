@@ -5,10 +5,11 @@ import { World } from '../sim/world';
 import { botInput } from '../harness/bot';
 import { hashWorld } from '../sim/hash';
 import { SIM_DT } from '../sim/tunables';
-import { noteHz, semiHz } from './voices';
-import { CHORD_TONES, TRACKS, trackForAxiom } from './tracks';
+import { noteHz } from './voices';
 import { derivePart } from './parts';
 import { DEMOS } from './demos';
+import { CELLS, parseMelodic, parsePerc, validate } from './cells';
+import { arrange, openingArrangement } from './arrange';
 import { ACTION_BY_ID, MODIFIER_BY_ID, TRIGGER_BY_ID } from '../content/index';
 import { AXIOMS } from '../content/index';
 
@@ -132,98 +133,6 @@ describe('the instrument (GDD §18.3)', () => {
   });
 });
 
-describe('the songs (GDD §18.2)', () => {
-  it('every track is playable — patterns are the right length and in range', () => {
-    // A pattern of the wrong length does not crash; it silently drifts against
-    // the bar, which is the kind of bug you only find by listening carefully to
-    // the fifth track twenty minutes in.
-    for (const t of TRACKS) {
-      expect(t.kick, `${t.id} kick`).toHaveLength(16);
-      expect(t.bass, `${t.id} bass tiers`).toHaveLength(3);
-      for (const pattern of t.bass) {
-        expect(pattern, `${t.id} bass pattern`).toHaveLength(16);
-      }
-      expect(t.clap, `${t.id} clap`).toHaveLength(16);
-      expect(t.stab, `${t.id} stab`).toHaveLength(16);
-      // A motif may run one or two bars — Circuit's is two, which is what makes
-      // it a line you could hum rather than a cell that repeats. Anything not a
-      // whole number of bars drifts against the loop.
-      expect(t.motif.length % 16, `${t.id} motif is not whole bars`).toBe(0);
-      expect(t.motif.length).toBeGreaterThan(0);
-      expect(t.kick.some(Boolean), `${t.id} has no kick`).toBe(true);
-      // The clap on 2 and 4 is the backbone. A track without one is missing the
-      // thing the body counts, which is how the first version sounded thin.
-      expect(t.clap.some(Boolean), `${t.id} has no clap`).toBe(true);
-    }
-  });
-
-  it('stays modal — techno is not a chord journey', () => {
-    // The mistake the first version made: four chords, one per bar, is a pop
-    // song and sounds like one. This genre holds a tonal centre and moves the
-    // filter instead.
-    for (const t of TRACKS) {
-      expect(t.progression.length, `${t.id} has too many chords`).toBeLessThanOrEqual(2);
-      expect(t.barsPerChord, `${t.id} changes chord too fast`).toBeGreaterThanOrEqual(2);
-      expect(t.progression[0]!.root, `${t.id} does not open on its tonic`).toBe(0);
-      for (const c of t.progression) {
-        expect(CHORD_TONES[c.quality], `${t.id} ${c.quality}`).toBeDefined();
-        expect(c.root).toBeGreaterThanOrEqual(0);
-        expect(c.root).toBeLessThan(12);
-      }
-    }
-  });
-
-  it('each track is built from a different set of instruments', () => {
-    // The point of the rewrite: two tracks sharing a synth with different knob
-    // settings still sound like the same band. Distinctness has to come from
-    // the voices, so no two tracks may pick the same one everywhere.
-    const keys = ['kickVoice', 'percVoice', 'bassVoice', 'stabVoice', 'leadVoice'] as const;
-    for (const key of keys) {
-      const used = new Set(TRACKS.map((t) => t[key]));
-      expect(used.size, `every track uses the same ${key}`).toBe(TRACKS.length);
-    }
-  });
-
-  it('every Axiom has a song, and every song has an Axiom', () => {
-    // The Music menu is one row per Axiom. An Axiom with no track silently falls
-    // back to the first one, which would make two Axioms sound identical and
-    // look like a bug in the menu rather than a gap in the data.
-    const ids = new Set(TRACKS.map((t) => t.id));
-    expect(ids.size).toBe(TRACKS.length);
-    for (const a of AXIOMS) {
-      expect(ids.has(a.id), `axiom "${a.id}" has no track`).toBe(true);
-      expect(trackForAxiom(a.id).id).toBe(a.id);
-    }
-    for (const t of TRACKS) {
-      expect(AXIOMS.some((a) => a.id === t.id), `track "${t.id}" has no axiom`).toBe(true);
-    }
-  });
-
-  it('bass and motif only ever reach for notes the chord has', () => {
-    // Both index into chord tones. A value past the end wraps into a different
-    // octave silently, which is the kind of wrong that sounds *almost* right.
-    for (const t of TRACKS) {
-      const smallest = Math.min(...t.progression.map((c) => CHORD_TONES[c.quality].length));
-      for (const pattern of t.bass) {
-        for (const v of pattern) expect(v, `${t.id} bass`).toBeLessThan(smallest);
-      }
-      // Motif values 0-2 are the low octave, 3-5 the high one.
-      for (const v of t.motif) expect(v, `${t.id} motif`).toBeLessThan(6);
-    }
-  });
-
-  it('semitones and scale degrees agree on the root', () => {
-    // The musical layers work in semitones and the hue accents in scale
-    // degrees. They have to share a tonic or the accents drift out of key.
-    expect(semiHz(0)).toBeCloseTo(noteHz(0), 6);
-    // And the pentatonic must be a subset of the minor scale the chords use,
-    // which is what lets forty accents sit over any chord without clashing.
-    for (const degree of [0, 3, 5, 7, 10]) {
-      expect(semiHz(degree)).toBeGreaterThan(0);
-    }
-  });
-});
-
 describe('the Engine is the arrangement (GDD §18.1)', () => {
   const bolt = { primitive: 'projectile', hue: 'thermal' };
   const nova = { primitive: 'burst', hue: 'thermal' };
@@ -336,10 +245,7 @@ describe('the audition list (GDD §19.2)', () => {
     }
   });
 
-  it('every demo plays over a real bed, and every Axiom is auditionable', () => {
-    for (const demo of DEMOS) {
-      expect(TRACKS.some((t) => t.id === demo.bed), `${demo.id} bed "${demo.bed}"`).toBe(true);
-    }
+  it('every Axiom is auditionable', () => {
     for (const a of AXIOMS) {
       expect(DEMOS.some((d) => d.id === `axiom_${a.id}`), `axiom "${a.id}"`).toBe(true);
     }
@@ -399,5 +305,186 @@ describe('visual effects (GDD §20.1)', () => {
     for (const e of VIEW_EFFECTS) maxGlow = Math.max(maxGlow, e.values.glow ?? 1);
     expect(together.glow).toBe(maxGlow);
     applyEffects([]);
+  });
+});
+
+describe('the cell library (GDD §18)', () => {
+  it('validates — every pattern is whole bars of legal characters', () => {
+    // Also run at import time, but asserted here so a failure is a red test
+    // rather than a blank screen. A malformed pattern does not throw on its own:
+    // a 15-step bar slips a sixteenth every bar and takes twenty minutes of
+    // listening to notice.
+    expect(() => validate(CELLS)).not.toThrow();
+  });
+
+  it('rejects a cell reaching for a seventh it has not declared', () => {
+    // The bug this codebase already shipped once: an index past the end of the
+    // chord wraps silently back to the root, which sounds almost right.
+    expect(() =>
+      validate({
+        ...CELLS,
+        basslines: [
+          { id: 'bad', steps: '3...............', energy: 1, register: 'low', space: 'mid' },
+        ],
+      }),
+    ).toThrow(/needsSeventh/);
+  });
+
+  it('rejects a harmony that is secretly a pop song', () => {
+    expect(() =>
+      validate({
+        ...CELLS,
+        harmonies: [
+          {
+            id: 'too-many',
+            chords: [
+              { root: 0, quality: 'min' },
+              { root: 8, quality: 'maj' },
+              { root: 3, quality: 'maj' },
+            ],
+            barsPerChord: 1,
+            mood: 'lifting',
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
+  it('parses percussion weights and melodic octaves', () => {
+    const perc = parsePerc('X.xo------------');
+    expect(perc[0]!.gain).toBeGreaterThan(perc[2]!.gain);
+    expect(perc[3]!.gain).toBeLessThan(perc[2]!.gain);
+    expect(perc[1]).toBeNull();
+    expect(perc[4]!.open).toBe(true);
+
+    const mel = parseMelodic({
+      id: 't',
+      steps: '0a~.............',
+      accent: 'x...............',
+      slide: '.~..............',
+      energy: 1,
+      register: 'low',
+      space: 'mid',
+    });
+    expect(mel[0]).toMatchObject({ tone: 0, octave: 0, accent: true });
+    expect(mel[1]).toMatchObject({ tone: 0, octave: 1, slide: true });
+    expect(mel[2]!.hold).toBe(true);
+    expect(mel[3]).toBeNull();
+  });
+});
+
+describe('the arranger (GDD §18.1)', () => {
+  const row = (
+    triggerId: string,
+    primitive: string,
+    hue: 'thermal' | 'voltaic' | 'void',
+    modifiers: string[] = [],
+  ) => ({ triggerId, primitive, hue, modifiers });
+
+  it('is deterministic — the same Engine always sounds the same', () => {
+    // A build is a thing you return to. A track that reshuffled on identical
+    // input would make that untrue, and would make every assertion below
+    // meaningless as well.
+    const input = {
+      axiomId: 'circuit',
+      rows: [row('clock', 'projectile', 'thermal'), row('on_hit', 'chain', 'voltaic', ['echo'])],
+      intensity: 0.5,
+    };
+    const a = arrange(input);
+    const b = arrange(input);
+    expect(a.signature).toBe(b.signature);
+    for (const key of ['kick', 'backbeat', 'hats', 'bass', 'motif', 'stab', 'harmony'] as const) {
+      expect(a[key].id).toBe(b[key].id);
+    }
+  });
+
+  it('different builds sound different', () => {
+    const cascade = arrange({
+      axiomId: 'ignition',
+      rows: [row('on_hit', 'chain', 'voltaic', ['overdrive'])],
+      intensity: 0.6,
+    });
+    const metronome = arrange({
+      axiomId: 'ignition',
+      rows: [row('clock', 'zone', 'void')],
+      intensity: 0.6,
+    });
+    // Different hue, so a different kit; different trigger, so a different mood.
+    expect(cascade.kickVoice).not.toBe(metronome.kickVoice);
+    expect(cascade.harmony.mood).not.toBe(metronome.harmony.mood);
+  });
+
+  it('the modifiers you own are audible', () => {
+    const of = (modifiers: string[]) =>
+      arrange({
+        axiomId: 'ignition',
+        rows: [row('clock', 'projectile', 'thermal', modifiers)],
+        intensity: 0.5,
+      });
+    const plain = of([]);
+
+    // Draft Echo and the room opens up; draft Ground and the bass goes dark.
+    // Every one of these is a modifier a player can point at, which is the bar
+    // every mapping in the arranger has to clear.
+    expect(of(['echo']).echo).toBeGreaterThan(plain.echo);
+    expect(of(['ground']).bassBrightness).toBeLessThan(plain.bassBrightness);
+    expect(of(['overdrive']).bassBrightness).toBeGreaterThan(plain.bassBrightness);
+  });
+
+  it('a fuller Engine gets a sparser bass', () => {
+    // The most important rule in the arranger. Without it a five-row build and a
+    // busy bassline compete for the same bar and neither wins.
+    const one = arrange({
+      axiomId: 'ignition',
+      rows: [row('clock', 'projectile', 'thermal')],
+      intensity: 0.8,
+    });
+    const five = arrange({
+      axiomId: 'ignition',
+      rows: [
+        row('clock', 'projectile', 'thermal'),
+        row('on_hit', 'burst', 'thermal'),
+        row('on_kill', 'chain', 'voltaic'),
+        row('on_pickup', 'zone', 'void'),
+        row('on_crit', 'beam', 'voltaic'),
+      ],
+      intensity: 0.8,
+    });
+    const rank = { sparse: 0, mid: 1, busy: 2 } as const;
+    expect(rank[five.bass.space]).toBeLessThanOrEqual(rank[one.bass.space]);
+  });
+
+  it('never selects a cell the chord cannot play', () => {
+    const triggers = ['clock', 'on_hit', 'on_kill', 'on_convert', 'on_crit'];
+    const primitives = ['projectile', 'burst', 'chain', 'zone', 'convert'];
+    const hues = ['thermal', 'voltaic', 'void'] as const;
+
+    for (const axiomId of ['ignition', 'circuit', 'feedback']) {
+      for (let n = 0; n <= 5; n++) {
+        for (const intensity of [0, 0.3, 0.6, 1]) {
+          const plan = arrange({
+            axiomId,
+            rows: Array.from({ length: n }, (_, i) =>
+              row(triggers[i % 5]!, primitives[i % 5]!, hues[i % 3]!),
+            ),
+            intensity,
+          });
+          const hasSeventh = plan.harmony.chords.some((c) => c.quality === 'min7');
+          for (const cell of [plan.bass, plan.motif]) {
+            if (cell.needsSeventh) {
+              expect(hasSeventh, `${axiomId}/${n}: "${cell.id}" over ${plan.harmony.id}`).toBe(true);
+            }
+          }
+        }
+      }
+    }
+  });
+
+  it('an Engine with nothing in it still has a floor', () => {
+    // Run one, before the first Draft. A kick and a chord at minimum, or the
+    // opening seconds are silence.
+    const opening = openingArrangement('ignition');
+    expect(opening.kick.pattern).toMatch(/[xX]/);
+    expect(opening.harmony.chords.length).toBeGreaterThan(0);
   });
 });
