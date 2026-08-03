@@ -2475,41 +2475,35 @@ export class World {
     points: number[],
     life: number,
   ): void {
-    // §16.2 / §20.1 — a *budget*, not a cap, and a merge before it.
+    // §16.2 / §20.1 — a *budget*, not a cap.
     //
     // Measured at 5,882 EPS on a Nova build: six thousand live detonations, a
     // 65ms frame, and 57.8ms of that inside the bloom composite uploading the
-    // geometry. Each burst is a ring plus twelve ticks — two tessellations —
-    // so the emissive layer was rebuilding twelve thousand of them every frame.
+    // geometry. Effects shared the 6,000-entity safety cap, which is a net
+    // against running out of memory, not a budget for what a frame may draw.
     //
-    // Fifty overlapping identical rings are also not a better picture than one.
-    // So coincident detonations of the same kind and hue merge: the survivor
-    // takes the larger radius and a fresh life, which is both cheaper and more
-    // legible than stacking them.
-    if (kind === 'burst' || kind === 'rupture') {
-      const mergeR = radius * TUNABLE.fxMergeRadius;
-      for (let i = this.fx.length - 1, seen = 0; i >= 0 && seen < 48; i--, seen++) {
-        const other = this.fx[i]!;
-        if (!other.alive || other.kind !== kind || other.hue !== hue) continue;
-        const dx = other.x - x;
-        const dy = other.y - y;
-        if (dx * dx + dy * dy > mergeR * mergeR) continue;
-        if (radius > other.radius) other.radius = radius;
-        other.life = Math.max(other.life, life);
-        other.maxLife = Math.max(other.maxLife, life);
-        return;
-      }
-    }
-
-    // Full: drop whichever is closest to finishing rather than refusing the new
-    // one. The newest detonation is the one the player is looking at.
+    // When full, drop whichever is closest to finishing rather than refusing the
+    // new one: the newest detonation is the one the player is looking at.
+    //
+    // There was a merge here for one commit, folding coincident detonations into
+    // one. It was wrong twice over — it refreshed the survivor's life, so a
+    // stream of hits at one spot produced a ring that never died and sat on the
+    // player feeding bloom forever, and a merged ring is not what a detonation
+    // looks like anyway. The budget and the batched draw were doing the work;
+    // the merge was only doing damage.
     if (this.fx.length >= TUNABLE.maxFx) {
       let worst = -1;
       let worstLife = Infinity;
       for (let i = 0; i < this.fx.length; i++) {
         const f = this.fx[i]!;
-        if (!f.alive) { worst = i; break; }
-        if (f.life < worstLife) { worstLife = f.life; worst = i; }
+        if (!f.alive) {
+          worst = i;
+          break;
+        }
+        if (f.life < worstLife) {
+          worstLife = f.life;
+          worst = i;
+        }
       }
       if (worst >= 0) this.fx.splice(worst, 1);
     }

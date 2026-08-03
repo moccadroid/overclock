@@ -305,16 +305,12 @@ export const TUNABLE = {
   scrapOutputBonus: 0.04,
 
   /**
-   * §20.1 — how many detonations may be on screen at once, and how close two of
-   * them have to be to become one.
+   * §20.1 — how many detonations may be on screen at once.
    *
    * Measured before this existed: a Nova cascade at 5,882 EPS held six thousand
    * live effects and cost 65ms a frame, 58 of them inside the bloom composite.
-   * Three hundred is still more than anyone can read; the merge is what actually
-   * keeps the picture legible, and the budget is the backstop.
    */
   maxFx: 300,
-  fxMergeRadius: 0.55,
 
   // ---- §21b.4 the Cooler ----
   /**

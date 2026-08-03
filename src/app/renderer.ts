@@ -1714,25 +1714,43 @@ export class Renderer {
     const g = this.gFx;
     g.clear();
 
-    // Bursts first, batched by hue. Each one used to issue two strokes of its
-    // own — a ring and twelve ticks — so a cascade was thousands of separate
-    // tessellations, and the bill arrived in the bloom composite (measured:
-    // 57.8ms of a 65ms frame). Same lesson the projectile and enemy passes
-    // already learned: group by paint, path everything, stroke once.
+    // Bursts, batched by hue and by how far through their life they are.
+    //
+    // Each one used to issue two strokes of its own, so a cascade was thousands
+    // of separate tessellations and the bill arrived in the bloom composite
+    // (measured: 57.8ms of a 65ms frame). Grouping by paint fixes that — but the
+    // *paint* has to survive the grouping, and in the first version it did not:
+    // the ring and its twelve radial ticks got folded into one stroke, which
+    // made the 1px ticks 4px and turned every detonation into a fat dashed
+    // circle. Two passes, one per weight, is still a couple of dozen strokes for
+    // a screen full of explosions.
+    const BANDS = 6;
     for (const hue of HUE_ORDER) {
       const color = HUE_COLOR[hue];
-      // Two alpha bands rather than one per effect: a detonation's ring fades
-      // over its life, and four steps of that is indistinguishable from smooth.
-      for (let band = 0; band < 4; band++) {
+      for (let band = 0; band < BANDS; band++) {
+        const t = (band + 0.5) / BANDS;
+        // The ring.
         let any = false;
         for (const f of world.fx) {
           if (f.kind !== 'burst' || f.hue !== hue) continue;
           if (!this.camera.isVisible(f.x, f.y, f.radius + 60)) continue;
           if (this.waitingForBeat(f.id)) continue;
-          const t = Math.max(0, f.life / f.maxLife);
-          if (Math.min(3, Math.floor(t * 4)) !== band) continue;
-          const radius = f.radius * (1.08 - t * 0.28);
-          g.circle(f.x, f.y, radius);
+          const life = Math.max(0, f.life / f.maxLife);
+          if (Math.min(BANDS - 1, Math.floor(life * BANDS)) !== band) continue;
+          g.circle(f.x, f.y, f.radius * (1.08 - life * 0.28));
+          any = true;
+        }
+        if (any) g.stroke({ width: 2 + 2 * t, color, alpha: BAND.entity * t });
+
+        // The ticks, at their own weight.
+        any = false;
+        for (const f of world.fx) {
+          if (f.kind !== 'burst' || f.hue !== hue) continue;
+          if (!this.camera.isVisible(f.x, f.y, f.radius + 60)) continue;
+          if (this.waitingForBeat(f.id)) continue;
+          const life = Math.max(0, f.life / f.maxLife);
+          if (Math.min(BANDS - 1, Math.floor(life * BANDS)) !== band) continue;
+          const radius = f.radius * (1.08 - life * 0.28);
           for (let i = 0; i < 12; i++) {
             const a = (i / 12) * Math.PI * 2;
             g.moveTo(f.x + Math.cos(a) * radius * 0.82, f.y + Math.sin(a) * radius * 0.82).lineTo(
@@ -1742,10 +1760,7 @@ export class Renderer {
           }
           any = true;
         }
-        if (any) {
-          const t = (band + 0.5) / 4;
-          g.stroke({ width: 2 + 2 * t, color, alpha: BAND.entity * t });
-        }
+        if (any) g.stroke({ width: 1, color, alpha: BAND.inFlight * t });
       }
     }
 
