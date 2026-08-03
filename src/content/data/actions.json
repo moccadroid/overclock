@@ -116,7 +116,7 @@
     "lifetime": 1.6,
     "tickInterval": 0.3,
     "cooldown": 0.4,
-    "description": "Sucks every nearby enemy into a single point for 1.6s. Deals almost no damage — it exists to bunch the horde up for whatever fires next."
+    "description": "Sucks every nearby enemy into a single point for 1.6s. Deals almost no damage \u2014 it exists to bunch the horde up for whatever fires next."
   },
   {
     "id": "shove",
@@ -128,7 +128,7 @@
     "damage": 6,
     "radius": 190,
     "knockback": 260,
-    "description": "Radial knockback. Displacement per enemy is capped — no shove walls."
+    "description": "Radial knockback. Displacement per enemy is capped \u2014 no shove walls."
   },
   {
     "id": "fragment",
@@ -153,8 +153,8 @@
     "damage": 5,
     "speed": 380,
     "lifetime": 2,
-    "siphon": 1,
-    "description": "Steals 1 fuel of the target's colour on hit."
+    "siphon": 6,
+    "description": "Projectile that sheds 6 Heat on hit. Sustained cooling."
   },
   {
     "id": "convert_bleed",
@@ -166,27 +166,14 @@
     "poolWeight": 0.34,
     "damage": 0,
     "cooldown": 0.8,
-    "convert": { "costKind": "integrity", "costAmount": 5, "gainKind": "fuel", "gainAmount": 10 },
-    "description": "Spend 5 Integrity for 10 fuel in your fullest gauge. Fuelled fires hit harder, so this trades health directly for damage."
-  },
-  {
-    "id": "convert_rectify",
-    "kind": "action",
-    "name": "Convert: Rectify",
-    "hue": "voltaic",
-    "cycleCost": 2,
-    "primitive": "convert",
-    "poolWeight": 0.34,
-    "damage": 0,
-    "cooldown": 0.8,
     "convert": {
-      "costKind": "fuel",
-      "costAmount": 15,
-      "gainKind": "fuel",
-      "gainAmount": 10,
-      "rebalance": true
+      "costKind": "integrity",
+      "costAmount": 8,
+      "gainKind": "output",
+      "gainAmount": 0.5,
+      "duration": 4
     },
-    "description": "Move 15 fuel from your fullest gauge into 10 in your emptiest. A net loss of 5 — you take it to feed Actions in a colour you never pick up."
+    "description": "Spend 8 Integrity for +50% output, 4s. Health straight into damage."
   },
   {
     "id": "convert_cashout",
@@ -198,8 +185,13 @@
     "poolWeight": 0.34,
     "damage": 0,
     "cooldown": 1.5,
-    "convert": { "costKind": "fuel", "costAmount": 20, "gainKind": "xp", "gainAmount": 1 },
-    "description": "Spend 20 fuel for one level's worth of XP. Turns fuel you cannot burn into Drafts."
+    "convert": {
+      "costKind": "heat",
+      "costAmount": 30,
+      "gainKind": "xp",
+      "gainAmount": 1
+    },
+    "description": "Spend 30 Heat for a level's worth of XP. A deep cascade pays twice."
   },
   {
     "id": "convert_coolant",
@@ -211,8 +203,13 @@
     "poolWeight": 0.34,
     "damage": 0,
     "cooldown": 0.6,
-    "convert": { "costKind": "fuel", "costAmount": 10, "gainKind": "heat", "gainAmount": 25 },
-    "description": "Spend 10 fuel to shed 25 Heat. This is how an over-budget Engine keeps running."
+    "convert": {
+      "costKind": "integrity",
+      "costAmount": 6,
+      "gainKind": "heat",
+      "gainAmount": 30
+    },
+    "description": "Spend 6 Integrity to shed 30 Heat. How a hot Engine keeps running."
   },
   {
     "id": "convert_stim",
@@ -225,13 +222,13 @@
     "damage": 0,
     "cooldown": 1.2,
     "convert": {
-      "costKind": "fuel",
-      "costAmount": 10,
+      "costKind": "heat",
+      "costAmount": 20,
       "gainKind": "speed",
       "gainAmount": 0.3,
       "duration": 3
     },
-    "description": "Spend 10 fuel for +30% move speed, 3s. Pair it with a trigger that fires when you are in trouble."
+    "description": "Spend 20 Heat for +30% move speed, 3s. Turns running hot into escape."
   },
   {
     "id": "arc",

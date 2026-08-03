@@ -88,11 +88,10 @@ const actionSchema: Schema = {
   convert: {
     type: 'object',
     fields: {
-      costKind: { type: 'string', required: true, oneOf: ['integrity', 'fuel'] },
+      costKind: { type: 'string', required: true, oneOf: ['integrity', 'heat'] },
       costAmount: { type: 'number', required: true, min: 0 },
-      gainKind: { type: 'string', required: true, oneOf: ['fuel', 'xp', 'heat', 'speed'] },
+      gainKind: { type: 'string', required: true, oneOf: ['xp', 'heat', 'speed', 'output'] },
       gainAmount: { type: 'number', required: true, min: 0 },
-      rebalance: { type: 'boolean' },
       duration: { type: 'number', min: 0 },
     },
   },
@@ -196,6 +195,8 @@ const enemySchema: Schema = {
       'pentagon',
     ],
   },
+  /** §16.3 — threat class. See EnemyDef.hue. */
+  hue: { type: 'string', required: true, oneOf: ['thermal', 'voltaic', 'void'] },
   behavior: {
     type: 'string',
     required: true,
@@ -206,14 +207,13 @@ const enemySchema: Schema = {
   radius: { type: 'number', required: true, min: 1 },
   contactDamage: { type: 'number', required: true, min: 0 },
   xp: { type: 'number', required: true, min: 0 },
-  fuel: { type: 'number', required: true, min: 0 },
   windup: { type: 'number', min: 0 },
   dashSpeed: { type: 'number', min: 0 },
   dashDuration: { type: 'number', min: 0 },
   shieldArc: { type: 'number', min: 0 },
   growthPerMeal: { type: 'number', min: 0 },
   zoneRadius: { type: 'number', min: 0 },
-  fuelSteal: { type: 'number', min: 0 },
+  heatOnTouch: { type: 'number', min: 0 },
   standoff: { type: 'number', min: 0 },
   beamDamage: { type: 'number', min: 0 },
   elite: { type: 'boolean' },

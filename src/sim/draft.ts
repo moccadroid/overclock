@@ -9,11 +9,34 @@
 import { ACTIONS, MODIFIERS, TRIGGERS, NODE_BY_ID } from '../content/index';
 import type { NodeDef } from './types';
 import { LOADBEARING, TUNABLE } from './tunables';
+import { TAG_GLYPH, TAG_LABEL, tagRequiredBy, tagsOf, type Tag } from './engine';
 import type { World } from './world';
 import { axiom as getAxiom } from '../content/index';
 
-/** §8.2 — the deliberately boring floor that keeps a draft from being dead. */
-export type StatKind = 'crit' | 'magnet' | 'speed' | 'integrity' | 'power';
+/**
+ * §8.2 — the floor that keeps a draft from being dead, and, now, three cards
+ * that are not boring at all.
+ *
+ * The first five are deliberately small: +8% damage, +25 Integrity. They exist
+ * so a draft always has something legal in it, and measured across a real run
+ * they were the cards you passed — four Gains offered and four refused.
+ *
+ * The last three are the class stats, and they only pay if your Engine is
+ * focused. +1 Pierce and +15% projectile speed is nothing to a Nova build and a
+ * great deal to a Bolt build. That makes them the first stats in the game that
+ * are a *decision* rather than a small number, and it gives a non-cascade build
+ * something to scale into — which is most of the answer to "what if I never draw
+ * On Hit".
+ */
+export type StatKind =
+  | 'crit'
+  | 'magnet'
+  | 'speed'
+  | 'integrity'
+  | 'power'
+  | 'travels'
+  | 'area'
+  | 'lingers';
 
 /** §8.3 — the draft economy, drafted. */
 export type ToolKind = 'reroll' | 'purge';
@@ -64,6 +87,29 @@ export const STAT_CARDS: Record<StatKind, { title: string; body: string; apply: 
       apply: (w) => {
         w.player.maxIntegrity += 25;
         w.player.integrity = Math.min(w.player.maxIntegrity, w.player.integrity + 25);
+      },
+    },
+
+    // ---- the class stats. Worthless to a build that is not focused. --------
+    travels: {
+      title: `Ballistics ${TAG_GLYPH.travels}`,
+      body: '+1 Pierce and +20% projectile speed on everything that travels.',
+      apply: (w) => {
+        w.bonuses.travels += 1;
+      },
+    },
+    area: {
+      title: `Yield ${TAG_GLYPH.area}`,
+      body: '+22% radius on every burst, field, mine and shove.',
+      apply: (w) => {
+        w.bonuses.area += 0.22;
+      },
+    },
+    lingers: {
+      title: `Half-Life ${TAG_GLYPH.lingers}`,
+      body: '+30% duration on everything that lingers.',
+      apply: (w) => {
+        w.bonuses.lingers += 0.3;
       },
     },
   };
@@ -275,15 +321,28 @@ export function describeCard(card: DraftCard): { title: string; body: string; ta
   if (!node) return { title: card.nodeId, body: '', tag: '?' };
   const cost =
     node.kind === 'modifier' ? `x${node.cycleMult} Cycles` : `${node.cycleCost} Cycles`;
-  // §5.4 lists Convert's hue as "—": it neither burns fuel of its own colour nor
-  // deals damage, so a hue tag on it is a promise the card cannot keep. Every
-  // other Action's tag means "this is the gauge it drains and the resistance it
-  // faces", and that has to stay true or the tag means nothing anywhere.
-  const hue =
-    node.kind === 'action' && node.primitive !== 'convert' ? ` · ${node.hue}` : '';
+
+  // §5.5 — the behaviour glyphs, on the card, before you take it.
+  //
+  // The rule they describe has always been enforced: Pierce writes a field a
+  // Nova does not read, so it does nothing, and the game let you take it and
+  // said nothing. An Action shows what it *is*; a conditional modifier shows
+  // what it *needs*. Match the glyph and it works.
+  const marks =
+    node.kind === 'action'
+      ? tagsOf(node.id).map((t) => TAG_GLYPH[t])
+      : node.kind === 'modifier'
+        ? [tagRequiredBy(node.id)].filter((t): t is Tag => t !== null).map((t) => TAG_GLYPH[t])
+        : [];
+  const glyphs = marks.length > 0 ? ` ${marks.join('')}` : '';
+  const needs =
+    node.kind === 'modifier' && marks.length > 0
+      ? `  Needs ${TAG_LABEL[tagRequiredBy(node.id)!].split(' — ')[0]}.`
+      : '';
+
   return {
-    title: node.name,
-    body: `${node.description}  [${cost}${hue}]`,
+    title: `${node.name}${glyphs}`,
+    body: `${node.description}${needs}  [${cost}]`,
     tag: node.kind.toUpperCase(),
   };
 }
@@ -325,3 +384,4 @@ export function useReroll(world: World): boolean {
   world.rerolls--;
   return true;
 }
+

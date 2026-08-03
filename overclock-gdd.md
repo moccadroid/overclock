@@ -236,6 +236,22 @@ Design intent: a lean 3-program engine that always fires must beat an 8-program 
 
 The budget system. This is what makes "breaking the game" a skill instead of a lookup.
 
+> **AMENDED — see DECISIONS D-106.** The per-event Cycle budget described below is
+> gone, and so is the overdraw path into Heat. Measured on a recorded run, the
+> dynamic budget was inert for 89% of the game and then went from full headroom
+> to nothing in ten seconds; that shape is structural, not a tuning problem, and
+> no readout could fix it.
+>
+> What replaced it:
+> - **Cycles are a static reservation only.** Every live node costs, capacity
+>   limits what fits, and the number moves only when the *build* moves.
+> - **Heat comes from cascade depth.** The first three links are free; past that
+>   every event charges in proportion to how deep it is. Heat now has a cause you
+>   can see on screen, and it rises and falls as you lean in and back off.
+>
+> §6.1's regen, §6.2's deficit-to-Heat and the misfire-on-overdraw rule are all
+> superseded. Instability tiers, the Overheat stall and Overdrive are unchanged.
+
 ### 6.1 Cycles
 
 - **Capacity:** base 100 [T], raised by draft upgrades and Recompile bonuses. Displayed as a ring around the avatar (19.5).
@@ -262,6 +278,22 @@ Overclock is a **dial, not a line**. Running at Instability I permanently is a l
 ## 7. Fuel economy
 
 The horde is a supply chain, not an obstacle course.
+
+> **REMOVED — see DECISIONS D-106.** Fuel is gone: the drops, the three gauges,
+> the fuelled-fire bonus, Attune and Rectify. It was ungameable by construction —
+> you cannot choose what drops, so it was a tax to watch rather than a decision to
+> make — and the only thing anyone did with it was draft pickup radius. Removing
+> it also removes the worst legibility problem in the game: a fuel mote and a
+> Mote enemy were the same colour, nearly the same size, and separated by a shape
+> nobody can resolve at five pixels. Only white XP falls now.
+>
+> **§7.4 Convert survives**, re-based onto Heat and Integrity. That is a better
+> arbitrage layer than the one it replaces: Heat is what a deep cascade
+> *produces*, so Cash Out and Stim turn the game's central pressure back into
+> progress. Running hot is a position to trade out of rather than only a penalty.
+>
+> **§7.1's hues survive too, with a different job** — see the §11.1 note. Hue is
+> enemy *threat class* now, and Actions keep colour as identity only.
 
 ### 7.1 The three hues
 
@@ -400,11 +432,35 @@ The Mirror is the only anti-screensaver mechanic that gets *more* interesting as
 
 HP inflation is banned as a difficulty lever. Pressure attacks the **build**, the **economy**, or the **space** — never just the health bar.
 
-### 11.1 Adaptive resistance (global)
+### 11.1 Hue is threat class
 
-- The population builds resistance to each hue proportional to that hue's share of your recent damage (rolling 60s window [T]). Cap: 60% [T] reduction.
-- Displayed always: three small hue glyphs with % in the HUD (19.5), and enemies visibly *desaturate* toward the resisted hue.
-- Counters: diversify hues, Attune, Rectify conversions, or deliberately "pay the tax" with a mono-hue engine strong enough to push through. All are valid; the system's job is to make mono-hue a *choice* with a price, not the default.
+> **REPLACED — see DECISIONS D-106.** Adaptive resistance is retired. It was
+> never displayed despite this section promising it always would be, so it was a
+> tax nobody could see — and it punished exactly the focused single-hue builds
+> the new class stats exist to reward. Its named counters are gone with Fuel.
+
+Hue is now a property of the **enemy**, and it predicts behaviour:
+
+| hue | class | reads as |
+|---|---|---|
+| thermal | **rushers** | mote, charger, splitter — come straight at you |
+| voltaic | **harassers** | lancer, interceptor, suppressor — hit or interfere from range |
+| void | **anchors** | drifter, bulwark, leech, warden — soak, hold ground, disable |
+
+The point is that colour is now something you read *while dodging*. An
+Interceptor is a diamond that hides inside your own projectile cloud and did the
+most damage of anything in a measured run; making its colour mean "this one
+harasses you" is the only warning that survives a busy screen.
+
+Actions keep their colour as identity — you have to tell a Bolt from an Arc — but
+it is no longer a system, because a colour that pretends to interact and does not
+is just more noise in an arena that has plenty.
+
+**What replaces it as a build axis: behaviour tags (§5.5).** Every Action is some
+combination of *travels* ▸, *area* ◍ and *lingers* ⧗, derived from the fire-context
+fields its primitive actually reads. Pierce and Ricochet need ▸; Enlarge needs ◍;
+Sustain needs ⧗. That rule always existed and was enforced silently; the glyphs
+put it on the card, and three class stats pay you for committing to one.
 
 ### 11.2 Suppression zones
 

@@ -9,8 +9,8 @@
     "radius": 5,
     "contactDamage": 1,
     "xp": 1,
-    "fuel": 1,
-    "description": "Drifts toward the player in loose flocks. Mass, fuel rain, cascade kindling."
+    "description": "Drifts toward the player in loose flocks. Mass, fuel rain, cascade kindling.",
+    "hue": "thermal"
   },
   {
     "id": "drifter",
@@ -22,8 +22,8 @@
     "radius": 13,
     "contactDamage": 6,
     "xp": 2,
-    "fuel": 1,
-    "description": "Steady seek. Baseline pressure."
+    "description": "Steady seek. Baseline pressure.",
+    "hue": "void"
   },
   {
     "id": "charger",
@@ -35,11 +35,11 @@
     "radius": 14,
     "contactDamage": 12,
     "xp": 3,
-    "fuel": 1,
     "windup": 0.6,
     "dashSpeed": 620,
     "dashDuration": 0.45,
-    "description": "Stops, aims, telegraphed dash. Punishes standing still."
+    "description": "Stops, aims, telegraphed dash. Punishes standing still.",
+    "hue": "thermal"
   },
   {
     "id": "bulwark",
@@ -51,9 +51,9 @@
     "radius": 21,
     "contactDamage": 10,
     "xp": 6,
-    "fuel": 2,
     "shieldArc": 1.5,
-    "description": "Slow and heavy, with a front shield arc that blocks projectiles. Forces flanking."
+    "description": "Slow and heavy, with a front shield arc that blocks projectiles. Forces flanking.",
+    "hue": "void"
   },
   {
     "id": "splitter",
@@ -65,9 +65,12 @@
     "radius": 18,
     "contactDamage": 8,
     "xp": 4,
-    "fuel": 2,
-    "splitsInto": { "enemy": "charger", "count": 2 },
-    "description": "On death splits into 2 Chargers plus bonus fuel. Cascade amplifier."
+    "splitsInto": {
+      "enemy": "charger",
+      "count": 2
+    },
+    "description": "On death splits into 2 Chargers plus bonus fuel. Cascade amplifier.",
+    "hue": "thermal"
   },
   {
     "id": "interceptor",
@@ -79,9 +82,9 @@
     "radius": 12,
     "contactDamage": 7,
     "xp": 4,
-    "fuel": 1,
     "growthPerMeal": 0.1,
-    "description": "Fast. Hunts your projectiles, eats them, and grows. The counter to mindless spray."
+    "description": "Fast. Hunts your projectiles, eats them, and grows. The counter to mindless spray.",
+    "hue": "voltaic"
   },
   {
     "id": "suppressor",
@@ -93,9 +96,9 @@
     "radius": 16,
     "contactDamage": 0,
     "xp": 5,
-    "fuel": 2,
     "zoneRadius": 250,
-    "description": "Never attacks. Projects a zone where your Triggers do not fire. Attacks the build."
+    "description": "Never attacks. Projects a zone where your Triggers do not fire. Attacks the build.",
+    "hue": "voltaic"
   },
   {
     "id": "leech",
@@ -107,9 +110,9 @@
     "radius": 13,
     "contactDamage": 0,
     "xp": 3,
-    "fuel": 1,
-    "fuelSteal": 5,
-    "description": "Contact steals fuel of your fullest gauge. Attacks the economy, not the health bar."
+    "description": "Contact heats your Engine instead of hurting you. Attacks the economy, not the health bar.",
+    "heatOnTouch": 16,
+    "hue": "void"
   },
   {
     "id": "lancer",
@@ -121,11 +124,11 @@
     "radius": 14,
     "contactDamage": 4,
     "xp": 5,
-    "fuel": 2,
     "standoff": 520,
     "windup": 1.1,
     "beamDamage": 12,
-    "description": "Keeps distance and fires a telegraphed beam across the arena. The reason to keep moving."
+    "description": "Keeps distance and fires a telegraphed beam across the arena. The reason to keep moving.",
+    "hue": "voltaic"
   },
   {
     "id": "warden",
@@ -137,8 +140,8 @@
     "radius": 26,
     "contactDamage": 14,
     "xp": 24,
-    "fuel": 8,
     "elite": true,
-    "description": "Mini-elite. Any base behaviour plus one or two affixes. Wave punctuation."
+    "description": "Mini-elite. Any base behaviour plus one or two affixes. Wave punctuation.",
+    "hue": "void"
   }
 ]

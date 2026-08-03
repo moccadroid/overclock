@@ -1,9 +1,42 @@
 /**
- * Cycles, Heat and Overclock. GDD §6.
+ * Cycles and Heat. GDD §6.
  *
- * Design intent (§6.3): Overclock is a dial, not a line. Running permanently in
- * Instability I is a legitimate strategy. Nothing here caps the player — going
- * over budget produces instability the player authored, not a designer's wall.
+ * ---
+ *
+ * **Cycles are a static reservation. Heat comes from cascade depth.**
+ *
+ * That is a rewrite of §6, and it is worth saying why, because the version it
+ * replaces was carefully built and completely broken.
+ *
+ * Cycles used to be two resources wearing one name: a static reservation for
+ * what your Engine *is*, and a per-event budget for what it *does*. The second
+ * one could not work, and no tuning would have fixed it. A cascade's demand is
+ * multiplicative — output is roughly `kills x depth`, and both terms rise
+ * together — while supply was a constant. A constant against a multiplicative
+ * term is not a curve, it is a cliff.
+ *
+ * Measured, from a recorded nine-minute run: available Cycles sat between 87%
+ * and full for seven and a half minutes with Heat at exactly zero, then went
+ * from full headroom to nothing in **ten seconds**. 91% of that run was spent at
+ * Heat tier 0. The mechanic was inert for the whole game and then binary. You
+ * cannot learn a system that never engages, and you cannot prepare for one that
+ * resolves in ten seconds.
+ *
+ * So the per-event budget is gone, along with overdraw, deficits and misfires.
+ * What remains:
+ *
+ *   **Cycles** — a static reservation. Every live node costs; capacity limits
+ *   what fits. It changes only when *you* change the Engine, which makes it a
+ *   number you can plan against instead of one you discover.
+ *
+ *   **Heat** — accrues from cascade *depth*. Shallow play never heats. A chain
+ *   running ten deep heats hard. This prices the thing the game is named after,
+ *   and unlike a hidden per-second integral it has a cause you can see: the
+ *   chain is drawn on screen and the depth is on the HUD.
+ *
+ * Bounding cascades is still handled where it always was — §5.6's depth pricing
+ * decays output geometrically with depth. Heat is the second half of that: the
+ * first makes deep chains unrewarding, this makes them dangerous.
  */
 import { TUNABLE } from './tunables';
 import type { Rng } from './rng';
@@ -13,29 +46,27 @@ export type HeatTier = 0 | 1 | 2 | 3;
 export class CycleBudget {
   capacity: number;
   staticLoad = 0;
-  /** Dynamic Cycles currently available to spend on events. */
-  available: number;
   heat = 0;
   /** Seconds remaining of an Overheat stall (§6.2). */
   stall = 0;
-  /** Set when demand exceeded supply this tick — blocks Heat decay. */
-  private overdrawn = false;
-  /** Diagnostics for the HUD ring and the harness. */
-  spentThisTick = 0;
-  deficitThisTick = 0;
   /**
-   * Signed Heat change per second. Heat only moves when you are over or under
-   * budget, so without this the gauge sits at zero and then leaps — the player
-   * never sees the mechanism, only the punishment. Positive = building.
+   * Signed Heat change per second, for the gauge. Positive = building.
+   *
+   * Kept from the old model because the reason for it still holds: a gauge that
+   * sits at zero and then leaps shows the player the punishment and never the
+   * mechanism.
    */
   heatRate = 0;
+  /** Heat asked for this tick, before decay. Diagnostics and the HUD. */
+  heatThisTick = 0;
+  /** Deepest cascade seen this tick — the HUD shows it beside the gauge. */
+  depthThisTick = 0;
 
   constructor(capacity: number = TUNABLE.cycleCapacityBase) {
     this.capacity = capacity;
-    this.available = this.headroom;
   }
 
-  /** Cycles left for dynamic work once live Programs have reserved theirs. */
+  /** Cycles still unreserved. Negative is impossible: the draft refuses it. */
   get headroom(): number {
     return Math.max(0, this.capacity - this.staticLoad);
   }
@@ -69,46 +100,28 @@ export class CycleBudget {
 
   setStaticLoad(load: number): void {
     this.staticLoad = load;
-    if (this.available > this.headroom) this.available = this.headroom;
   }
 
   beginTick(dt: number): void {
-    this.overdrawn = false;
-    this.spentThisTick = 0;
-    this.deficitThisTick = 0;
-    if (this.stall > 0) {
-      this.stall = Math.max(0, this.stall - dt);
-      return;
-    }
-    // §6.1 — regenerates at capacity/sec.
-    this.available = Math.min(
-      this.headroom,
-      this.available + this.capacity * TUNABLE.cycleRegenPerCapacity * dt,
-    );
+    this.heatThisTick = 0;
+    this.depthThisTick = 0;
+    if (this.stall > 0) this.stall = Math.max(0, this.stall - dt);
   }
 
   /**
-   * Charge an event's Cycle cost. Never refuses: the deficit becomes Heat (§6.2).
-   * Running out of Cycles doesn't stop the engine — it Overclocks it.
+   * An event resolved at this cascade depth. GDD §6.2, rewritten.
+   *
+   * The first few links are free, so ordinary play — a Clock row, a shallow
+   * On Kill bounce — never heats at all and the gauge stays where a new player
+   * can ignore it. Past that the cost is linear in depth *per event*, which
+   * makes the total quadratic in a deep chain: exactly the shape that lets a
+   * cascade be spectacular and brief rather than free and permanent.
    */
-  spend(cost: number): void {
-    this.spentThisTick += cost;
-    if (this.available >= cost) {
-      this.available -= cost;
-      return;
-    }
-    this.deficitThisTick += cost - this.available;
-    this.available = 0;
-    this.overdrawn = true;
-  }
-
-  /**
-   * How far over budget this tick ran, as a multiple of the Cycles regen
-   * supplies in that time. 0 = within budget, 1 = drawing twice what you make.
-   */
-  overdrawRatio(dt: number): number {
-    const supply = this.capacity * TUNABLE.cycleRegenPerCapacity * dt;
-    return supply > 0 ? this.deficitThisTick / supply : 0;
+  chargeDepth(depth: number): void {
+    if (depth > this.depthThisTick) this.depthThisTick = depth;
+    const over = depth - TUNABLE.heatFreeDepth;
+    if (over <= 0) return;
+    this.heatThisTick += over * TUNABLE.heatPerDepthEvent;
   }
 
   /**
@@ -120,21 +133,18 @@ export class CycleBudget {
       this.heatRate = 0;
       return false;
     }
-    if (this.overdrawn) {
-      const gain = Math.min(
-        TUNABLE.heatGainMaxPerSec,
-        TUNABLE.heatGainPerOverdraw * this.overdrawRatio(dt),
-      );
-      this.heatRate = gain;
-      this.heat += gain * dt;
-    } else {
-      this.heatRate = this.heat > 0 ? -TUNABLE.heatDecayPerSec : 0;
-      this.heat = Math.max(0, this.heat - TUNABLE.heatDecayPerSec * dt);
-    }
+
+    // Capped per second so one enormous frame cannot jump the gauge from cold to
+    // Overheat with nothing in between. The cap is what keeps this a *rate* the
+    // player can watch rather than an event that happens to them.
+    const gain = Math.min(TUNABLE.heatGainMaxPerSec, dt > 0 ? this.heatThisTick / dt : 0);
+    const decay = TUNABLE.heatDecayPerSec;
+    this.heatRate = gain - decay;
+    this.heat = Math.max(0, this.heat + (gain - decay) * dt);
+
     if (this.heat >= 100) {
       this.heat = TUNABLE.overheatHeatReset;
       this.stall = TUNABLE.overheatStallSeconds;
-      this.available = 0;
       return true;
     }
     return false;
@@ -146,23 +156,8 @@ export class CycleBudget {
     return c > 0 && rng.chance(c);
   }
 
-  /**
-   * Cycles the engine asked for this tick, as a rate per second. Compared
-   * against `capacity`, this is the whole Heat mechanic in one number: draw more
-   * than you make and the difference becomes Heat.
-   */
-  demandPerSecond(dt: number): number {
-    return dt > 0 ? this.spentThisTick / dt : 0;
-  }
-
-  /** Fraction of the Ring that is statically reserved (§19.4). */
+  /** Fraction of capacity that is reserved (§19.4). */
   get staticFraction(): number {
     return this.capacity > 0 ? Math.min(1, this.staticLoad / this.capacity) : 0;
-  }
-
-  /** Fraction of the Ring currently spent dynamically. */
-  get dynamicFraction(): number {
-    const h = this.headroom;
-    return h > 0 ? Math.min(1, (h - this.available) / h) : 1;
   }
 }

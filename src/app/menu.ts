@@ -613,7 +613,7 @@ function threatOf(e: EnemyDef): string {
 
   if (e.beamDamage) parts.push(hit(e.beamDamage, 'beam'));
   if (e.contactDamage > 0) parts.push(hit(e.contactDamage, 'contact'));
-  if (e.fuelSteal) parts.push(`<span class="cx-dmg">${e.fuelSteal} fuel</span> stolen`);
+  if (e.heatOnTouch) parts.push(`<span class="cx-dmg">+${e.heatOnTouch} Heat</span> on contact`);
   if (parts.length === 0) parts.push('<span class="cx-safe">harmless on contact</span>');
 
   parts.push(`${e.hp} hp`, `${e.speed} speed`);

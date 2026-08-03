@@ -3,6 +3,7 @@
  * Placeholder styling; the Ring itself lives on the avatar in the renderer.
  */
 import type { World } from '../sim/world';
+import { TUNABLE } from '../sim/tunables';
 import { BRANDING } from '../branding';
 import { MODIFIER_BY_ID, NODE_BY_ID } from '../content/index';
 
@@ -142,16 +143,31 @@ export class Hud {
     } else {
       heatFlow = `<span class="cool">stable</span>`;
     }
+    // §6.2 — Heat's cause, printed beside Heat.
+    //
+    // This is the whole reason Heat moved onto cascade depth. The old readout
+    // could only say how hot you were, because its cause was a per-second
+    // integral of a hidden budget — nothing you could point at. Depth is a thing
+    // on the screen: you can see the chain, and now you can see the number it is
+    // charging you.
+    const depth = world.depthAverage;
+    const free = TUNABLE.heatFreeDepth;
+    const depthRead =
+      depth < 0.5
+        ? `<span class="cool">chain 0</span>`
+        : `<span class="${depth > free ? 'z-warn' : 'z-ok'}">chain ${depth.toFixed(1)}` +
+          `${depth > free ? ` · ${(depth - free).toFixed(1)} over` : ' · free'}</span>`;
+
     const advice =
       world.budget.stalled || heat > 55
-        ? `<span class="advice">scrap a program, draft capacity, or fire less</span>`
+        ? `<span class="advice">shorten the chain — depth past ${free} is what heats you</span>`
         : '';
 
     this.tc.innerHTML =
       `${topLine}\n` +
       `HEAT ${zoneBar(heat, 100, 16, [40, 70, 100])} ` +
       `<span class="${tier >= 2 ? 'z-crit' : tier >= 1 ? 'z-warn' : 'z-ok'}">${tierName}</span>` +
-      `   ${heatFlow}` +
+      `   ${heatFlow}   ${depthRead}` +
       (advice ? `\n${advice}` : '') +
       (world.surgeTime > 0
         ? `\n<span class="surge">REBUILD SURGE ${world.surgeTime.toFixed(0)}s · 2× XP</span>`
@@ -162,42 +178,15 @@ export class Hud {
       `SCORE ${Math.floor(world.score)}` +
       (world.kernels > 0 ? `   KERNEL ×${world.engine.kernel.toFixed(2)}` : '') +
       `\n` +
-      `CYCLES ${Math.round(world.budget.available)}/${Math.round(world.budget.headroom)}` +
-      `  (static ${world.engine.staticLoad.toFixed(1)}/${world.budget.capacity})`;
+      // One number, and it only moves when *you* move it. The old readout showed
+      // a dynamic pool draining against a static reservation — two quantities
+      // with one name, one of which was a cliff.
+      `CYCLES ${world.engine.staticLoad.toFixed(1)}/${world.budget.capacity}` +
+      `  ${bar(world.engine.staticLoad, world.budget.capacity, 12)}`;
 
-    // §19.4 — the three fuel gauges, each carrying its adaptive-resistance
-    // percentage (§11.1). Resistance is always visible: it is a tax the player
-    // is choosing to pay, so it can never be a surprise.
-    // A gauge pinned at zero and a gauge sitting full are both confusing without
-    // the flow behind them: the first means "burning it as fast as it arrives",
-    // the second "nothing you own can spend this". Say which.
-    const gauge = (hue: 'thermal' | 'voltaic' | 'void', label: string): string => {
-      const resist = world.resistance[hue];
-      const tax = resist > 0.01 ? ` <span class="resist">−${Math.round(resist * 100)}%</span>` : '';
-      const burn = world.fuelBurn[hue];
-      const gain = world.fuelGain[hue];
-
-      let flow: string;
-      if (burn > 0.2) {
-        flow = `<span class="burning">−${burn < 10 ? burn.toFixed(1) : burn.toFixed(0)}/s spent</span>`;
-      } else if (gain > 0.2) {
-        flow = `<span class="idle">nothing spends this</span>`;
-      } else {
-        flow = '';
-      }
-
-      return (
-        `<span class="${hue}">${label} ${bar(world.fuel[hue], 100, 14)} ` +
-        `${String(Math.floor(world.fuel[hue])).padStart(3)}</span>${tax}  ${flow}`
-      );
-    };
-    this.bl.innerHTML =
-      gauge('thermal', 'THERMAL') +
-      '\n' +
-      gauge('voltaic', 'VOLTAIC') +
-      '\n' +
-      gauge('void', 'VOID   ') +
-      (world.suppressedNow ? '\n<span class="suppressed">SUPPRESSED — TRIGGERS OFFLINE</span>' : '');
+    this.bl.innerHTML = world.suppressedNow
+      ? '<span class="suppressed">SUPPRESSED — TRIGGERS OFFLINE</span>'
+      : '';
 
     const queued = world.pendingDrafts;
     const showNotice = performance.now() / 1000 < this.noticeUntil;
@@ -256,17 +245,16 @@ export class Hud {
         `${'█'.repeat(filled)}${'·'.repeat(10 - filled)}</div>`
       : '';
 
-    // The draw belongs next to the rows that cause it, not floating in the middle
-    // of the screen where it reads as an unexplained number. Every line below
-    // shows its own share; this is the total those shares add up to, against what
-    // the Engine can supply.
-    const demand = world.demandAverage;
+    // What the Engine reserves, against what it may. This only changes when the
+    // build does, which is the entire point of the resource being static: it is
+    // a number you plan against rather than one you discover.
+    const reserved = world.engine.staticLoad;
     const supply = world.budget.capacity;
-    const pct = supply > 0 ? demand / supply : 0;
+    const pct = supply > 0 ? reserved / supply : 0;
     const load =
-      `<div class="load">DRAW ${zoneBar(demand, supply * 1.5, 14, [supply * 0.8, supply, supply * 1.5])}` +
-      `  <span class="${pct > 1 ? 'z-crit' : pct > 0.8 ? 'z-warn' : 'z-ok'}">` +
-      `${Math.round(demand)}</span><span class="num">/${Math.round(supply)} c/s</span></div>`;
+      `<div class="load">RESERVED ${zoneBar(reserved, supply, 14, [supply * 0.75, supply * 0.9, supply])}` +
+      `  <span class="${pct > 0.95 ? 'z-crit' : pct > 0.8 ? 'z-warn' : 'z-ok'}">` +
+      `${reserved.toFixed(1)}</span><span class="num">/${supply} c</span></div>`;
 
     this.engine.innerHTML =
       `<div class="prog head">ENGINE — TAB to edit</div>` + load + lines.join('') + channel;

@@ -13,7 +13,7 @@
     "id": "sculptor",
     "name": "Sculptor",
     "hint": "Purge 4 cards from the pool in one run.",
-    "teaches": "Purging is not throwing a card away — it is deleting it from every draft that follows, so the ones you want come round sooner.",
+    "teaches": "Purging is not throwing a card away \u2014 it is deleting it from every draft that follows, so the ones you want come round sooner.",
     "score": 500,
     "unlocks": []
   },
@@ -99,22 +99,22 @@
   },
   {
     "id": "full_tanks",
-    "name": "Full Tanks",
-    "hint": "Hold all three fuel gauges above 70 at once.",
+    "name": "Cold Depths",
+    "hint": "Reach cascade depth 8 without a single Overheat.",
     "teaches": "A full gauge is fuel nothing you own can spend. Diversify or convert.",
     "score": 400,
     "unlocks": [
-      "attune"
+      "siphon"
     ]
   },
   {
     "id": "siphoned",
-    "name": "Siphoned",
-    "hint": "Reach 60 fuel in a hue while its resistance is above 30%.",
+    "name": "Red Line",
+    "hint": "Sit above 60 Heat while running a chain 6 deep.",
     "teaches": "Overusing one hue taxes it. The world adapts to your build.",
     "score": 500,
     "unlocks": [
-      "convert_rectify"
+      "on_overheat"
     ]
   },
   {

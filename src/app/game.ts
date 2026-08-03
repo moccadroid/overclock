@@ -446,9 +446,18 @@ export class Game {
     const w = this.world;
     const cues = w.audioCues;
     if (cues.length > 0 || this.audio.enabled) {
+      // §18 — the hue the *soundtrack* colours itself with. It used to be your
+      // fullest fuel gauge; with fuel gone it comes from the Engine, which is
+      // where every other musical decision already comes from.
+      const counts = { thermal: 0, voltaic: 0, void: 0 };
+      w.engine.programs.forEach((program, i) => {
+        if (!w.engine.compiled[i]?.live || !program.actionId) return;
+        const action = ACTION_BY_ID.get(program.actionId);
+        if (action) counts[action.hue]++;
+      });
       let dominant: 'thermal' | 'voltaic' | 'void' = 'thermal';
       for (const hue of ['voltaic', 'void'] as const) {
-        if (w.fuel[hue] > w.fuel[dominant]) dominant = hue;
+        if (counts[hue] > counts[dominant]) dominant = hue;
       }
       this.audio.update(
         {

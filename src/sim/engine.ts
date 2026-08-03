@@ -170,6 +170,70 @@ export function inertFields(modifierId: string, actionId: string | null): FireFi
     : [];
 }
 
+/**
+ * §5.5 — the three behaviour tags, and the glyphs that carry them.
+ *
+ * These are not a new rule. `PRIMITIVE_FIELDS` above has always decided which
+ * modifiers do anything on which Actions, and `inertFields` has always been able
+ * to say so — but only *after* you had built the row and gone looking. Put
+ * Pierce on a Nova and the game let you, ran it, and told you nothing.
+ *
+ * So the same table now also produces a glyph you can read on the card, before
+ * you take it. Derived rather than authored, because a second hand-written list
+ * of "which modifiers work with which actions" would drift from the one the
+ * simulation actually uses, and the version the player reads would be the wrong
+ * one.
+ *
+ * Glyphs rather than colour: §16.3 already spends hue on enemy threat class and
+ * the editor already spends colour on node *kind*. A fourth colour meaning would
+ * collide with both, and a glyph survives the draft card, the chip and the HUD
+ * strip identically.
+ */
+export type Tag = 'travels' | 'area' | 'lingers';
+
+export const TAG_GLYPH: Record<Tag, string> = {
+  travels: '▸',
+  area: '◍',
+  lingers: '⧗',
+};
+
+export const TAG_LABEL: Record<Tag, string> = {
+  travels: 'travels — Pierce and Ricochet work here',
+  area: 'area — Enlarge works here',
+  lingers: 'lingers — Sustain works here',
+};
+
+/** Which fire-context field marks each tag. */
+const TAG_FIELDS: Record<Tag, readonly FireField[]> = {
+  travels: ['pierce', 'bounce'],
+  area: ['area'],
+  lingers: ['duration'],
+};
+
+/** What an Action *is*, in the only terms that change what modifiers do to it. */
+export function tagsOf(actionId: string | null): Tag[] {
+  const action = actionId ? ACTION_BY_ID.get(actionId) : undefined;
+  if (!action) return [];
+  const fields = PRIMITIVE_FIELDS[action.primitive] ?? [];
+  return (Object.keys(TAG_FIELDS) as Tag[]).filter((tag) =>
+    TAG_FIELDS[tag].some((f) => fields.includes(f)),
+  );
+}
+
+/** Which tag a modifier needs to do anything, or null if it is universal. */
+export function tagRequiredBy(modifierId: string): Tag | null {
+  const mod = MODIFIER_BY_ID.get(modifierId);
+  if (!mod) return null;
+  const targets = mod.ops.map((o) => o.target).filter((t) => !UNIVERSAL_FIELDS.includes(t));
+  if (targets.length === 0) return null;
+  // Only a modifier whose *entire* effect rides one tag is worth marking. Split
+  // writes `count`, which every Action reads; marking it would be noise.
+  for (const tag of Object.keys(TAG_FIELDS) as Tag[]) {
+    if (targets.every((t) => TAG_FIELDS[tag].includes(t))) return tag;
+  }
+  return null;
+}
+
 /** Slots are typed — this is what stops a Modifier landing in the Action slot. */
 export function slotAccepts(slot: NodeSlot, nodeId: string): boolean {
   if (slot === 'trigger') return TRIGGER_BY_ID.has(nodeId);

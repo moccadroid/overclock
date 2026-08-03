@@ -54,11 +54,10 @@ export const DISCOVERY_CHECKS: Record<string, DiscoveryCheck> = {
     ) && w.stats.overheats > 0,
 
   arbitrage: (w) => w.stats.converts >= 20,
-  full_tanks: (w) => w.fuel.thermal > 70 && w.fuel.voltaic > 70 && w.fuel.void > 70,
-  siphoned: (w) =>
-    (['thermal', 'voltaic', 'void'] as const).some(
-      (h) => w.fuel[h] >= 60 && w.resistance[h] > 0.3,
-    ),
+  // Fuel is gone; these two now measure the thing that replaced it. Running
+  // deep and staying cold is the skill the new economy actually asks for.
+  full_tanks: (w) => w.stats.maxDepth >= 8 && w.stats.overheats === 0,
+  siphoned: (w) => w.budget.heat >= 60 && w.stats.maxDepth >= 6,
 
   flank_it: (w) => w.stats.killsByEnemy.get('bulwark') !== undefined,
   blackout: (w) => w.stats.suppressedKills > 0,

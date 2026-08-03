@@ -162,7 +162,7 @@ function simulateRun(
       number,
       number,
     ],
-    cyclesPerSec: world.time > 0 ? world.stats.cyclesSpent / world.time : 0,
+    cyclesPerSec: world.time > 0 ? world.stats.maxDepth / world.time : 0,
     peakHeat: world.stats.peakHeat,
     firstLevelTime: world.stats.firstLevelTime,
     kernels: world.kernels,

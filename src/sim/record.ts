@@ -40,7 +40,7 @@ import { applyDraft, purgeCard, rollDraft, type DraftCard } from './draft';
 import type { NodeSlot } from './engine';
 
 /** Bumped whenever the format or anything a replay depends on changes. */
-export const RECORDING_VERSION = 1;
+export const RECORDING_VERSION = 2;
 
 /**
  * Everything that changes the world other than time passing.

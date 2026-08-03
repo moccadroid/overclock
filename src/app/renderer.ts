@@ -614,7 +614,7 @@ export class Renderer {
 
     const view = this.camera.view;
     const step = VISUAL.gridSpacing;
-    const load = world.budget.dynamicFraction;
+    const load = world.budget.staticFraction;
     const arena = world.arena;
 
     // Everything that bends the world, in one list. The avatar pushes space
@@ -1125,9 +1125,10 @@ export class Renderer {
       const def = getEnemy(e.defId);
       const born = Math.min(1, e.spawnAge / VISUAL.drawInTime);
       const flashing = e.flash > 0;
-      // §11.1 — desaturated in proportion to how resistant it is to your hue.
-      const resist = Math.max(world.resistance[e.hue], e.adaptive[e.hue]);
-      const color = flashing ? PALETTE.player : desaturate(HUE_COLOR[e.hue], resist);
+      // §16.3 — hue is threat class now: thermal rushes, voltaic harasses,
+      // void anchors. Full saturation always; the old desaturation carried
+      // adaptive resistance, which is retired.
+      const color = flashing ? PALETTE.player : HUE_COLOR[e.hue];
       const r = e.radius;
       const health = e.hp / e.maxHp;
       // §10.3 Phasing — untargetable, and it has to look it.
@@ -1430,7 +1431,7 @@ export class Renderer {
       arcSegment(g, p.x + wobble, p.y, ringR, -Math.PI / 2, -Math.PI / 2 + staticArc);
       g.stroke({ width: 3, color: 0x7f98bb, alpha: BAND.inFlight });
     }
-    const dynArc = world.budget.dynamicFraction * Math.PI * 2;
+    const dynArc = world.budget.staticFraction * Math.PI * 2;
     if (dynArc > 0.001) {
       arcSegment(g, p.x + wobble, p.y, ringR + 4, -Math.PI / 2, -Math.PI / 2 + dynArc);
       g.stroke({
@@ -1571,14 +1572,6 @@ const CORNERS = [
  * §11.1 — enemies visibly desaturate toward the hue you have been over-using, so
  * adaptive resistance is legible in the world rather than only in the HUD.
  */
-function desaturate(color: number, amount: number): number {
-  const r = (color >> 16) & 0xff;
-  const g = (color >> 8) & 0xff;
-  const b = color & 0xff;
-  const grey = Math.round(0.3 * r + 0.59 * g + 0.11 * b);
-  const mixTo = (c: number): number => Math.round(c + (grey - c) * amount);
-  return (mixTo(r) << 16) | (mixTo(g) << 8) | mixTo(b);
-}
 
 /** Merged drops carry more value, so they draw bigger. Sub-linear, and capped
  *  tighter now that merging is rare — a merged pile should read as chunky, not

@@ -2421,6 +2421,120 @@ Worst case is now fifteen seconds of a run rather than all of it.
 
 ---
 
+## D-106 · SETTLED · Fuel is gone, and Heat comes from depth
+
+The biggest change since M1, and every part of it came out of one recorded run.
+
+**The diagnosis.** Playtest: "the cycle thing just escalates with enemy count —
+this is *not* something you can manage. I suddenly stall, but I can't change my
+build, because it relies on that damage to survive." Measured against the
+recording, that is exactly right and it is not a tuning problem:
+
+    450s   avail 93/115   heat 0    eps 102
+    455s   avail 74       heat 0    eps 30
+    460s   avail  8       heat 4    eps 61
+    465s   avail  0       heat 50   eps 702
+
+Full headroom to nothing in ten seconds, after seven and a half minutes at
+exactly zero. 91% of that run sat at Heat tier 0. Misfires — the sim's own "I
+could not afford that" signal — did not *lead* the collapse, they arrived with
+it. There was no early warning to surface because the system did not generate
+one.
+
+The reason is structural. A cascade's demand is **multiplicative** — output is
+roughly `kills x depth`, and both terms rise together — while supply was a
+constant. A constant against a multiplicative term is not a curve, it is a cliff,
+and no capacity number produces a ramp.
+
+**Cycles keep the half that worked.** Static reservation stays; the per-event
+budget, `available`, overdraw, deficits and misfire-on-overdraw are deleted.
+Capacity dropped 100 → 55 because at 100 it was never once the reason you could
+not do something: peak measured static load was 27, or 23% of capacity. It now
+sits at 70-85% in normal play, which is where a choice between rows becomes a
+choice.
+
+**Heat comes from cascade depth.** The first three links are free, so ordinary
+play never heats and a new player can correctly ignore the gauge. Past that each
+event charges in proportion to its depth, making a whole chain's cost quadratic
+in how deep it runs. Bounding cascades was always split between two mechanisms —
+§5.6's depth pricing decays output geometrically — and this is the other half:
+the first makes deep chains unrewarding, this makes them dangerous.
+
+Calibrated against real event rates rather than guessed. Measured after, on the
+harness pilot:
+
+    195s  depth 0.7  heat  0   tier 0
+    200s  depth 6.3  heat 32   tier 0
+    205s  depth 1.2  heat 50   tier 1
+    210s  depth 7.6  heat 82   tier 2
+    215s  depth 4.6  heat 62   tier 1   <- backs off, cools
+    230s  depth 4.0  heat 95   tier 2
+    235s  depth 5.0  heat 62   tier 1
+
+It **oscillates**. Heat rises with depth and falls when you ease off, which is
+§6.3's "Overclock is a dial, not a line" for the first time. Tier distribution
+went from 91/6/3 to 78/16/7 — a mechanic that is engaged for a third of a run
+instead of a tenth.
+
+And Heat finally has a cause you can point at. The old readout could only say how
+hot you were, because its cause was a per-second integral of a hidden budget.
+Depth is on screen. The HUD prints it beside the gauge.
+
+**Fuel is deleted entirely** — drops, gauges, the fuelled-fire bonus, Attune,
+Rectify. It was ungameable by construction: you cannot choose what drops, so it
+was a tax to watch rather than a decision to make, and the only thing anyone ever
+did with it was draft pickup radius three times. Removing it also removes the
+worst legibility bug in the game, unprompted: a fuel mote and a Mote enemy were
+the same colour, nearly the same size, and separated only by a shape nobody can
+resolve at five pixels. Only white XP falls now.
+
+**Convert survives, re-based on Heat.** Four of the five were never really about
+fuel — they traded one resource for another. Bleed spends Integrity for output,
+Coolant spends Integrity for Heat relief, Cash Out spends **Heat for XP**, Stim
+spends Heat for speed. That last pair is the good part: Heat is what a deep
+cascade *produces*, so Converts turn the game's central pressure back into
+progress. Running hot becomes a position to trade out of rather than only a
+penalty to survive. Rectify died with the gauges it moved fuel between.
+
+**Hue is threat class.** "Just because it's neat is not a good game mechanic —
+it needs something I can game around, otherwise it's just more noise." Correct.
+Enemy hue now predicts behaviour — thermal rushes, voltaic harasses, void anchors
+— which makes colour something you read *while dodging*. That is also the fix for
+the Interceptor: 7 contact damage, a diamond, and a gimmick that hides it inside
+your own projectile cloud, where it did more damage than anything else in the
+measured run.
+
+Adaptive resistance is retired with it. §11.1 promised it would "always" be
+displayed and it never was, so it was an invisible tax — and it punished exactly
+the focused builds the class stats now reward.
+
+**Behaviour tags replace it as the build axis.** Pierce says "only affects
+projectiles", Enlarge says "not projectiles", Sustain says "anything that
+lingers". Those rules always existed and were enforced silently: put Pierce on a
+Nova and the game let you, ran it, and said nothing. Every Action now shows what
+it *is* — travels ▸, area ◍, lingers ⧗ — and every conditional modifier shows
+what it *needs*.
+
+Derived from `PRIMITIVE_FIELDS` rather than authored, because a second
+hand-written list of which modifiers work with which Actions would drift from the
+one the simulation uses, and the version the player reads would be the wrong one.
+Glyphs rather than colour: hue is spoken for by threat class and the editor
+already spends colour on node kind.
+
+Three class stats pay for committing — Ballistics ▸, Yield ◍, Half-Life ⧗. They
+are worthless to an unfocused Engine, which makes them the first stats in the
+game that are a decision rather than a number that always goes up, and they give
+a non-cascade build something to scale into.
+
+**Costs accepted:** the recording format bumps to v2 and every existing recording
+becomes unreplayable; six nodes leave or change; a lot of tests were rewritten.
+
+**Not done here**, on purpose: retuning triggers. On Hit and On Kill self-feed and
+nothing else does, which is why there is one build — but removing the cliff
+changes what every card is worth, so specifying that now would be guessing.
+
+---
+
 ## Not built in Milestone 1
 
 Deliberately absent: the §16/§17 visual language (bloom, phosphor trails,

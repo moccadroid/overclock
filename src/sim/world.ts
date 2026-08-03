@@ -68,8 +68,6 @@ export interface Enemy extends SpatialItem {
   enriched: boolean;
   /** §10.3 — elite affixes rolled at spawn. */
   affixes: EliteAffix[];
-  /** Adaptive affix: personal, per-hue resistance that climbs as it is hit. */
-  adaptive: Record<Hue, number>;
   /** Phasing affix: currently untargetable. */
   phased: boolean;
   /** Facing, for the Bulwark's shield arc and the Lancer's beam. */
@@ -93,7 +91,7 @@ export interface Enemy extends SpatialItem {
 }
 
 /** §10.3 — Wardens and Meltdown-tier enemies roll one or two of these. */
-export type EliteAffix = 'adaptive' | 'volatile' | 'phasing' | 'anchored';
+export type EliteAffix = 'volatile' | 'phasing' | 'anchored';
 
 export interface Projectile extends SpatialItem {
   id: number;
@@ -118,11 +116,11 @@ export interface Projectile extends SpatialItem {
   leech: number;
   /** Fragment — steering strength toward a target, 0 for a straight shot. */
   seek: number;
-  /** Siphon — fuel stolen from the target's hue on hit. */
+  /** Siphon — Heat shed on hit. */
   siphon: number;
 }
 
-export type PickupKind = 'fuel' | 'xp';
+export type PickupKind = 'xp';
 
 export interface Pickup extends SpatialItem {
   id: number;
@@ -361,6 +359,9 @@ export interface Player {
   /** §7.4 Convert: Stim — fractional move-speed bonus, and its remaining time. */
   speedBoost: number;
   speedBoostTime: number;
+  /** §7.4 Convert: Bleed — fractional output bonus, and its remaining time. */
+  outputBoost: number;
+  outputBoostTime: number;
   alive: boolean;
 }
 
@@ -417,7 +418,6 @@ export interface RunStats {
   /** Seconds spent in each Heat tier — the instrument for tuning §6.3. */
   tierSeconds: [number, number, number, number];
   /** Total Cycles the engine asked for. Compare against capacity x time. */
-  cyclesSpent: number;
   /** Kills per enemy id. Feeds Discoveries and the Results breakdown. */
   killsByEnemy: Map<string, number>;
   /** Kills landed while a Suppressor had your Triggers offline (§11.2). */
@@ -466,24 +466,8 @@ export class World {
   /** §18 — drained by the audio layer each frame. See AudioCue. */
   audioCues: AudioCue[] = [];
 
-  fuel: Record<Hue, number> = { thermal: 0, voltaic: 0, void: 0 };
-  /**
-   * Fuel spent and gained per second, per hue, smoothed.
-   *
-   * Without these the economy is opaque: a gauge pinned at zero looks broken
-   * when it actually means "your engine is burning this exactly as fast as it
-   * arrives", and a gauge sitting full looks healthy when it actually means
-   * "nothing you own can spend this".
-   */
-  fuelBurn: Record<Hue, number> = { thermal: 0, voltaic: 0, void: 0 };
-  fuelGain: Record<Hue, number> = { thermal: 0, voltaic: 0, void: 0 };
-  private fuelBurnTick: Record<Hue, number> = { thermal: 0, voltaic: 0, void: 0 };
-  private fuelGainTick: Record<Hue, number> = { thermal: 0, voltaic: 0, void: 0 };
 
-  /** §11.1 — smoothed damage dealt per hue, the basis of adaptive resistance. */
-  private damageByHue: Record<Hue, number> = { thermal: 0, voltaic: 0, void: 0 };
-  /** Current resistance per hue, 0..cap. Always visible in the HUD (§19.4). */
-  resistance: Record<Hue, number> = { thermal: 0, voltaic: 0, void: 0 };
+
   xp = 0;
   xpToNext: number;
   level = 1;
@@ -493,8 +477,24 @@ export class World {
   purges = TUNABLE.purgesPerRun;
   /** Node ids removed from this run's pool by Purge (§8.3). */
   purged = new Set<string>();
-  /** §8.2 — accumulated stat-card bonuses. Deliberately small and boring. */
-  bonuses = { crit: 0, magnet: 0, speed: 0, power: 0 };
+  /**
+   * §8.2 — accumulated stat-card bonuses.
+   *
+   * The first four are deliberately small. The last three are the class stats,
+   * and they are not: they multiply one *kind* of Action and do nothing at all
+   * to the others, which is what makes taking one a decision about the build you
+   * are in rather than a number that always goes up.
+   */
+  bonuses = { crit: 0, magnet: 0, speed: 0, power: 0, travels: 0, area: 0, lingers: 0 };
+
+  /** Class-stat multipliers, read at the point of use so they cannot go stale. */
+  get areaMul(): number {
+    return 1 + this.bonuses.area;
+  }
+
+  get durationMul(): number {
+    return 1 + this.bonuses.lingers;
+  }
   /**
    * §14 — a Results screen that cannot say how you died teaches nothing. The
    * final blow answers "what got me"; the tally answers "what was actually
@@ -520,7 +520,8 @@ export class World {
   score = 0;
   eps = 0;
   /** Smoothed Cycles/sec the engine is drawing. Shown against capacity (§6). */
-  demandAverage = 0;
+  /** Smoothed cascade depth. The cause Heat now has, for the HUD. */
+  depthAverage = 0;
   /** §5.4 Surge — engine-rate bonus and its remaining time. */
   surgeRate = 0;
   surgeRateTime = 0;
@@ -561,7 +562,6 @@ export class World {
     converts: 0,
     crits: 0,
     tierSeconds: [0, 0, 0, 0],
-    cyclesSpent: 0,
     killsByEnemy: new Map(),
     suppressedKills: 0,
     desperateConverts: 0,
@@ -616,6 +616,8 @@ export class World {
       dirY: -1,
       speedBoost: 0,
       speedBoostTime: 0,
+      outputBoost: 0,
+      outputBoostTime: 0,
       alive: true,
     };
 
@@ -693,24 +695,13 @@ export class World {
       if (!this.budget.stalled) this.drainEvents();
     }
 
-    const fuelDecay = Math.pow(0.5, dt / 1.5);
-    for (const hue of HUES) {
-      this.fuelBurn[hue] =
-        this.fuelBurn[hue] * fuelDecay + (this.fuelBurnTick[hue] / dt) * (1 - fuelDecay);
-      this.fuelGain[hue] =
-        this.fuelGain[hue] * fuelDecay + (this.fuelGainTick[hue] / dt) * (1 - fuelDecay);
-      this.fuelBurnTick[hue] = 0;
-      this.fuelGainTick[hue] = 0;
-    }
-
-    this.updateResistance(dt);
     this.stats.tierSeconds[this.budget.tier] += dt;
-    this.stats.cyclesSpent += this.budget.spentThisTick;
-    // Smoothed so the HUD can show a stable "you are drawing X/sec" rather than
-    // a per-tick number that flickers too fast to read.
-    const demandDecay = Math.pow(0.5, dt / 0.5);
-    this.demandAverage =
-      this.demandAverage * demandDecay + this.budget.demandPerSecond(dt) * (1 - demandDecay);
+    // Smoothed, so the HUD shows a depth you can read rather than a per-tick
+    // number that flickers. This is the number Heat is *caused by*, and showing
+    // it beside the gauge is the whole point of moving Heat onto depth.
+    const depthDecay = Math.pow(0.5, dt / 0.6);
+    this.depthAverage =
+      this.depthAverage * depthDecay + this.budget.depthThisTick * (1 - depthDecay);
     if (this.budget.heat > this.stats.peakHeat) this.stats.peakHeat = this.budget.heat;
 
     this.compact();
@@ -801,8 +792,11 @@ export class World {
       this.engine.lastFired[index] = this.time;
     }
 
-    // §23.1 pricing: the deeper into a cascade this fire is, the more it costs.
-    this.budget.spend(compiled.cycleCost * (1 + depth * TUNABLE.cascadeCostGrowth));
+    // §6.2 — depth is what heats you. Firing itself is free: Cycles are a static
+    // reservation now, so a fire has already been paid for by existing. What has
+    // not been paid for is *how deep into a cascade* this fire is, and that is
+    // charged here, per event, so a chain's total cost grows with its own depth.
+    this.budget.chargeDepth(depth);
 
     if (this.budget.rollMisfire(this.rng)) {
       this.stats.misfires++;
@@ -891,9 +885,7 @@ export class World {
       return;
     }
 
-    // §5.5 Attune — the Action's hue shifts to your fullest gauge, which is the
-    // clean answer to adaptive resistance for a mono-hue engine.
-    const hue = compiled.ctx.attune > 0 ? this.fullestHue() : def.hue;
+    const hue = def.hue;
 
     // Actions happen where the triggering event happened, unless they say
     // otherwise — see ActionDef.origin. This is what lets a cascade travel.
@@ -902,23 +894,17 @@ export class World {
     const oy = atPlayer ? this.player.y : y;
 
     for (let n = 0; n < instances; n++) {
-      // §7.2 — fuelled fire consumes 1 fuel of the Action's hue for +50% output.
-      let fuelBonus = 1;
-      if (this.fuel[hue] >= 1) {
-        this.fuel[hue] -= 1;
-        this.fuelBurnTick[hue] += 1;
-        fuelBonus = 1 + TUNABLE.fueledFireOutputBonus;
-      }
       // ...and pays less. Together these let a cascade run wild near its source
       // and run out of steam as it travels, rather than being cut off.
       const depthFalloff = Math.pow(TUNABLE.cascadeOutputFalloff, depth);
       const output =
         compiled.ctx.output *
         outputMul *
-        fuelBonus *
         depthFalloff *
         this.engine.globalOutput *
-        (1 + this.bonuses.power);
+        (1 + this.bonuses.power) *
+        // §7.4 Convert: Bleed — Integrity spent, damage back, for a few seconds.
+        (1 + this.player.outputBoost);
       const damage = def.damage * output;
       const corrupted =
         this.budget.corruptionChance > 0 && this.rng.chance(this.budget.corruptionChance);
@@ -928,7 +914,7 @@ export class World {
           this.spawnProjectile(def.id, damage, depth, index, ox, oy, compiled.ctx, corrupted, hue);
           break;
         case 'burst':
-          this.doBurst(def.id, damage, depth, index, ox, oy, compiled.ctx.area, hue, compiled.ctx.leech);
+          this.doBurst(def.id, damage, depth, index, ox, oy, (compiled.ctx.area * this.areaMul), hue, compiled.ctx.leech);
           break;
         case 'chain':
           this.doChain(def.id, damage, depth, index, ox, oy, hue, compiled.ctx.leech);
@@ -942,8 +928,8 @@ export class World {
             index,
             ox,
             oy,
-            compiled.ctx.area,
-            compiled.ctx.duration,
+            (compiled.ctx.area * this.areaMul),
+            (compiled.ctx.duration * this.durationMul),
             hue,
           );
           break;
@@ -1007,7 +993,7 @@ export class World {
       vy: dy * speed,
       life: def.lifetime ?? 2,
       damage,
-      pierce: (def.pierce ?? 0) + Math.round(ctx.pierce),
+      pierce: (def.pierce ?? 0) + Math.round(ctx.pierce) + this.bonuses.travels,
       hue,
       depth,
       programIndex,
@@ -1157,15 +1143,15 @@ export class World {
     hue: Hue,
   ): void {
     if (this.mines.length >= SAFETY.maxZones) this.mines[0]!.alive = false;
-    const life = (def.lifetime ?? 8) * Math.max(0.1, ctx.duration);
+    const life = (def.lifetime ?? 8) * Math.max(0.1, (ctx.duration * this.durationMul));
     this.mines.push({
       id: this.nextId++,
       hue,
       x: this.player.x,
       y: this.player.y,
       damage,
-      radius: (def.radius ?? 100) * Math.max(0.1, ctx.area),
-      triggerRadius: (def.triggerRadius ?? 44) * Math.max(0.1, ctx.area),
+      radius: (def.radius ?? 100) * Math.max(0.1, (ctx.area * this.areaMul)),
+      triggerRadius: (def.triggerRadius ?? 44) * Math.max(0.1, (ctx.area * this.areaMul)),
       arm: def.armTime ?? 0.3,
       life,
       maxLife: life,
@@ -1190,7 +1176,7 @@ export class World {
     const target = this.grid.nearest(x, y, 900);
     const tx = target ? target.x : x;
     const ty = target ? target.y : y;
-    const radius = (def.radius ?? 120) * Math.max(0.1, ctx.area);
+    const radius = (def.radius ?? 120) * Math.max(0.1, (ctx.area * this.areaMul));
     if (this.pendingBursts.length < SAFETY.maxScheduledFires) {
       this.pendingBursts.push({
         time: this.time + (def.delay ?? 0.7),
@@ -1259,7 +1245,7 @@ export class World {
     const angle = far ? Math.atan2(far.y - y, far.x - x) : Math.atan2(this.player.dirY, this.player.dirX);
     const ux = Math.cos(angle);
     const uy = Math.sin(angle);
-    const width = (def.beamWidth ?? 12) * Math.max(0.1, ctx.area);
+    const width = (def.beamWidth ?? 12) * Math.max(0.1, (ctx.area * this.areaMul));
 
     for (const e of this.enemies) {
       if (!e.alive) continue;
@@ -1283,15 +1269,15 @@ export class World {
     hue: Hue,
   ): void {
     if (this.orbitals.length >= TUNABLE.maxOrbitals) this.orbitals[0]!.alive = false;
-    const life = (def.lifetime ?? 12) * Math.max(0.1, ctx.duration);
+    const life = (def.lifetime ?? 12) * Math.max(0.1, (ctx.duration * this.durationMul));
     this.orbitals.push({
       id: this.nextId++,
       hue,
       x: this.player.x,
       y: this.player.y,
       damage,
-      radius: (def.radius ?? 12) * Math.max(0.1, ctx.area),
-      orbitRadius: (def.orbitRadius ?? 110) * Math.max(0.1, ctx.area),
+      radius: (def.radius ?? 12) * Math.max(0.1, (ctx.area * this.areaMul)),
+      orbitRadius: (def.orbitRadius ?? 110) * Math.max(0.1, (ctx.area * this.areaMul)),
       orbitSpeed: def.orbitSpeed ?? 2.2,
       angle: this.rng.next() * Math.PI * 2,
       life,
@@ -1309,7 +1295,7 @@ export class World {
     this.surgeRate = Math.max(this.surgeRate, def.rateBonus ?? 0.4);
     this.surgeRateTime = Math.max(
       this.surgeRateTime,
-      (def.lifetime ?? 2) * Math.max(0.1, ctx.duration),
+      (def.lifetime ?? 2) * Math.max(0.1, (ctx.duration * this.durationMul)),
     );
   }
 
@@ -1331,7 +1317,7 @@ export class World {
     ctx: FireContext,
     hue: Hue,
   ): void {
-    const radius = (def.radius ?? 180) * Math.max(0.1, ctx.area);
+    const radius = (def.radius ?? 180) * Math.max(0.1, (ctx.area * this.areaMul));
     const impulse = def.knockback ?? 240;
     this.grid.queryRadius(x, y, radius, (enemy) => {
       const dx = enemy.x - x;
@@ -1934,35 +1920,6 @@ export class World {
     });
   }
 
-  /**
-   * §11.1 — the population builds resistance to each hue in proportion to that
-   * hue's share of your recent damage, capped at 60%.
-   *
-   * Its job is to make mono-hue a *choice with a price*, not a mistake: an
-   * engine strong enough to pay the tax may still push straight through. The
-   * counters are diversifying, Attune, Rectify conversions — or brute force.
-   *
-   * A floor keeps the early game clean: nothing resists you until one hue
-   * genuinely dominates, so a player is never taxed for owning one Action.
-   */
-  private updateResistance(dt: number): void {
-    const decay = Math.pow(0.5, dt / TUNABLE.resistanceHalfLife);
-    let total = 0;
-    for (const hue of HUES) {
-      this.damageByHue[hue] *= decay;
-      total += this.damageByHue[hue];
-    }
-    if (total <= 0.0001) {
-      for (const hue of HUES) this.resistance[hue] = 0;
-      return;
-    }
-    for (const hue of HUES) {
-      const share = this.damageByHue[hue] / total;
-      const over = (share - TUNABLE.resistanceFloor) / (1 - TUNABLE.resistanceFloor);
-      this.resistance[hue] = Math.max(0, Math.min(1, over)) * TUNABLE.resistanceCap;
-    }
-  }
-
   /** §11.2 — is the player inside a Suppressor's zone? Triggers do not fire there. */
   get suppressed(): boolean {
     for (const e of this.enemies) {
@@ -2001,14 +1958,12 @@ export class World {
       damage *= TUNABLE.critMultiplier;
     }
 
-    // §11.1 — global adaptive resistance, plus the elite's personal version.
-    let resisted = damage * (1 - this.resistance[hue]);
-    if (enemy.affixes.includes('adaptive')) {
-      resisted *= 1 - Math.min(TUNABLE.resistanceCap, enemy.adaptive[hue]);
-      enemy.adaptive[hue] = Math.min(1, enemy.adaptive[hue] + TUNABLE.affixAdaptiveRate);
-    }
+    // §11.1's adaptive resistance is retired. It was invisible — nothing in the
+    // HUD ever showed it — and it punished exactly the focused single-hue builds
+    // the class stats now exist to reward. A tax nobody can see is not a
+    // decision, it is a worse number.
+    let resisted = damage;
 
-    this.damageByHue[hue] += damage;
     enemy.hp -= resisted;
     enemy.flash = 0.04;
 
@@ -2079,8 +2034,7 @@ export class World {
 
     // §12.3 — beacon-called waves drop enriched.
     const bonus = enemy.enriched ? 1 + TUNABLE.beaconDropBonus : 1;
-    const fuelDrops = Math.round(def.fuel * bonus);
-    for (let i = 0; i < fuelDrops; i++) this.dropPickup('fuel', enemy.x, enemy.y, enemy.hue, 1);
+
     this.dropPickup('xp', enemy.x, enemy.y, enemy.hue, def.xp * bonus);
 
     // §10.3 Volatile — a telegraphed death explosion.
@@ -2183,6 +2137,8 @@ export class World {
 
     p.speedBoostTime = Math.max(0, p.speedBoostTime - dt);
     if (p.speedBoostTime <= 0) p.speedBoost = 0;
+    p.outputBoostTime = Math.max(0, p.outputBoostTime - dt);
+    if (p.outputBoostTime <= 0) p.outputBoost = 0;
 
     const speed =
       TUNABLE.playerMoveSpeed *
@@ -2255,6 +2211,10 @@ export class World {
       if (!e.alive) continue;
       e.spawnAge += dt;
       e.flash = Math.max(0, e.flash - dt);
+      // A shared per-enemy cooldown. It used to tick only inside the Lancer
+      // branch, which meant every other enemy that leaned on it — the Leech —
+      // fired once and never again.
+      if (e.beamTimer > 0) e.beamTimer -= dt;
       // §23.1 — refresh the per-second knockback budget.
       e.shoveWindow -= dt;
       if (e.shoveWindow <= 0) {
@@ -2394,17 +2354,19 @@ export class World {
   }
 
   /**
-   * §10.2 Leech — "contact steals 5 fuel of your fullest gauge (no damage)".
-   * Pressure aimed at the economy rather than the health bar (§11).
+   * §10.2 Leech — contact heats you instead of hurting you.
+   *
+   * Pressure aimed at the economy rather than the health bar (§11), and with
+   * Fuel gone the economy is Heat. Touching one shoves you toward Overheat,
+   * which is worse for a deep-cascade engine than losing Integrity and harmless
+   * to a shallow one — the enemy that punishes the build the game rewards.
    */
   private touchPlayer(e: Enemy, def: EnemyDef): void {
-    if (def.fuelSteal) {
-      if (e.beamTimer > 0) return; // per-enemy steal cooldown
+    if (def.heatOnTouch) {
+      if (e.beamTimer > 0) return; // per-enemy cooldown
       e.beamTimer = 1.2;
-      let fullest: Hue = 'thermal';
-      for (const hue of HUES) if (this.fuel[hue] > this.fuel[fullest]) fullest = hue;
-      this.fuel[fullest] = Math.max(0, this.fuel[fullest] - def.fuelSteal);
-      this.pushFx('hurt', fullest, this.player.x, this.player.y, 0, [], 0.16);
+      this.budget.addHeat(def.heatOnTouch);
+      this.pushFx('hurt', e.hue, this.player.x, this.player.y, 0, [], 0.16);
       return;
     }
     if (def.contactDamage > 0) {
@@ -2505,7 +2467,6 @@ export class World {
       e.y += e.vy * dt;
       this.resolveRuins(e, e.radius);
 
-      e.beamTimer -= dt;
       // §23.1 — only so many may be charging at once. Lancers arriving in
       // numbers turned a dodgeable telegraph into an unavoidable crossfire; the
       // rest simply hold their shot rather than being removed from the fight.
@@ -2621,13 +2582,14 @@ export class World {
           }
         }
         proj.hits.push(enemy.id);
-        // §5.4 Siphon — "steals 1 fuel of the target's hue on hit".
+        // §5.4 Siphon — sheds Heat on hit.
+        //
+        // Fuel is gone and Heat is the resource, so the node that used to steal
+        // one currency now vents the other. It is the only *sustained* cooling
+        // in the game — Coolant is a burst — which makes it the piece a deep
+        // cascade build is actually looking for.
         if (proj.siphon > 0) {
-          this.fuel[enemy.hue] = Math.min(
-            TUNABLE.fuelGaugeCap,
-            this.fuel[enemy.hue] + proj.siphon,
-          );
-          this.fuelGainTick[enemy.hue] += proj.siphon;
+          this.budget.addHeat(-proj.siphon);
         }
         this.damageEnemy(enemy, proj.damage, proj.depth, proj.programIndex, proj.hue, proj.leech);
         if (proj.hits.length > proj.pierce) {
@@ -2655,19 +2617,6 @@ export class World {
     }
   }
 
-  /** The hue you are currently richest in. Used by Attune and by Bleed. */
-  fullestHue(): Hue {
-    let best: Hue = 'thermal';
-    for (const hue of HUES) if (this.fuel[hue] > this.fuel[best]) best = hue;
-    return best;
-  }
-
-  private emptiestHue(): Hue {
-    let worst: Hue = 'thermal';
-    for (const hue of HUES) if (this.fuel[hue] < this.fuel[worst]) worst = hue;
-    return worst;
-  }
-
   /**
    * §7.4 — the arbitrage layer. Convert exchanges one resource for another, and
    * the exchange rates are called out as "the most sensitive tuning surface in
@@ -2680,42 +2629,31 @@ export class World {
     const spec = def.convert;
     if (!spec) return;
 
-    // Rectify moves fuel between gauges rather than spending it outright.
-    if (spec.rebalance) {
-      const from = this.fullestHue();
-      const to = this.emptiestHue();
-      if (from === to || this.fuel[from] < spec.costAmount) return;
-      this.fuel[from] -= spec.costAmount;
-      this.fuel[to] = Math.min(TUNABLE.fuelGaugeCap, this.fuel[to] + spec.gainAmount);
-      this.finishConvert(def, depth);
-      return;
-    }
-
     // Pay.
-    let payHue: Hue = 'thermal';
     if (spec.costKind === 'integrity') {
       // Never let a Convert kill you outright: it is a trade, not a gamble.
       if (this.player.integrity <= spec.costAmount + 1) return;
       if (this.player.integrity < 40) this.stats.desperateConverts++;
       this.player.integrity -= spec.costAmount;
     } else {
-      payHue = this.fullestHue();
-      if (this.fuel[payHue] < spec.costAmount) return;
-      this.fuel[payHue] -= spec.costAmount;
+      // Heat is the currency now. Spending it is what makes running hot a
+      // *position* rather than only a penalty — a deep cascade generates the
+      // thing these Actions turn back into progress.
+      if (this.budget.heat < spec.costAmount) return;
+      this.budget.addHeat(-spec.costAmount);
     }
 
     // Receive.
     switch (spec.gainKind) {
-      case 'fuel': {
-        const target = spec.costKind === 'integrity' ? this.fullestHue() : payHue;
-        this.fuel[target] = Math.min(TUNABLE.fuelGaugeCap, this.fuel[target] + spec.gainAmount);
-        break;
-      }
       case 'xp':
         this.gainXp(this.xpToNext * spec.gainAmount);
         break;
       case 'heat':
         this.budget.addHeat(-spec.gainAmount);
+        break;
+      case 'output':
+        this.player.outputBoost = Math.max(this.player.outputBoost, spec.gainAmount);
+        this.player.outputBoostTime = Math.max(this.player.outputBoostTime, spec.duration ?? 4);
         break;
       case 'speed':
         this.player.speedBoost = Math.max(this.player.speedBoost, spec.gainAmount);
@@ -2775,11 +2713,7 @@ export class World {
 
       if (d < TUNABLE.playerRadius + 6) {
         item.alive = false;
-        if (item.kind === 'fuel') {
-          const before = this.fuel[item.hue];
-          this.fuel[item.hue] = Math.min(TUNABLE.fuelGaugeCap, before + item.value);
-          this.fuelGainTick[item.hue] += this.fuel[item.hue] - before;
-        } else {
+        {
           this.gainXp(item.value);
         }
         this.cue('pickup', item.hue, 0, item.kind === 'xp' ? 0.3 : 0.2);
@@ -2813,9 +2747,8 @@ export class World {
         if (!other.alive) continue;
         if (other.kind !== host.kind) continue;
         // XP renders white regardless of which enemy dropped it, so its hue is
-        // not load-bearing and shards merge freely. Fuel must not: merging hues
+        // not load-bearing and shards merge freely.
         // would silently convert one gauge into another.
-        if (host.kind === 'fuel' && other.hue !== host.hue) continue;
         const dx = other.x - host.x;
         const dy = other.y - host.y;
         if (dx * dx + dy * dy > r2) continue;
@@ -3082,14 +3015,20 @@ export class World {
 
   // ------------------------------------------------------------------ spawning
 
-  spawnEnemy(defId: string, x: number, y: number, hue: Hue): Enemy | null {
+  /**
+   * `hue` is accepted and ignored — it is the enemy's threat class now, and a
+   * wave does not get to recolour what a Charger is. The parameter stays so
+   * every caller keeps compiling and so a Splitter's children still read as
+   * inheriting from their parent, which they do: they are the same enemy.
+   */
+  spawnEnemy(defId: string, x: number, y: number, _hue?: Hue): Enemy | null {
     if (this.enemies.length >= SAFETY.maxEntities) return null;
     const def = ENEMY_BY_ID.get(defId);
     if (!def) throw new Error(`Unknown enemy "${defId}"`);
     const e: Enemy = {
       id: this.nextId++,
       defId,
-      hue,
+      hue: def.hue,
       x,
       y,
       vx: 0,
@@ -3105,7 +3044,6 @@ export class World {
       spawnAge: 0,
       enriched: false,
       affixes: [],
-      adaptive: { thermal: 0, voltaic: 0, void: 0 },
       phased: false,
       facing: 0,
       meals: 0,
@@ -3123,7 +3061,7 @@ export class World {
     const eliteRoll =
       def.elite === true || (this.phase === 'meltdown' && def.hp >= 20 && this.rng.chance(0.25));
     if (eliteRoll) {
-      const pool: EliteAffix[] = ['adaptive', 'volatile', 'phasing', 'anchored'];
+      const pool: EliteAffix[] = ['volatile', 'phasing', 'anchored'];
       const count = def.elite === true ? 1 + this.rng.int(2) : 1;
       for (let i = 0; i < count; i++) {
         const pick = pool[this.rng.int(pool.length)]!;
@@ -3290,3 +3228,4 @@ function angleDelta(a: number, b: number): number {
 
 export type { Program };
 export type { EventType };
+

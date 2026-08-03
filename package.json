@@ -12,7 +12,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "sim": "tsx src/harness/headless.ts",
-    "inspect": "tsx src/harness/inspect.ts"
+    "inspect": "tsx src/harness/inspect.ts",
+    "probe": "tsx src/harness/probe.ts"
   },
   "engines": {
     "node": ">=20"
@@ -31,4 +32,5 @@
     "vitest": "^4.1.10"
   }
 }
+
 

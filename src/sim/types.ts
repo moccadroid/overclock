@@ -58,15 +58,21 @@ export type FireField =
   /** §5.6 Ground — the row above costs less; this row outputs less. */
   | 'ground';
 
-/** §7.4 — what a Convert card exchanges. */
+/**
+ * §7.4 — what a Convert card exchanges.
+ *
+ * Fuel is gone, so the currencies are Integrity and **Heat**. That is a better
+ * arbitrage layer than the one it replaces: Heat is the resource a deep cascade
+ * *produces*, so these are the Actions that turn the game's central pressure
+ * back into progress. Running hot becomes a position to trade out of rather than
+ * only a penalty to survive.
+ */
 export interface ConvertSpec {
-  costKind: 'integrity' | 'fuel';
+  costKind: 'integrity' | 'heat';
   costAmount: number;
-  gainKind: 'fuel' | 'xp' | 'heat' | 'speed';
+  gainKind: 'xp' | 'heat' | 'speed' | 'output';
   gainAmount: number;
-  /** Rectify: drains the fullest gauge to fill the emptiest. */
-  rebalance?: boolean;
-  /** Stim: seconds the effect lasts. */
+  /** Stim and Bleed: seconds the effect lasts. */
   duration?: number;
 }
 
@@ -200,7 +206,7 @@ export interface ActionDef extends PoolWeighted {
   knockback?: number;
   /** Fragment: a projectile that steers toward a target and detonates. */
   seek?: number;
-  /** Siphon: fuel stolen from the target's hue on hit. */
+  /** Siphon: Heat shed on hit. The only sustained cooling in the game. */
   siphon?: number;
   description: string;
 }
@@ -259,13 +265,28 @@ export interface EnemyDef {
   id: string;
   name: string;
   shape: EnemyShape;
+  /**
+   * §16.3 — hue is *threat class*, and it is a property of the enemy rather than
+   * of the wave that spawned it.
+   *
+   *   thermal  rushers   — come straight at you
+   *   voltaic  harassers — hit or interfere from range
+   *   void     anchors   — soak, hold ground, disable
+   *
+   * It used to be a damage type that nothing interacted with: enemies had a
+   * colour, Actions had a colour, and the two never met except through an
+   * adaptive resistance nothing ever displayed. Colour that means nothing is
+   * noise, and this arena has enough. Now it predicts behaviour, which is a
+   * thing you can read while dodging — which is exactly where an Interceptor
+   * hiding inside your own bullet cloud needed to be readable.
+   */
+  hue: Hue;
   behavior: EnemyBehavior;
   hp: number;
   speed: number;
   radius: number;
   contactDamage: number;
   xp: number;
-  fuel: number;
   /** GDD §10.2 Splitter — children spawned on death. */
   splitsInto?: { enemy: string; count: number };
   /** Charger and Lancer telegraph windup, seconds. */
@@ -278,8 +299,8 @@ export interface EnemyDef {
   growthPerMeal?: number;
   /** Suppressor — radius of the zone in which the player's Triggers do not fire. */
   zoneRadius?: number;
-  /** Leech — fuel drained from the fullest gauge on contact. */
-  fuelSteal?: number;
+  /** Leech — Heat added on contact. Pressure on the economy, not the health bar. */
+  heatOnTouch?: number;
   /** Lancer — preferred distance, and the damage of its beam. */
   standoff?: number;
   beamDamage?: number;

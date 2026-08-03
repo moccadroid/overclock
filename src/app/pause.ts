@@ -120,7 +120,8 @@ export function renderRunBody(world: World, library: Library): string {
 
         <div class="k">heat</div>
         ${stat(tierName, `${world.budget.heat.toFixed(0)} / 100`)}
-        ${stat('DRAW', `${Math.round(world.demandAverage)} of ${Math.round(world.budget.capacity)} c/s`)}
+        ${stat('RESERVED', `${world.engine.staticLoad.toFixed(1)} of ${world.budget.capacity} c`)}
+        ${stat('CHAIN DEPTH', world.depthAverage.toFixed(1))}
 
         <div class="k">draft</div>
         ${stat('REROLLS', String(world.rerolls))}

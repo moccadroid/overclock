@@ -4,7 +4,12 @@
     "kind": "modifier",
     "name": "Amplify",
     "cycleMult": 1.3,
-    "ops": [{ "target": "output", "add": 0.5 }],
+    "ops": [
+      {
+        "target": "output",
+        "add": 0.5
+      }
+    ],
     "description": "+50% output (flat, applied where it sits in the chain)."
   },
   {
@@ -13,8 +18,14 @@
     "name": "Split",
     "cycleMult": 2.0,
     "ops": [
-      { "target": "count", "mul": 3 },
-      { "target": "output", "mul": 0.65 }
+      {
+        "target": "count",
+        "mul": 3
+      },
+      {
+        "target": "output",
+        "mul": 0.65
+      }
     ],
     "description": "x3 copies, each -35% output."
   },
@@ -23,7 +34,12 @@
     "kind": "modifier",
     "name": "Echo",
     "cycleMult": 1.8,
-    "ops": [{ "target": "echo", "add": 1 }],
+    "ops": [
+      {
+        "target": "echo",
+        "add": 1
+      }
+    ],
     "description": "Repeats everything before it once, 0.2s later, at 70% output."
   },
   {
@@ -31,7 +47,12 @@
     "kind": "modifier",
     "name": "Accelerate",
     "cycleMult": 1.4,
-    "ops": [{ "target": "rate", "add": 0.3 }],
+    "ops": [
+      {
+        "target": "rate",
+        "add": 0.3
+      }
+    ],
     "description": "-30% trigger interval. The row fires more often."
   },
   {
@@ -39,7 +60,12 @@
     "kind": "modifier",
     "name": "Enlarge",
     "cycleMult": 1.3,
-    "ops": [{ "target": "area", "add": 0.6 }],
+    "ops": [
+      {
+        "target": "area",
+        "add": 0.6
+      }
+    ],
     "description": "+60% area. Affects bursts, fields, mines and shoves - not projectiles."
   },
   {
@@ -47,7 +73,12 @@
     "kind": "modifier",
     "name": "Pierce",
     "cycleMult": 1.2,
-    "ops": [{ "target": "pierce", "add": 2 }],
+    "ops": [
+      {
+        "target": "pierce",
+        "add": 2
+      }
+    ],
     "description": "Projectiles pass through 2 more enemies. Only affects projectiles."
   },
   {
@@ -55,7 +86,12 @@
     "kind": "modifier",
     "name": "Ricochet",
     "cycleMult": 1.3,
-    "ops": [{ "target": "bounce", "add": 1 }],
+    "ops": [
+      {
+        "target": "bounce",
+        "add": 1
+      }
+    ],
     "description": "Projectiles bounce once to a new target. Only affects projectiles."
   },
   {
@@ -64,9 +100,18 @@
     "name": "Focus",
     "cycleMult": 1.1,
     "ops": [
-      { "target": "count", "mul": 0 },
-      { "target": "count", "add": 1 },
-      { "target": "output", "add": 1.2 }
+      {
+        "target": "count",
+        "mul": 0
+      },
+      {
+        "target": "count",
+        "add": 1
+      },
+      {
+        "target": "output",
+        "add": 1.2
+      }
     ],
     "description": "Cancels Split: fires once instead of many, but each shot hits far harder."
   },
@@ -75,7 +120,12 @@
     "kind": "modifier",
     "name": "Sustain",
     "cycleMult": 1.3,
-    "ops": [{ "target": "duration", "add": 0.8 }],
+    "ops": [
+      {
+        "target": "duration",
+        "add": 0.8
+      }
+    ],
     "description": "+80% duration. Affects anything that lingers: fields, mines, orbitals, buffs."
   },
   {
@@ -83,7 +133,12 @@
     "kind": "modifier",
     "name": "Leech",
     "cycleMult": 1.4,
-    "ops": [{ "target": "leech", "add": 0.03 }],
+    "ops": [
+      {
+        "target": "leech",
+        "add": 0.03
+      }
+    ],
     "description": "3% of damage dealt returns to you as Integrity."
   },
   {
@@ -91,7 +146,12 @@
     "kind": "modifier",
     "name": "Volatile",
     "cycleMult": 1.4,
-    "ops": [{ "target": "volatile", "add": 0.5 }],
+    "ops": [
+      {
+        "target": "volatile",
+        "add": 0.5
+      }
+    ],
     "description": "Effects detonate at the end of their life for 50% output."
   },
   {
@@ -99,16 +159,13 @@
     "kind": "modifier",
     "name": "Quantize",
     "cycleMult": 1.2,
-    "ops": [{ "target": "quantize", "add": 1 }],
+    "ops": [
+      {
+        "target": "quantize",
+        "add": 1
+      }
+    ],
     "description": "Locks this row to the engine pulse. Fires landing on the beat hit 25% harder."
-  },
-  {
-    "id": "attune",
-    "kind": "modifier",
-    "name": "Attune",
-    "cycleMult": 1.2,
-    "ops": [{ "target": "attune", "add": 1 }],
-    "description": "The action takes the hue of your fullest fuel gauge."
   },
   {
     "id": "overdrive",
@@ -116,8 +173,14 @@
     "name": "Overdrive",
     "cycleMult": 1.0,
     "ops": [
-      { "target": "output", "add": 1.0 },
-      { "target": "overdrive", "add": 1 }
+      {
+        "target": "output",
+        "add": 1.0
+      },
+      {
+        "target": "overdrive",
+        "add": 1
+      }
     ],
     "description": "+100% output. Every fire adds Heat directly, budget or no budget."
   },
@@ -126,7 +189,12 @@
     "kind": "modifier",
     "name": "Resonate",
     "cycleMult": 1.5,
-    "ops": [{ "target": "resonate", "add": 1 }],
+    "ops": [
+      {
+        "target": "resonate",
+        "add": 1
+      }
+    ],
     "description": "This row also fires whenever the row directly above it fires."
   },
   {
@@ -135,9 +203,15 @@
     "name": "Ground",
     "cycleMult": 1.0,
     "ops": [
-      { "target": "ground", "add": 1 },
-      { "target": "output", "mul": 0.8 }
+      {
+        "target": "ground",
+        "add": 1
+      },
+      {
+        "target": "output",
+        "mul": 0.8
+      }
     ],
-    "description": "The row above costs 30% fewer Cycles. This row outputs 20% less."
+    "description": "The row above reserves 30% fewer Cycles. This row outputs 20% less."
   }
 ]

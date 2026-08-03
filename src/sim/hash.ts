@@ -26,7 +26,7 @@ export function hashWorld(world: World): string {
   h = fnv(h, q(world.player.y));
   h = fnv(h, q(world.player.integrity));
   h = fnv(h, q(world.budget.heat));
-  h = fnv(h, q(world.budget.available));
+  h = fnv(h, q(world.budget.staticLoad));
   h = fnv(h, world.stats.events);
   h = fnv(h, world.stats.kills);
   h = fnv(h, world.stats.fires);

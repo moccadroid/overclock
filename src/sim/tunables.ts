@@ -28,19 +28,33 @@ export const TUNABLE = {
   playerRadius: 15,
 
   // ---- §6 cycles & heat ----
-  cycleCapacityBase: 100,
-  /** Regen per second == capacity (GDD §6.1: "regenerating at capacity/sec"). */
-  cycleRegenPerCapacity: 1.0,
   /**
-   * Heat accrues from how far over budget you are, not from raw unmet Cycles.
+   * Capacity is a *static* reservation now, and it binds.
    *
-   * Charging Heat per deficit-Cycle made a single big cascade tick cross the
-   * whole 0-100 band, so Overheat became a wall the engine bounced off every few
-   * seconds — the opposite of §6.3's "dial, not a line". Instead: overdraw is
-   * measured as a multiple of what regen supplies, and Heat climbs at a bounded
-   * rate. Running at 2x budget is a place you can live; running at 10x is not.
+   * It used to be 100 against a peak measured static load of 27 — a constraint
+   * that was never once the reason you could not do something. With the dynamic
+   * budget gone this is the only build tension left, so it has to bite: 55 puts
+   * a typical three-row Engine around 70-85% reserved, which is where a choice
+   * between rows starts being a choice.
    */
-  heatGainPerOverdraw: 22,
+  cycleCapacityBase: 55,
+  /**
+   * Heat from cascade depth. See cycles.ts for why the overdraw model is gone.
+   *
+   * The first three links are free, so a Clock row or a shallow bounce never
+   * heats and a new player can ignore the gauge entirely. Past that each event
+   * charges in proportion to how deep it is, which makes a whole chain's cost
+   * quadratic in its depth — spectacular and brief rather than free and
+   * permanent.
+   */
+  heatFreeDepth: 3,
+  // Calibrated against real event rates rather than guessed. A cascade runs
+  // 50-500 events a second; at 100/s and two links past free that is 10 Heat a
+  // second, which the 8/s decay very nearly cancels. Six past free is 30/s and
+  // climbs. Twelve past free saturates the cap. The point is that the whole
+  // band between "free" and "on fire" is reachable, which is exactly what the
+  // overdraw model never managed.
+  heatPerDepthEvent: 0.05,
   heatGainMaxPerSec: 45,
   heatDecayPerSec: 8,
   overheatStallSeconds: 3,
@@ -48,17 +62,6 @@ export const TUNABLE = {
   instability1Misfire: 0.05,
   instability2Misfire: 0.15,
   instability2Corruption: 0.1,
-
-  // ---- §11.1 adaptive resistance ----
-  /**
-   * The population builds resistance to each hue in proportion to that hue's
-   * share of your recent damage. Mono-hue is a choice with a price, not a
-   * mistake — a strong enough engine can pay the tax and push through.
-   */
-  resistanceCap: 0.6,
-  resistanceHalfLife: 60,
-  /** Resistance only starts biting once a hue dominates this much of your output. */
-  resistanceFloor: 0.34,
 
   // ---- §11.2 suppression ----
   /** Seconds an Action already in flight keeps resolving after a zone lands. */
@@ -139,7 +142,7 @@ export const TUNABLE = {
   beatsPerMinute: 110,
   quantizeBonus: 0.25,
 
-  // ---- §7 fuel ----
+  // ---- §7.3 ground clutter ----
   /**
    * §7.3 — "when ground shards exceed ~200, the oldest merge into fewer, richer
    * shards. Invisible when it works; mandatory." It is mandatory because at this
@@ -158,10 +161,6 @@ export const TUNABLE = {
   consolidateRadius: 90,
   consolidateInterval: 0.6,
 
-  fuelGaugeCap: 100,
-  fuelPerKill: 1,
-  fuelPerElite: 5,
-  fueledFireOutputBonus: 0.5,
 
   // ---- §8 leveling & draft ----
   /**

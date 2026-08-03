@@ -10,7 +10,7 @@ import { inertFields } from './engine';
 import { NODE_BY_ID } from '../content/index';
 import { hypot } from './num';
 
-/** Run with the harness pilot, which actually collects fuel and XP. */
+/** Run with the harness pilot, which actually collects XP. */
 function runPiloted(world: World, seconds: number): void {
   const ticks = Math.round(seconds / SIM_DT);
   for (let i = 0; i < ticks; i++) world.advance(botInput(world));
@@ -67,7 +67,7 @@ describe('determinism (GDD §0)', () => {
 });
 
 describe('the run actually runs', () => {
-  it('spawns, kills, drops fuel and levels the player', () => {
+  it('spawns, kills, drops XP and levels the player', () => {
     const w = new World({ seed: 'run-1', axiomId: 'ignition' });
     // Two minutes should clear the §8.1 cadence target of a level every 30-45s.
     runPiloted(w, 120);
@@ -76,7 +76,9 @@ describe('the run actually runs', () => {
     expect(w.stats.events).toBeGreaterThan(0);
     expect(w.level).toBeGreaterThan(1);
     expect(w.score).toBeGreaterThan(0);
-    expect(w.fuel.thermal + w.fuel.voltaic + w.fuel.void).toBeGreaterThan(0);
+    // Only XP falls now. Fuel is gone, and with it the mote-shaped pickup that
+    // was the same colour and nearly the same size as the enemy that kills you.
+    expect(w.pickups.every((p) => p.kind === 'xp')).toBe(true);
   });
 
   it('never spawns an enemy on top of the player', () => {
@@ -730,23 +732,6 @@ describe('the rest of the grammar (GDD §5.5, §5.6, §7.4)', () => {
     expect(w2.engine.programs[1]!.fireCount).toBeGreaterThan(withoutResonate * 4 + 5);
   });
 
-  it('§5.5 Attune — the action takes the hue of your fullest gauge', () => {
-    const w = bare('attune');
-    w.fuel.thermal = 0;
-    w.fuel.voltaic = 0;
-    w.fuel.void = 80;
-    const p = w.engine.programs[0]!;
-    p.triggerId = 'clock';
-    p.actionId = 'bolt'; // thermal by default
-    p.modifierIds[0] = 'attune';
-    w.engine.recompile();
-    w.syncBudget();
-
-    w.spawnEnemy('drifter', w.player.x + 90, w.player.y, 'thermal');
-    for (let i = 0; i < 200; i++) w.advance(NO_INPUT);
-    expect(w.projectiles.some((proj) => proj.hue === 'void')).toBe(true);
-  });
-
   it('§5.5 Overdrive — buys output with Heat directly, budget or no budget', () => {
     const w = bare('overdrive');
     const p = w.engine.programs[0]!;
@@ -787,10 +772,9 @@ describe('the rest of the grammar (GDD §5.5, §5.6, §7.4)', () => {
     expect(w.player.integrity).toBeGreaterThan(40);
   });
 
-  it('§7.4 Convert: Bleed — trades Integrity for fuel, and emits On Convert', () => {
+  it('§7.4 Convert: Bleed — trades Integrity for output, and emits On Convert', () => {
     const w = bare('bleed');
     w.player.integrity = 90;
-    w.fuel.thermal = 10;
     const p = w.engine.programs[0]!;
     p.triggerId = 'clock';
     p.actionId = 'convert_bleed';
@@ -799,13 +783,13 @@ describe('the rest of the grammar (GDD §5.5, §5.6, §7.4)', () => {
 
     for (let i = 0; i < 60 * 6; i++) w.advance(NO_INPUT);
     expect(w.player.integrity).toBeLessThan(90);
-    expect(w.fuel.thermal).toBeGreaterThan(10);
+    expect(w.player.outputBoost).toBeGreaterThan(0);
     expect(w.stats.converts).toBeGreaterThan(0);
   });
 
-  it('§7.4 Convert: Coolant — spends fuel to shed Heat', () => {
+  it('§7.4 Convert: Coolant — trades Integrity for Heat relief', () => {
     const w = bare('coolant');
-    w.fuel.voltaic = 90;
+    w.player.integrity = 90;
     w.budget.heat = 80;
     const p = w.engine.programs[0]!;
     p.triggerId = 'clock';
@@ -815,7 +799,25 @@ describe('the rest of the grammar (GDD §5.5, §5.6, §7.4)', () => {
 
     for (let i = 0; i < 60 * 4; i++) w.advance(NO_INPUT);
     expect(w.budget.heat).toBeLessThan(80);
-    expect(w.fuel.voltaic).toBeLessThan(90);
+    expect(w.player.integrity).toBeLessThan(90);
+  });
+
+  it('§7.4 Convert: Cash Out — spends Heat for XP, which is the new arbitrage', () => {
+    // The whole reason Converts survived losing Fuel. Heat is what a deep
+    // cascade *produces*, so this is the Action that turns the game's central
+    // pressure back into progress rather than only into punishment.
+    const w = bare('cashout');
+    w.budget.heat = 90;
+    const before = w.level;
+    const p = w.engine.programs[0]!;
+    p.triggerId = 'clock';
+    p.actionId = 'convert_cashout';
+    w.engine.recompile();
+    w.syncBudget();
+
+    for (let i = 0; i < 60 * 6; i++) w.advance(NO_INPUT);
+    expect(w.budget.heat).toBeLessThan(90);
+    expect(w.level).toBeGreaterThan(before);
   });
 
   it('a Convert that cannot be paid for simply does not fire', () => {
@@ -1034,11 +1036,9 @@ describe('the action roster (GDD §5.4)', () => {
     expect(curved).toBe(true);
   });
 
-  it('Siphon steals fuel of the target’s hue on hit', () => {
+  it('Siphon sheds Heat on hit — the only sustained cooling in the game', () => {
     const w = rig('siphon', 'siphon');
-    w.fuel.thermal = 0;
-    w.fuel.voltaic = 0;
-    w.fuel.void = 0;
+    w.budget.heat = 90;
     // Not Bulwarks: their shield arc blocks projectiles from the front, which
     // is exactly the direction the engine fires from.
     for (let i = 0; i < 14; i++) {
@@ -1046,8 +1046,7 @@ describe('the action roster (GDD §5.4)', () => {
       e.hp = 1e6;
     }
     for (let i = 0; i < 200; i++) w.advance(NO_INPUT);
-    // Voltaic gained without any voltaic enemy having died and dropped.
-    expect(w.fuel.voltaic).toBeGreaterThan(0);
+    expect(w.budget.heat).toBeLessThan(90);
   });
 });
 
@@ -1058,54 +1057,28 @@ describe('pressure attacks the build, not the health bar (GDD §11)', () => {
     return w;
   }
 
-  it('§11.1 — mono-hue output builds resistance to that hue, capped', () => {
-    const w = quietWorld('resist');
-    const p = w.engine.programs[0]!;
-    p.triggerId = 'clock';
-    p.actionId = 'bolt'; // thermal only
-    w.engine.recompile();
-    w.syncBudget();
-
-    runPiloted(w, 120);
-
-    expect(w.resistance.thermal).toBeGreaterThan(0.2);
-    expect(w.resistance.thermal).toBeLessThanOrEqual(TUNABLE.resistanceCap + 1e-9);
-    // Hues you have not used are not taxed.
-    expect(w.resistance.voltaic).toBe(0);
-  });
-
-  it('§11.1 — splitting damage between hues is taxed far less than mono-hue', () => {
-    // Resistance follows the share of *damage*, not the number of Actions owned:
-    // an Action that ticks an area will dominate the split however many other
-    // Actions sit beside it. Two comparable single-hit Actions are the honest
-    // test of the mapping.
+  it('§11.1 — hue is threat class, and nothing taxes you for using one', () => {
+    // Adaptive resistance is retired. It was invisible — nothing in the HUD ever
+    // showed it — and it punished exactly the focused builds the class stats now
+    // exist to reward. A tax nobody can see is not a decision.
     const mono = quietWorld('mono');
     const m = mono.engine.programs[0]!;
     m.triggerId = 'clock';
     m.actionId = 'bolt';
     mono.engine.recompile();
     mono.syncBudget();
-    runPiloted(mono, 120);
+    runPiloted(mono, 60);
 
     const split = quietWorld('mono');
     const a = split.engine.programs[0]!;
     a.triggerId = 'clock';
-    a.actionId = 'bolt'; // thermal
-    const b = split.engine.programs[1]!;
-    b.triggerId = 'clock';
-    b.actionId = 'arc'; // voltaic
+    a.actionId = 'bolt';
     split.engine.recompile();
     split.syncBudget();
-    runPiloted(split, 120);
+    runPiloted(split, 60);
 
-    const worstMono = Math.max(mono.resistance.thermal, mono.resistance.voltaic);
-    const worstSplit = Math.max(split.resistance.thermal, split.resistance.voltaic);
-
-    // The contract is the relationship, not an absolute number: Arc chains to
-    // three targets and so out-damages Bolt, which keeps the split uneven even
-    // with one Action per hue. Splitting must simply cost less than mono-hue.
-    expect(worstSplit).toBeLessThan(worstMono);
-    expect(worstSplit).toBeLessThan(TUNABLE.resistanceCap * 0.85);
+    // Identical Engines, identical seeds: no hidden per-hue divergence left.
+    expect(mono.stats.kills).toBe(split.stats.kills);
   });
 
   it('§11.2 — a Suppressor silences triggers, and killing it restores them', () => {
@@ -1221,13 +1194,17 @@ describe('pressure attacks the build, not the health bar (GDD §11)', () => {
     expect(e.radius).toBeGreaterThan(radiusBefore);
   });
 
-  it('§10.2 — a Leech drains fuel instead of dealing damage', () => {
+  it('§10.2 — a Leech heats you instead of hurting you', () => {
     const w = quietWorld('leech');
-    w.fuel.thermal = 40;
+    // Disarm the Engine, or the starter Program kills the attacker mid-test.
+    for (const p of w.engine.programs) p.actionId = null;
+    w.engine.recompile();
     const integrityBefore = w.player.integrity;
-    w.spawnEnemy('leech', w.player.x + 25, w.player.y, 'thermal');
-    for (let i = 0; i < 120; i++) w.advance(NO_INPUT);
-    expect(w.fuel.thermal).toBeLessThan(40);
+    w.spawnEnemy('leech', w.player.x + 25, w.player.y, 'void');
+    // Long enough that it must be touching repeatedly: one hit decays away
+    // inside two seconds, so a Leech that fires once is a Leech with no teeth.
+    for (let i = 0; i < 60 * 8; i++) w.advance(NO_INPUT);
+    expect(w.budget.heat).toBeGreaterThan(10);
     expect(w.player.integrity).toBe(integrityBefore);
   });
 
@@ -1320,54 +1297,61 @@ describe('cascade physics (GDD §5.2)', () => {
     greedy.syncBudget();
     runPiloted(greedy, 150);
 
-    expect(greedy.stats.cyclesSpent).toBeGreaterThan(lean.stats.cyclesSpent * 2);
+    expect(greedy.stats.maxDepth).toBeGreaterThan(lean.stats.maxDepth);
     expect(greedy.stats.peakHeat).toBeGreaterThan(lean.stats.peakHeat);
     expect(greedy.stats.events).toBeGreaterThan(lean.stats.events);
   });
 });
 
-describe('Cycle budget (GDD §6)', () => {
-  /** Drive one tick that draws `cost` Cycles. Returns true if it overheated. */
-  function overdrawTick(b: CycleBudget, cost: number): boolean {
+describe('Cycles and Heat (GDD §6)', () => {
+  /** One tick in which the deepest event resolved at `depth`. */
+  function depthTick(b: CycleBudget, depth: number, events = 1): boolean {
     b.beginTick(SIM_DT);
-    b.spend(cost);
+    for (let i = 0; i < events; i++) b.chargeDepth(depth);
     return b.endTick(SIM_DT);
   }
 
-  it('never refuses to fire — the deficit becomes Heat instead', () => {
-    const b = new CycleBudget(100);
-    overdrawTick(b, 1000);
-    expect(b.available).toBe(0);
-    expect(b.heat).toBeGreaterThan(0);
+  it('shallow play never heats at all', () => {
+    // The whole reason the old model had to go: it was inert for 89% of a
+    // measured run and then binary. This one is the opposite by construction —
+    // the first few links are free, so an ordinary Engine sits cold and the
+    // gauge is something a new player can correctly ignore.
+    const b = new CycleBudget(55);
+    for (let i = 0; i < 60 * 30; i++) depthTick(b, TUNABLE.heatFreeDepth, 40);
+    expect(b.heat).toBe(0);
   });
 
-  it('decays Heat only while under budget', () => {
-    const b = new CycleBudget(100);
-    for (let i = 0; i < 30; i++) overdrawTick(b, 400);
-    const hot = b.heat;
-    expect(hot).toBeGreaterThan(0);
-
-    b.beginTick(SIM_DT);
-    b.endTick(SIM_DT);
-    expect(b.heat).toBeCloseTo(hot - TUNABLE.heatDecayPerSec * SIM_DT, 6);
+  it('a deep chain heats, and heats faster the deeper it runs', () => {
+    // Both well under the per-second cap, or this would only prove the cap
+    // exists. The property under test is that depth is a *dial*: the band
+    // between free and burning has to be somewhere you can sit.
+    const shallow = new CycleBudget(55);
+    const deep = new CycleBudget(55);
+    for (let i = 0; i < 120; i++) {
+      depthTick(shallow, TUNABLE.heatFreeDepth + 2, 2);
+      depthTick(deep, TUNABLE.heatFreeDepth + 8, 2);
+    }
+    expect(shallow.heat).toBeGreaterThan(0);
+    expect(deep.heat).toBeGreaterThan(shallow.heat * 2);
   });
 
   it('is a dial, not a line: one huge spike cannot cross the whole band', () => {
-    // The load-bearing property of the Heat model. A single monstrous cascade
-    // tick should register as heat, not teleport the engine into Overheat —
-    // otherwise Instability I and II are doorways rather than places to live.
-    const b = new CycleBudget(100);
-    expect(overdrawTick(b, 100000)).toBe(false);
+    // The load-bearing property, carried over from the old model. A single
+    // monstrous cascade tick registers as heat rather than teleporting the
+    // engine into Overheat, or Instability I and II are doorways rather than
+    // places to live.
+    const b = new CycleBudget(55);
+    expect(depthTick(b, 40, 20000)).toBe(false);
     expect(b.heat).toBeLessThan(40);
     expect(b.heat).toBeGreaterThan(0);
   });
 
-  it('overheats after sustained overdraw, stalls, and resets to 50', () => {
-    const b = new CycleBudget(100);
+  it('overheats after sustained depth, stalls, and resets to 50', () => {
+    const b = new CycleBudget(55);
     let overheated = false;
     let ticks = 0;
     while (!overheated && ticks < 60 * 20) {
-      overheated = overdrawTick(b, 400);
+      overheated = depthTick(b, 12, 60);
       ticks++;
     }
     expect(overheated).toBe(true);
@@ -1379,21 +1363,25 @@ describe('Cycle budget (GDD §6)', () => {
   });
 
   it('reports which way Heat is moving, not just where it is', () => {
-    // The gauge sat at zero and then leapt, so the player never saw the
-    // mechanism — only the punishment. The rate is what makes it a dial.
-    const b = new CycleBudget(100);
-    overdrawTick(b, 4000);
+    const b = new CycleBudget(55);
+    for (let i = 0; i < 30; i++) depthTick(b, 20, 60);
     expect(b.heatRate).toBeGreaterThan(0);
 
     b.beginTick(SIM_DT);
     b.endTick(SIM_DT);
     expect(b.heatRate).toBeLessThan(0);
+  });
 
-    // Cold and idle is neither building nor venting — don't claim it is.
-    b.heat = 0;
-    b.beginTick(SIM_DT);
-    b.endTick(SIM_DT);
-    expect(b.heatRate).toBe(0);
+  it('reserves statically, and nothing else spends', () => {
+    // The other half of the change. Cycles only move when the *build* moves,
+    // which is what makes them plannable — the old dynamic pool drained from
+    // full to empty in ten seconds of a real run.
+    const b = new CycleBudget(55);
+    b.setStaticLoad(40);
+    expect(b.headroom).toBe(15);
+    expect(b.staticFraction).toBeCloseTo(40 / 55, 6);
+    for (let i = 0; i < 600; i++) depthTick(b, 1, 50);
+    expect(b.headroom).toBe(15);
   });
 
   it('reports instability tiers on the documented thresholds', () => {
