@@ -6,8 +6,8 @@
     "cycleCost": 1,
     "listens": "clock",
     "interval": 1.2,
-    "payload": 1,
-    "description": "Every 1.2s, reliably. The metronome everything else is measured against."
+    "payload": 12,
+    "description": "Every 1.2s, reliably, and it hits hard because it is so rare. The metronome everything else is measured against."
   },
   {
     "id": "on_hit",
@@ -15,8 +15,8 @@
     "name": "On Hit",
     "cycleCost": 1,
     "listens": "hit",
-    "payload": 1,
-    "description": "Whenever your effects damage an enemy. Very frequent — the core cascade fuel."
+    "payload": 0.35,
+    "description": "Whenever your effects damage an enemy. Constant — measured at 188 a second — so each one is worth a fraction."
   },
   {
     "id": "on_kill",
@@ -24,7 +24,7 @@
     "name": "On Kill",
     "cycleCost": 1,
     "listens": "kill",
-    "payload": 1.2,
+    "payload": 1.6,
     "description": "Whenever an enemy dies to your effects. The classic cascade seed."
   },
   {
@@ -33,8 +33,8 @@
     "name": "On Pickup",
     "cycleCost": 1,
     "listens": "pickup",
-    "payload": 1.1,
-    "description": "Whenever you collect fuel or XP. Turns movement into firepower."
+    "payload": 4,
+    "description": "Whenever you collect XP. Turns movement into firepower, and a Magnet into a barrage."
   },
   {
     "id": "on_crit",
@@ -51,8 +51,8 @@
     "name": "On Dash",
     "cycleCost": 2,
     "listens": "dash",
-    "payload": 3.5,
-    "description": "When you dash. x3.5 payload on a 3s cooldown — mobility as a weapon."
+    "payload": 20,
+    "description": "When you dash. x20 on a 3s cooldown — mobility as a weapon."
   },
   {
     "id": "on_wound",
@@ -60,8 +60,8 @@
     "name": "On Wound",
     "cycleCost": 2,
     "listens": "wound",
-    "payload": 5,
-    "description": "When you take damage. Rare and unwanted, so it pays x5. Pairs with Leech."
+    "payload": 40,
+    "description": "When you take damage. Rare and unwanted, so it pays x40. Pairs with Leech."
   },
   {
     "id": "on_wave",
@@ -69,8 +69,8 @@
     "name": "On Wave",
     "cycleCost": 3,
     "listens": "wave",
-    "payload": 7,
-    "description": "When a new composition arrives. Very rare, x7 payload. The burst archetype."
+    "payload": 50,
+    "description": "When a new composition arrives. Once or twice a minute, x50. The burst archetype."
   },
   {
     "id": "on_overheat",
@@ -78,8 +78,8 @@
     "name": "On Overheat",
     "cycleCost": 3,
     "listens": "overheat",
-    "payload": 8,
-    "description": "When Heat hits 100. x8 payload — weaponises the penalty. Build around it."
+    "payload": 60,
+    "description": "When Heat hits 100. x60 — weaponises the penalty. Build around it."
   },
   {
     "id": "on_convert",
@@ -87,7 +87,7 @@
     "name": "On Convert",
     "cycleCost": 2,
     "listens": "convert",
-    "payload": 2.5,
-    "description": "When a conversion resolves. x2.5 — the economy-engine payoff."
+    "payload": 6,
+    "description": "When a conversion resolves. x6 — the economy-engine payoff."
   }
 ]

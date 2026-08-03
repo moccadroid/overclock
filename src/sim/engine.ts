@@ -36,6 +36,26 @@ export interface FireContext {
   overdrive: number;
   resonate: number;
   ground: number;
+  /** Seconds every execution of this row is pushed back (Stagger). */
+  stagger: number;
+  /** Extra chain jumps (Fork). */
+  jumps: number;
+  /** Range multiplier for flight, beams and chains (Conduct). */
+  range: number;
+  /** Projectile speed multiplier (Slug, Seeker). */
+  speed: number;
+  /** Homing strength on projectiles (Seeker). */
+  seek: number;
+  /** A second, smaller detonation on area effects (Bloom). */
+  bloom: number;
+  /** This row produces no Heat (Insulate). */
+  insulate: number;
+  /** This row's events resolve at depth 0 (Grounding Rod). */
+  rootDepth: number;
+  /** Copy the Action of the row above (Mirror). */
+  mirror: number;
+  /** Output ceiling, in multiples of base (Governor). 0 = no ceiling. */
+  governor: number;
 }
 
 export function baseFireContext(): FireContext {
@@ -55,6 +75,16 @@ export function baseFireContext(): FireContext {
     overdrive: 0,
     resonate: 0,
     ground: 0,
+    stagger: 0,
+    jumps: 0,
+    range: 1,
+    speed: 1,
+    seek: 0,
+    bloom: 0,
+    insulate: 0,
+    rootDepth: 0,
+    mirror: 0,
+    governor: 0,
   };
 }
 
@@ -76,14 +106,79 @@ export function applyModifier(ctx: FireContext, def: ModifierDef): void {
 
 /** Resolve an ordered modifier list into a fire context. */
 export function resolveChain(modifierIds: readonly (string | null)[]): FireContext {
+  return resolveRow(modifierIds).ctx;
+}
+
+/**
+ * Resolve a row into its fire context *and* its execution schedule.
+ *
+ * The schedule has to be built during the walk rather than from a final Echo
+ * count, because §5.5 says Echo "repeats everything before it" and the old
+ * version did not: `echo, split, amplify` and `split, amplify, echo` produced
+ * byte-identical results (5.86 output either way). The strongest modifier in the
+ * game had no ordering decision in it at all.
+ *
+ * Now an Echo snapshots the output *at its own position*. Put it last and the
+ * copies inherit every multiplier before it; put it first and they repeat a bare
+ * Action while the modifiers after it pump only the original. Same card, two
+ * genuinely different rows — which is the whole point of §5.5.
+ *
+ * Only `output` is snapshotted. Count, area, pierce and the rest come from the
+ * finished chain, because those describe the *shape* of the Action and a copy
+ * that was a different shape from its original would be unreadable on screen.
+ */
+export function resolveRow(modifierIds: readonly (string | null)[]): {
+  ctx: FireContext;
+  executions: Execution[];
+} {
   const ctx = baseFireContext();
+  // Absolute output values, resolved to multipliers at the end.
+  let schedule: { delay: number; output: number }[] = [{ delay: 0, output: 1 }];
+  let live = true;
+
   for (const id of modifierIds) {
     if (!id) continue;
     const def = MODIFIER_BY_ID.get(id);
     if (!def) throw new Error(`Unknown modifier "${id}" in chain`);
-    applyModifier(ctx, def);
+    for (const op of def.ops) {
+      if (op.target === 'echo') {
+        const levels = Math.max(0, Math.floor((op.add ?? 0) * (op.mul ?? 1)));
+        for (let i = 0; i < levels; i++) {
+          if (schedule.length * 2 > SAFETY.maxFireExecutions) {
+            live = false;
+            break;
+          }
+          schedule = schedule.concat(
+            schedule.map((e) => ({
+              delay: e.delay + ECHO_DELAY,
+              // The snapshot: what the row's output is *here*, not at the end.
+              output: ctx.output * ECHO_FALLOFF,
+            })),
+          );
+        }
+        ctx.echo += levels;
+        continue;
+      }
+      if (op.target === 'stagger') {
+        // Not a copy — a shift. Everything this row does lands late.
+        const by = (op.add ?? 0) * (op.mul ?? 1);
+        for (const e of schedule) e.delay += by;
+        ctx.stagger += by;
+        continue;
+      }
+      applyOp(ctx, op.target, op.add ?? 0, op.mul ?? 1);
+    }
   }
-  return ctx;
+  void live;
+
+  // The primary execution always carries the finished output; the copies carry
+  // whatever the row was worth where they were made.
+  const final = ctx.output === 0 ? 1 : ctx.output;
+  const executions: Execution[] = schedule.map((e, i) => ({
+    delay: e.delay,
+    outputMul: i === 0 ? 1 : e.output / final,
+  }));
+  return { ctx, executions };
 }
 
 export interface Execution {
@@ -131,22 +226,38 @@ export type MoveResult = 'ok' | 'empty' | 'wrong-slot' | 'over-capacity';
  * player is left guessing which of their picks are doing nothing.
  */
 const PRIMITIVE_FIELDS: Record<string, readonly FireField[]> = {
-  projectile: ['output', 'count', 'echo', 'pierce', 'bounce', 'volatile', 'leech'],
-  burst: ['output', 'count', 'echo', 'area', 'leech'],
-  chain: ['output', 'count', 'echo', 'leech'],
-  zone: ['output', 'count', 'echo', 'area', 'duration', 'leech'],
-  vortex: ['output', 'count', 'echo', 'area', 'duration', 'leech'],
-  mine: ['output', 'count', 'echo', 'area', 'duration', 'leech'],
-  delayed: ['output', 'count', 'echo', 'area', 'leech'],
-  beam: ['output', 'count', 'echo', 'area', 'leech'],
-  orbital: ['output', 'count', 'echo', 'area', 'duration', 'leech'],
+  projectile: ['output', 'count', 'echo', 'pierce', 'bounce', 'volatile', 'leech', 'range', 'speed', 'seek'],
+  burst: ['output', 'count', 'echo', 'area', 'leech', 'bloom'],
+  chain: ['output', 'count', 'echo', 'leech', 'jumps', 'range'],
+  // Volatile now lands on everything with a life, which is what its card has
+  // always said ("effects detonate at the end of their life"). It was
+  // implemented for projectiles alone: dead on 14 of 17 Actions, including the
+  // three — Field, Mine, Orbital — that most obviously *have* an end of life.
+  zone: ['output', 'count', 'echo', 'area', 'duration', 'leech', 'volatile', 'bloom'],
+  vortex: ['output', 'count', 'echo', 'area', 'duration', 'leech', 'volatile'],
+  mine: ['output', 'count', 'echo', 'area', 'duration', 'leech', 'volatile', 'bloom'],
+  delayed: ['output', 'count', 'echo', 'area', 'leech', 'volatile', 'bloom'],
+  beam: ['output', 'count', 'echo', 'area', 'leech', 'range'],
+  orbital: ['output', 'count', 'echo', 'area', 'duration', 'leech', 'volatile'],
   buff: ['count', 'echo', 'duration'],
-  knockback: ['output', 'count', 'echo', 'area', 'leech'],
+  knockback: ['output', 'count', 'echo', 'area', 'leech', 'bloom'],
   convert: ['count', 'echo'],
 };
 
 /** Fields that apply to the row itself rather than to the Action's shape. */
-const UNIVERSAL_FIELDS: readonly FireField[] = ['rate', 'quantize', 'attune', 'overdrive', 'resonate', 'ground'];
+const UNIVERSAL_FIELDS: readonly FireField[] = [
+  'rate',
+  'quantize',
+  'attune',
+  'overdrive',
+  'resonate',
+  'ground',
+  'stagger',
+  'insulate',
+  'rootDepth',
+  'mirror',
+  'governor',
+];
 
 /**
  * Does this modifier do anything on a row ending in this Action? Returns the
@@ -307,7 +418,7 @@ export interface CompiledProgram {
 export function compileProgram(p: Program): CompiledProgram {
   const trig = p.triggerId ? TRIGGER_BY_ID.get(p.triggerId) : undefined;
   const act = p.actionId ? ACTION_BY_ID.get(p.actionId) : undefined;
-  const ctx = resolveChain(p.modifierIds);
+  const { ctx, executions } = resolveRow(p.modifierIds);
 
   let mult = 1;
   for (const id of p.modifierIds) {
@@ -328,7 +439,7 @@ export function compileProgram(p: Program): CompiledProgram {
     cycleCost,
     staticCost: cycleCost,
     interval,
-    executions: expandExecutions(ctx.echo),
+    executions,
   };
 }
 

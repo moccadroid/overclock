@@ -163,6 +163,8 @@ export interface Mine extends SpatialItem {
   depth: number;
   programIndex: number;
   leech: number;
+  /** §5.5 Volatile — detonates for this share of its damage when its life ends. */
+  volatile: number;
 }
 
 /** §5.4 Orbital — a persistent body circling the avatar. Stacks. */
@@ -179,6 +181,8 @@ export interface Orbital extends SpatialItem {
   depth: number;
   programIndex: number;
   leech: number;
+  /** §5.5 Volatile — detonates for this share of its damage when its life ends. */
+  volatile: number;
   /** Per-enemy hit cooldowns, so an orbital does not shred on contact. */
   cooldowns: Map<number, number>;
 }
@@ -212,6 +216,8 @@ export interface Zone extends SpatialItem {
   /** Pull — inward acceleration applied every tick, 0 for a plain Field. */
   force: number;
   leech: number;
+  /** §5.5 Volatile — detonates for this share of its damage when its life ends. */
+  volatile: number;
 }
 
 /**
@@ -967,6 +973,7 @@ export class World {
             (compiled.ctx.area * this.areaMul),
             (compiled.ctx.duration * this.durationMul),
             hue,
+            compiled.ctx,
           );
           break;
         case 'mine':
@@ -1114,6 +1121,7 @@ export class World {
     area: number,
     duration: number,
     hue: Hue,
+    ctx: FireContext,
   ): void {
     const def = ACTION_BY_ID.get(actionId)!;
     const radius = (def.radius ?? 130) * Math.max(0.1, area);
@@ -1169,7 +1177,8 @@ export class World {
       depth,
       programIndex,
       force: def.force ?? 0,
-      leech: 0,
+      leech: ctx.leech,
+      volatile: ctx.volatile,
       alive: true,
     });
   }
@@ -1199,6 +1208,7 @@ export class World {
       depth,
       programIndex,
       leech: ctx.leech,
+      volatile: ctx.volatile,
       alive: true,
     });
   }
@@ -1326,6 +1336,7 @@ export class World {
       depth,
       programIndex,
       leech: ctx.leech,
+      volatile: ctx.volatile,
       cooldowns: new Map(),
       alive: true,
     });
@@ -1378,6 +1389,33 @@ export class World {
     this.pushFx('burst', hue, x, y, radius, [], 0.2);
   }
 
+  /**
+   * §5.5 Volatile, for anything with a life.
+   *
+   * A Field that ends, a Mine that times out, an Orbital that runs down: each
+   * leaves a detonation worth `share` of its damage. The card has always said
+   * "effects detonate at the end of their life" and until now only projectiles
+   * did — which made Volatile a no-op on 14 of 17 Actions, including the three
+   * whose entire nature is *having* an end of life.
+   */
+  private expire(
+    share: number,
+    damage: number,
+    radius: number,
+    x: number,
+    y: number,
+    hue: Hue,
+    depth: number,
+    programIndex: number,
+    leech: number,
+  ): void {
+    if (share <= 0) return;
+    this.grid.queryRadius(x, y, radius, (enemy) => {
+      this.damageEnemy(enemy, damage * share, depth, programIndex, hue, leech);
+    });
+    this.pushFx('burst', hue, x, y, radius, [], 0.22);
+  }
+
   private updateMines(dt: number): void {
     for (const m of this.mines) {
       if (!m.alive) continue;
@@ -1385,6 +1423,7 @@ export class World {
       m.life -= dt;
       if (m.life <= 0) {
         m.alive = false;
+        this.expire(m.volatile, m.damage, m.radius, m.x, m.y, m.hue, m.depth, m.programIndex, m.leech);
         continue;
       }
       if (m.arm > 0) continue;
@@ -1407,6 +1446,7 @@ export class World {
       o.life -= dt;
       if (o.life <= 0) {
         o.alive = false;
+        this.expire(o.volatile, o.damage, o.radius * 4, o.x, o.y, o.hue, o.depth, o.programIndex, o.leech);
         continue;
       }
       o.angle += o.orbitSpeed * dt;
@@ -1430,6 +1470,7 @@ export class World {
       z.life -= dt;
       if (z.life <= 0) {
         z.alive = false;
+        this.expire(z.volatile, z.damage, z.radius, z.x, z.y, z.hue, z.depth, z.programIndex, z.leech);
         continue;
       }
       // §5.4 Pull — a vortex drags everything toward its centre. Continuous, so

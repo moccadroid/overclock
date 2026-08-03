@@ -113,7 +113,7 @@
         "add": 1.2
       }
     ],
-    "description": "Cancels Split: fires once instead of many, but each shot hits far harder."
+    "description": "Fires once instead of many, each shot far harder. Before a Split the two multiply; after one, it cancels it."
   },
   {
     "id": "sustain",
@@ -171,7 +171,7 @@
     "id": "overdrive",
     "kind": "modifier",
     "name": "Overdrive",
-    "cycleMult": 1.0,
+    "cycleMult": 1.4,
     "ops": [
       {
         "target": "output",
@@ -182,7 +182,7 @@
         "add": 1
       }
     ],
-    "description": "+100% output. Every fire adds Heat directly, budget or no budget."
+    "description": "+100% output, and every fire adds Heat directly. The Cycles it costs are the price of skipping the budget."
   },
   {
     "id": "resonate",

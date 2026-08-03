@@ -132,8 +132,14 @@ describe('topology nodes — row order as a build axis (GDD §5.6)', () => {
     expect(e.compiled[0]!.cycleCost).toBeCloseTo(undiscounted * 0.7, 8);
     // The row below the Ground row is unaffected.
     expect(e.compiled[2]!.cycleCost).toBeCloseTo(untouched, 8);
-    // And the Ground row pays for it in output.
-    expect(e.compiled[1]!.ctx.output).toBeCloseTo(0.8, 8);
+    // And the Ground row pays for it in output. Measured as a ratio against a
+    // bare row with the same Trigger: ctx.output carries the Trigger's payload,
+    // and those are tuned against measured event rates rather than fixed at 1.
+    const plain = new Engine();
+    plain.programs[0]!.triggerId = 'clock';
+    plain.programs[0]!.actionId = 'bolt';
+    plain.recompile();
+    expect(e.compiled[1]!.ctx.output / plain.compiled[0]!.ctx.output).toBeCloseTo(0.8, 8);
   });
 
   it('Ground on the first row discounts nothing', () => {

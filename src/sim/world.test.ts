@@ -78,7 +78,10 @@ describe('the run actually runs', () => {
     expect(w.score).toBeGreaterThan(0);
     // Only XP falls now. Fuel is gone, and with it the mote-shaped pickup that
     // was the same colour and nearly the same size as the enemy that kills you.
-    expect(w.pickups.every((p) => p.kind === 'xp')).toBe(true);
+    // XP and the occasional Magnet (§7.3) — and nothing else. Fuel is gone,
+    // and with it the mote-shaped pickup that was the same colour and nearly
+    // the same size as the enemy that kills you.
+    expect(w.pickups.every((p) => p.kind === 'xp' || p.kind === 'magnet')).toBe(true);
   });
 
   it('never spawns an enemy on top of the player', () => {
@@ -750,7 +753,15 @@ describe('the rest of the grammar (GDD §5.5, §5.6, §7.4)', () => {
       if (w.stats.fires > before) heatAtFire = w.budget.heat;
     }
     expect(heatAtFire).toBeGreaterThan(0);
-    expect(w.engine.compiled[0]!.ctx.output).toBeCloseTo(2, 8);
+    // Doubled output, measured as a ratio: ctx.output folds in the Trigger's
+    // payload, which is no longer 1 for a Clock.
+    const plain = bare('overdrive');
+    plain.engine.programs[0]!.triggerId = 'clock';
+    plain.engine.programs[0]!.actionId = 'bolt';
+    plain.engine.recompile();
+    expect(
+      w.engine.compiled[0]!.ctx.output / plain.engine.compiled[0]!.ctx.output,
+    ).toBeCloseTo(2, 8);
   });
 
   it('§5.5 Leech — returns a share of damage as Integrity', () => {

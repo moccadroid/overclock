@@ -56,7 +56,27 @@ export type FireField =
   /** §5.6 Resonate — this row also fires when the row above it fires. */
   | 'resonate'
   /** §5.6 Ground — the row above costs less; this row outputs less. */
-  | 'ground';
+  | 'ground'
+  /** §5.6 Stagger — everything this row does lands a beat late. */
+  | 'stagger'
+  /** Fork — extra chain jumps. */
+  | 'jumps'
+  /** Conduct — how far flight, beams and chains reach. */
+  | 'range'
+  /** Slug — projectile speed, traded against output. */
+  | 'speed'
+  /** Seeker — projectiles steer toward what they were aimed at. */
+  | 'seek'
+  /** Bloom — area effects detonate a second time, smaller. */
+  | 'bloom'
+  /** Insulate — this row produces no Heat. */
+  | 'insulate'
+  /** Grounding Rod — this row's events resolve at cascade depth 0. */
+  | 'rootDepth'
+  /** Mirror — take the Action of the row above. */
+  | 'mirror'
+  /** Governor — an output ceiling, in exchange for half the Cycles. */
+  | 'governor';
 
 /**
  * §7.4 — what a Convert card exchanges.
