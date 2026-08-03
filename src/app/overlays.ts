@@ -466,10 +466,12 @@ export class EditorOverlay extends Overlay {
       ops.className = 'ops';
       ops.append(
         button('^', i > 0, () => {
+          this.onCommand?.({ k: 'moveRow', from: i, to: i - 1 });
           world.engine.moveProgram(i, i - 1);
           this.afterChange();
         }),
         button('v', i < world.engine.programs.length - 1, () => {
+          this.onCommand?.({ k: 'moveRow', from: i, to: i + 1 });
           world.engine.moveProgram(i, i + 1);
           this.afterChange();
         }),

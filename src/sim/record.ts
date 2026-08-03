@@ -56,6 +56,13 @@ export type Command =
   | { k: 'purge'; i: number }
   | { k: 'recompile'; rows: number[] }
   | { k: 'move'; fp: number; fs: NodeSlot; tp: number; ts: NodeSlot }
+  /**
+   * Reordering whole rows. Easy to miss and impossible to ignore: a Program
+   * carries its Clock accumulator with it, so moving a row changes *when* it
+   * fires. It was the one editor action with no command, and it silently broke
+   * the replay of a nine-minute run at 5:27.
+   */
+  | { k: 'moveRow'; from: number; to: number }
   | { k: 'swap'; p: number; a: number; b: number }
   | { k: 'scrapNode'; p: number; s: NodeSlot }
   | { k: 'scrapRow'; p: number };
@@ -330,6 +337,10 @@ function apply(world: World, c: Command, tick: number, hooks: ReplayHooks): void
       // The capacity limit is part of the rule, not part of the choice: a move
       // the player was refused must be refused on replay too.
       world.engine.moveNode(c.fp, c.fs, c.tp, c.ts, world.budget.capacity);
+      world.syncBudget();
+      return;
+    case 'moveRow':
+      world.engine.moveProgram(c.from, c.to);
       world.syncBudget();
       return;
     case 'swap':
