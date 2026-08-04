@@ -268,6 +268,14 @@ export interface BiomeDef {
   h: number;
   /** Background tint while inside. The cheapest "where am I" there is. */
   tint?: number;
+  /**
+   * §21b.4 — the screen-space field this biome runs, if any.
+   *
+   * A tint says the floor is a different colour; a field says the room is a
+   * different room. Adding one is a JSON edit plus a branch in the post shader,
+   * which is the whole reason it is a name rather than a pile of numbers.
+   */
+  field?: 'frost' | 'ember' | 'static';
   /** The one rule. Multiplies base Heat venting while the player is inside. */
   ventMultiplier?: number;
   /** Multiplies XP from shards collected inside. */
@@ -300,6 +308,58 @@ export interface GateDef {
   barrier: RuinRect;
 }
 
+/**
+ * §21b — a level: one room of the run, and the only one you can see.
+ *
+ * Levels are laid out in a single arena rather than loaded one at a time, so a
+ * gate opening can *reveal* the next one — the camera clamps to the levels you
+ * have unlocked, and everything beyond that is wall. One arena also means one
+ * flow field, one spawn budget and one coordinate space, which is the whole
+ * reason it is worth doing this way.
+ */
+export interface LevelDef {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** Structure hue while you are in here. The cheapest "somewhere else". */
+  tint?: number;
+  /**
+   * What a gate *into* this level burns like as it cuts.
+   *
+   * The light coming through an opening is light from the other side, so it
+   * belongs to the room you are about to enter rather than the one you are
+   * leaving. It is separate from `tint` because a structure hue has to stay at
+   * band 5 and this is the brightest thing structure is ever allowed to be.
+   */
+  light?: number;
+  /** §12.4 — the Extract terminal lives in exactly one level. */
+  extract?: boolean;
+  roster: RosterDef;
+  description: string;
+}
+
+/**
+ * §10.4 — what this level is allowed to spawn. **No numbers are multiplied.**
+ *
+ * A Mote on the last level has exactly the stats it has on the first. What a
+ * level changes is which creatures the director may reach for: which families
+ * exist here at all, and how far up their variant ladder substitution may climb.
+ * That is the whole of difficulty progression, and it is the reason a wave of
+ * forty plain Motes stays legal forever — a crisis early, a breather later, and
+ * the pacing comes free.
+ */
+export interface RosterDef {
+  /** Highest variant tier substitution may reach. 0 is base creatures only. */
+  tier: number;
+  /** Families that may appear. Anything else is remapped to one of these. */
+  families: readonly string[];
+  /** Rare arrivals used as events, each with its own live cap. */
+  events?: readonly { id: string; maxAlive: number }[];
+}
+
 export interface ArenaDef {
   id: string;
   name: string;
@@ -313,6 +373,8 @@ export interface ArenaDef {
   ruins: readonly RuinRect[];
   /** §21b — the Core is implicit: everything not inside a biome. */
   biomes?: readonly BiomeDef[];
+  /** §21b — the rooms of the run, in order. The first is where you start. */
+  levels?: readonly LevelDef[];
   gates?: readonly GateDef[];
   description: string;
 }
@@ -440,7 +502,14 @@ export interface EnemyDef {
    * this variant instead. How a run's trash changes character without anything
    * being multiplied.
    */
-  substitutes?: { fromThreat: number; share: number };
+  /**
+   * §10.4 — when this variant may stand in for its family's base creature.
+   *
+   * `tier` is the level gate: a level's roster names the highest tier it will
+   * ever let through, so the same threat band produces different creatures in
+   * different rooms. That, and not a multiplier, is how the run gets harder.
+   */
+  substitutes?: { fromThreat: number; share: number; tier?: number };
   description: string;
 }
 
@@ -468,6 +537,124 @@ export interface WaveTemplateDef {
    */
   opener?: boolean;
   entries: readonly { enemy: string; count: number; spread: number }[];
+  description: string;
+}
+
+/**
+ * §18.4 — every sound the simulation can ask for. Lives here rather than beside
+ * `AudioCue` so wave data can name one without the content layer importing the
+ * world.
+ */
+export type AudioCueKind =
+  | 'fire'
+  | 'kill'
+  | 'pickup'
+  | 'hurt'
+  | 'overheat'
+  | 'convert'
+  | 'level'
+  | 'gate'
+  | 'breach'
+  | 'summons'
+  | 'hardened'
+  | 'siege'
+  | 'meltdown';
+
+/**
+ * §12.5 — one step in what a pool becomes at a particular call site.
+ *
+ * The chain is the part of the wave system that was always good and never
+ * visible: `rosterAllows -> substitute -> harden` were three hardcoded calls
+ * inside the spawner, in a fixed order, that nothing could reorder or reuse.
+ * Naming them makes every wave in the game describable in the same vocabulary,
+ * and a new kind of pressure becomes a new op rather than a fifth spawn loop.
+ *
+ * Note what is *not* in here: anywhere to look something up. `roster` carries a
+ * resolved tier and family list, not "current" or "destination". A def that
+ * names where to find its inputs is an enum the code has to switch on, and every
+ * new source becomes a code change — which is the thing this exists to stop. The
+ * caller resolves; the chain applies.
+ */
+export type WaveTransform =
+  /** §21b — the room's vocabulary. Anything outside it is remapped into it. */
+  | { op: 'roster'; tier: number; families: readonly string[]; events?: readonly string[] }
+  /**
+   * §10.4 — how far up the substitution ladder this wave may climb.
+   *
+   * `roll` is the ambient behaviour: eligible variants get their authored share,
+   * ramped in over the band above `fromThreat`, so a wave is a mix. `best` takes
+   * the hardest legal variant outright — what a called wave wants, because it is
+   * a statement rather than a texture.
+   *
+   * `ceiling` ignores Threat entirely and reaches the roster's tier limit: the
+   * map refusing you does not scale to how well you are doing.
+   */
+  | { op: 'escalate'; mode: 'roll' | 'best'; lead?: number; ceiling?: boolean }
+  /** §10.3 — elite affixes, drawn without replacement. */
+  | { op: 'affix'; count: number }
+  /**
+   * The one honest multiplier, and deliberately awkward to reach for.
+   *
+   * §10.4 is explicit that difficulty comes from substitution, not from scaling
+   * numbers, and that rule is the reason a forty-Mote template can stay in the
+   * pool forever. This op exists because opt-in difficulty is the one case where
+   * a multiplier is fair — the player pressed the button. Every use is greppable
+   * on purpose. If a second one appears without an argument for it, the wave
+   * system has started lying about where its difficulty comes from.
+   */
+  | { op: 'toughen'; hp: number; damage?: number }
+  /** §12.3 — the Beacon's enriched arrivals: more fuel, more of everything. */
+  | { op: 'enrich' };
+
+/**
+ * §12.5 — one delivery inside a called wave.
+ *
+ * A list of these is a *score*, not a ramp. Two numbers interpolated can only
+ * say "more, steadily"; an explicit list can say lull-then-spike, or nothing for
+ * eight seconds while the player commits and then everything, or one heavy
+ * parcel at the end. Wave design lives here, and it is authorable by hand and
+ * trivially emitted by a generator.
+ */
+export interface WaveParcel {
+  /** Seconds from the moment the wave is called. */
+  at: number;
+  /**
+   * Size, as a share of the director's live density target.
+   *
+   * Relative on purpose. Every difficulty number in this game is expressed
+   * against `targetAlive` or `threat`, so retuning the density curve retunes
+   * everything with it instead of silently rebalancing half the events.
+   */
+  share: number;
+  /**
+   * Where it lands, as a ring around the call site. Omitted means the director's
+   * own off-screen edge origins — which is what a Beacon wants, since it calls
+   * the horde in rather than conjuring it around a place.
+   */
+  ring?: readonly [number, number];
+  /** Per-enemy jitter on top of the ring. */
+  spread?: number;
+}
+
+/**
+ * §12.5 — a wave somebody called for, as opposed to the ambient flow.
+ *
+ * Pool, chain and schedule are three vocabularies rather than one record,
+ * because they vary independently: a siege's six escalating parcels are a good
+ * shape that has nothing to do with sieges, and would suit a Meltdown surge with
+ * an entirely different pool. Fused into one struct, every combination is a new
+ * row with every field repeated — which is the four hardcoded spawn loops this
+ * replaces, moved into JSON and no better for it.
+ */
+export interface WaveEventDef {
+  id: string;
+  /** A `WaveTemplateDef` id. Omitted means the composition already running. */
+  pool?: string;
+  parcels: readonly WaveParcel[];
+  /** Applied in order, after whatever the caller resolved and passed in. */
+  via: readonly WaveTransform[];
+  /** Fired once, on the first parcel. */
+  cue?: AudioCueKind;
   description: string;
 }
 

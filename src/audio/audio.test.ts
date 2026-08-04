@@ -692,3 +692,46 @@ describe('the arranger (GDD §18.1)', () => {
   });
 });
 
+describe('the source tree stays loadable', () => {
+  /**
+   * Every source file must be valid UTF-8.
+   *
+   * This is here because it broke a build and nothing caught it. A tool wrote
+   * `src/app/wavelab.ts` as cp1252, so the section signs and em-dashes in its
+   * comments became bytes no UTF-8 decoder accepts. `tsc --noEmit` passed, the
+   * whole test suite passed, and the dev server served it happily — Vite's
+   * transform is lenient. Only `vite build` refused it, with
+   * "stream did not contain valid UTF-8", which on a branch that auto-deploys
+   * means the failure surfaces after the push rather than before it.
+   *
+   * A linter does not check this either: Biome read all 71 files and reported
+   * nothing. So it lives here, next to the other invariant this codebase
+   * enforces by test rather than by hope.
+   */
+  it('is valid UTF-8 from end to end', async () => {
+    const { readdirSync, readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+
+    const files: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (/\.(ts|tsx|json|css|html)$/.test(entry.name)) files.push(full);
+      }
+    };
+    walk('src');
+    expect(files.length).toBeGreaterThan(20);
+
+    const decoder = new TextDecoder('utf-8', { fatal: true });
+    const bad: string[] = [];
+    for (const file of files) {
+      try {
+        decoder.decode(readFileSync(file));
+      } catch {
+        bad.push(file);
+      }
+    }
+    expect(bad, `not valid UTF-8: ${bad.join(', ')}`).toEqual([]);
+  });
+});

@@ -7,6 +7,7 @@ import actionsRaw from './data/actions.json';
 import modifiersRaw from './data/modifiers.json';
 import enemiesRaw from './data/enemies.json';
 import wavesRaw from './data/waves.json';
+import waveEventsRaw from './data/waveevents.json';
 import axiomsRaw from './data/axioms.json';
 import arenasRaw from './data/arenas.json';
 import discoveriesRaw from './data/discoveries.json';
@@ -21,6 +22,7 @@ import type {
   ModifierDef,
   NodeDef,
   TriggerDef,
+  WaveEventDef,
   WaveTemplateDef,
 } from '../sim/types';
 
@@ -149,9 +151,46 @@ const arenaSchema: Schema = {
         w: { type: 'number', required: true, min: 1 },
         h: { type: 'number', required: true, min: 1 },
         tint: { type: 'number', min: 0 },
+        field: { type: 'string', oneOf: ['frost', 'ember', 'static'] },
         ventMultiplier: { type: 'number', min: 0 },
         xpMultiplier: { type: 'number', min: 0 },
         poi: { type: 'array', items: { type: 'string' } },
+        description: { type: 'string', required: true },
+      },
+    },
+  },
+  levels: {
+    type: 'array',
+    items: {
+      type: 'object',
+      fields: {
+        id: { type: 'string', required: true },
+        name: { type: 'string', required: true },
+        x: { type: 'number', required: true, min: 0 },
+        y: { type: 'number', required: true, min: 0 },
+        w: { type: 'number', required: true, min: 1 },
+        h: { type: 'number', required: true, min: 1 },
+        tint: { type: 'number', min: 0 },
+        light: { type: 'number', min: 0 },
+        extract: { type: 'boolean' },
+        roster: {
+          type: 'object',
+          required: true,
+          fields: {
+            tier: { type: 'number', required: true, min: 0 },
+            families: { type: 'array', required: true, items: { type: 'string' } },
+            events: {
+              type: 'array',
+              items: {
+                type: 'object',
+                fields: {
+                  id: { type: 'string', required: true, ref: 'enemy' },
+                  maxAlive: { type: 'number', required: true, min: 0 },
+                },
+              },
+            },
+          },
+        },
         description: { type: 'string', required: true },
       },
     },
@@ -307,6 +346,7 @@ const enemySchema: Schema = {
     fields: {
       fromThreat: { type: 'number', required: true, min: 0 },
       share: { type: 'number', required: true, min: 0, max: 1 },
+      tier: { type: 'number', min: 0 },
     },
   },
   description: { type: 'string', required: true },
@@ -328,6 +368,53 @@ const waveSchema: Schema = {
         enemy: { type: 'string', required: true, ref: 'enemy' },
         count: { type: 'number', required: true, min: 1 },
         spread: { type: 'number', required: true, min: 0 },
+      },
+    },
+  },
+  description: { type: 'string', required: true },
+};
+
+/**
+ * §12.5 — a called wave. Validated hard, because this file is where wave design
+ * lives now and a typo in it is a wave that silently does nothing.
+ */
+const waveEventSchema: Schema = {
+  id: { type: 'string', required: true },
+  pool: { type: 'string' },
+  cue: { type: 'string' },
+  parcels: {
+    type: 'array',
+    required: true,
+    items: {
+      type: 'object',
+      fields: {
+        at: { type: 'number', required: true, min: 0 },
+        share: { type: 'number', required: true, min: 0 },
+        ring: { type: 'array', items: { type: 'number' } },
+        spread: { type: 'number', min: 0 },
+      },
+    },
+  },
+  via: {
+    type: 'array',
+    required: true,
+    items: {
+      type: 'object',
+      fields: {
+        op: {
+          type: 'string',
+          required: true,
+          oneOf: ['roster', 'escalate', 'affix', 'toughen', 'enrich'],
+        },
+        mode: { type: 'string', oneOf: ['roll', 'best'] },
+        lead: { type: 'number' },
+        ceiling: { type: 'boolean' },
+        count: { type: 'number', min: 0 },
+        hp: { type: 'number', min: 0 },
+        damage: { type: 'number', min: 0 },
+        tier: { type: 'number' },
+        families: { type: 'array', items: { type: 'string' } },
+        events: { type: 'array', items: { type: 'string' } },
       },
     },
   },
@@ -471,6 +558,13 @@ export const VARIANTS_BY_FAMILY: ReadonlyMap<string, EnemyDef[]> = (() => {
   return map;
 })();
 export const WAVE_BY_ID = index(WAVES);
+export const WAVE_EVENTS = validateCollection<WaveEventDef>(
+  'waveevents.json',
+  waveEventsRaw,
+  waveEventSchema,
+  registries,
+);
+export const WAVE_EVENT_BY_ID = index(WAVE_EVENTS);
 export const AXIOM_BY_ID = index(AXIOMS);
 export const ARENA_BY_ID = index(ARENAS);
 export const DISCOVERY_BY_ID = index(DISCOVERIES);

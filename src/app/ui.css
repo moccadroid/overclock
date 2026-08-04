@@ -13,6 +13,20 @@
   --signal: #ff2a3c;
 }
 
+/* Nothing in the UI is prose to be copied, and a stray drag across a card left
+   the whole overlay highlighted in system blue — a colour that exists nowhere in
+   §16 and lands on top of everything. The seed field is the one thing you might
+   genuinely want to select, so it opts back in. */
+* {
+  user-select: none;
+  -webkit-user-select: none;
+}
+input,
+textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 /* The platform scrollbar is a light-grey slab that punches a hole in §16's
    document. Restyled to a thin phosphor rail — visible enough to say "there is
    more below", quiet enough to stay inside the drawing. */

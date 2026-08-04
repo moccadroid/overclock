@@ -25,6 +25,7 @@ import {
   type Feel,
   type HarmonyCell,
   type MelodicCell,
+  type Mood,
   type PercCell,
   type Space,
   type StabCell,
@@ -63,6 +64,16 @@ export interface ArrangeInput {
    * Handed over by the audio layer from the plan it is already running.
    */
   avoid?: { motif?: string; bass?: string; stab?: string; hats?: string };
+  /**
+   * §13.2 — 0 during the build, above 0 once Meltdown has begun.
+   *
+   * Until this existed the phase reached the audio layer and moved exactly one
+   * number: the tempo, by twelve BPM. Act three sounded like act two in a hurry.
+   * It clamps the harmony to the dark cells; the layer stripping that goes with
+   * it lives in audio.ts, because what is *playing* is a per-bar decision and
+   * this file only chooses the material.
+   */
+  meltdown?: number;
 }
 
 export interface Arrangement {
@@ -229,7 +240,7 @@ export function arrange(input: ArrangeInput): Arrangement {
   // melodic seeds would be silently dropped.
   const vary = input.variation ?? 0;
   const signature =
-    `${input.axiomId}|v${vary}|` +
+    `${input.axiomId}|v${vary}|${input.meltdown ? 'm' : ''}` +
     rows.map((r) => `${r.triggerId}:${r.primitive}:${r.hue}:${r.modifiers.join(',')}`).join(';');
   const seed = hash(signature);
   // The drums keep the *build's* seed, so the kit and the groove are stable for
@@ -274,7 +285,19 @@ export function arrange(input: ArrangeInput): Arrangement {
   const hasConvert = rows.some(
     (r) => r.triggerId === 'on_convert' || r.primitive === 'convert',
   );
-  const mood = hasConvert ? 'suspended' : hasCascade ? 'driving' : size >= 3 ? 'lifting' : 'dark';
+  // Meltdown overrides all of it. Whatever the Engine is for stops being the
+  // most interesting fact about the run the moment the containment goes, and
+  // `dark` is the two modal cells — a single held minor, and i-iv with no way
+  // out of it. Neither goes anywhere, which is the point.
+  const mood: Mood = input.meltdown
+    ? 'dark'
+    : hasConvert
+      ? 'suspended'
+      : hasCascade
+        ? 'driving'
+        : size >= 3
+          ? 'lifting'
+          : 'dark';
   const inMood = CELLS.harmonies.filter((h) => h.mood === mood);
   const harmony = inMood[(seed + vary * 3) % Math.max(1, inMood.length)] ?? CELLS.harmonies[0]!;
   const seventhAvailable = harmony.chords.some((c) => c.quality === 'min7');

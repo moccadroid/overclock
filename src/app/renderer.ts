@@ -19,11 +19,18 @@ import type { EnemyMark, Hue } from '../sim/types';
 import type { TerminalKind, World } from '../sim/world';
 import { enemy as getEnemy } from '../content/index';
 import { Camera } from './camera';
-import { BAND, PALETTE, VIEW, VISUAL } from './visual';
+import { BAND, PALETTE, SHELL, VIEW, VISUAL, sampleGate } from './visual';
 import { PostPass } from './gfx/post';
 import { LightField } from './gfx/lights';
+import { MaskField } from './gfx/mask';
 import { BloomPipeline } from './gfx/bloom';
 import { GpuTimer } from './gfx/gputimer';
+import {
+  StructurePass,
+  type ShellSeal,
+  type ShellWall,
+  type ShellWarp,
+} from './gfx/structure';
 import { ParticleField } from './gfx/particles';
 import { shapeCoreRadius, shapeOutline } from './gfx/shapes';
 
@@ -48,22 +55,6 @@ const HOT_CORE: Record<Hue, number> = {
   void: 0xf0daff,
 };
 
-/**
- * Something that bends the grid. `pull` is a radial displacement in world units,
- * negative to push outward; `swirl` is a tangential rotation in radians at the
- * centre. Both fall off to nothing at `radius`.
- */
-interface WarpSource {
-  x: number;
-  y: number;
-  radius: number;
-  pull: number;
-  swirl: number;
-}
-
-const VIEW_HEIGHT = 900;
-const VIEW_WIDTH_MIN = 1200;
-const VIEW_WIDTH_MAX = 1900;
 /** Most lights one Arc contributes, however many times it actually bounced. */
 const CHAIN_LIGHT_HOPS = 6;
 
@@ -78,6 +69,10 @@ const CHAIN_LIGHT_HOPS = 6;
  */
 const BEAT_SNAP = 0.045;
 
+const VIEW_HEIGHT = 900;
+const VIEW_WIDTH_MIN = 1200;
+const VIEW_WIDTH_MAX = 1900;
+
 export class Renderer {
   readonly app = new Application();
   camera!: Camera;
@@ -85,16 +80,52 @@ export class Renderer {
   private bloom!: BloomPipeline;
   private readonly post = new PostPass();
   private lights!: LightField;
+  private masks!: MaskField;
   private readonly particles = new ParticleField();
 
   /** Non-blooming schematic: the arena's structure. */
-  private readonly structureLayer = new Container();
   /** Everything that emits light. Lives inside the bloom pipeline. */
   private readonly worldLayer = new Container();
   private readonly screenLayer = new Container();
 
-  private readonly gGrid = new Graphics();
-  private readonly gRuins = new Graphics();
+  /**
+   * The shell: floor, grid, ruins and the arena wall, as one distance field —
+   * rendered in two halves.
+   *
+   * The ground has to be under the ship and the mass has to be over it, so that
+   * walking beneath an overhanging slab puts you beneath it. One sprite cannot
+   * be on both sides of the entity layer, so the same field runs twice: the
+   * floor pass opaque and below, the mass pass alpha-blended and above. The
+   * floor pass never touches a block, so the second pass is most of the cost
+   * either way.
+   *
+   * Both are full-screen sprites that exist only to carry a filter — the shader
+   * ignores what it samples and writes the surface from scratch. They sit
+   * outside the transformed layers because they do their own world mapping: the
+   * camera arrives as two uniforms, so the pattern is anchored in world space
+   * rather than dragged around by a transform.
+   */
+  private readonly shellFloor = new StructurePass();
+  private readonly shellMass = new StructurePass();
+  private readonly floorSprite = new Sprite(Texture.WHITE);
+  private readonly massSprite = new Sprite(Texture.WHITE);
+  /** A faint copy of every emissive, over the mass. See init. */
+  private readonly ghostSprite = new Sprite();
+  /**
+   * Everything the post pass is allowed to touch.
+   *
+   * The filter used to be on the stage itself, which put the shell's mass
+   * *inside* it — so `uLit` lit the slab from underneath by the player standing
+   * beneath it, and haze went straight through it. Both are light, and light
+   * has no business reaching the far side of a solid thing. The mass, the ghost
+   * and the HUD are siblings of this group, above it and beyond its reach.
+   */
+  private readonly worldGroup = new Container();
+  /** Per-gate opening animation, 0..1, keyed by gate id. Renderer-local. */
+  private readonly gateOpen = new Map<string, number>();
+  private readonly wallScratch: ShellWall[] = [];
+  /** Shake asked for by a gate this frame, from its sequence. */
+  private gateShake = 0;
   private readonly gBeacons = new Graphics();
   private readonly gContainment = new Graphics();
   private readonly gZones = new Graphics();
@@ -123,7 +154,6 @@ export class Renderer {
   private readonly backdrop = new Sprite(Texture.WHITE);
 
   private viewWidth = VIEW_WIDTH_MIN;
-  private world!: World;
   private readonly beaconLabels: Text[] = [];
   /** §17.1 — floating damage-taken numbers. Pooled: Text allocation is not free. */
   private readonly hurtLabels: { text: Text; life: number; x: number; y: number }[] = [];
@@ -136,8 +166,10 @@ export class Renderer {
   /** The avatar's drawn position: the sim's, interpolated across the tick. */
   private playerX = 0;
   private playerY = 0;
-  /** Ruins drawn last time. A gate opening changes it; nothing else does. */
-  private ruinCount = -1;
+  /** Where world (0,0) sits on screen, and pixels per world unit. */
+  private originX = 0;
+  private originY = 0;
+  private originScale = 1;
   /**
    * What the GPU actually costs. CPU timing around a draw call measures queuing,
    * not work — see gfx/gputimer.ts for the mistake that made this necessary.
@@ -145,6 +177,18 @@ export class Renderer {
   gpu!: GpuTimer;
   /** §21b.4 — the background colour, easing toward the current biome's. */
   private tint: number = PALETTE.background;
+  /** Both halves of the shell, for the many settings they share. */
+  private get shells(): readonly StructurePass[] {
+    return [this.shellFloor, this.shellMass];
+  }
+
+  private shellTint: number = PALETTE.background;
+  private shellTintAmount = 0;
+  /** Monotonic quarter-notes, and the last in-bar reading it came from. */
+  private quarter = 0;
+  private lastQuarterInBar = -1;
+  private fieldKind = 0;
+  private fieldAmount = 0;
   /** §16.6 — how far the camera has pulled back. See updateZoom. */
   private zoom = 1;
   /** Shared phase for the loot pulse — see drawPickups. Presentation only. */
@@ -189,7 +233,6 @@ export class Renderer {
   private clock = 0;
 
   async init(mount: HTMLElement, world: World): Promise<void> {
-    this.world = world;
     this.camera = new Camera(world.arena);
 
     await this.app.init({
@@ -212,8 +255,42 @@ export class Renderer {
 
     this.lights = new LightField(this.app);
     this.post.setLightTexture(this.lights.source);
+    this.masks = new MaskField(this.app);
+    this.post.setMaskTexture(this.masks.source);
 
-    this.structureLayer.addChild(this.gGrid, this.gRuins);
+    this.floorSprite.filters = [this.shellFloor.filter];
+    this.massSprite.filters = [this.shellMass.filter];
+    for (const shell of this.shells) {
+      shell.setPalette(PALETTE.structure, PALETTE.background, PALETTE.mass);
+      shell.setStyle(SHELL);
+      shell.setArena(world.arena.width, world.arena.height);
+    }
+    this.shellFloor.setMode(0);
+    this.shellMass.setMode(1);
+    this.shellMass.setLight(
+      this.lights.source,
+      SHELL.massLit,
+      this.app.screen.width,
+      this.app.screen.height,
+    );
+
+    // §16.2 — you must always be able to find yourself.
+    //
+    // The mass is drawn over the entities so an overhang occludes what walks
+    // under it, and that worked too well: the ship disappeared outright while
+    // its light carried on through, because the light field is added later over
+    // everything. A silhouette that vanishes while its glow does not is worse
+    // than either alone.
+    //
+    // So a faint additive copy of the whole emissive layer sits on top of the
+    // mass. Under a slab it is the only thing visible and reads as an outline;
+    // over open floor it lands on strokes that are already drawn and does
+    // nothing but lift them a little. One sprite, and it treats the player and
+    // the enemies identically, which is the point — both are under there.
+    this.ghostSprite.texture = this.bloom.source;
+    this.ghostSprite.blendMode = 'add';
+    this.ghostSprite.alpha = SHELL.ghost;
+
     this.worldLayer.addChild(
       this.gBeacons,
       this.gContainment,
@@ -230,14 +307,18 @@ export class Renderer {
     this.screenLayer.addChild(this.gIndicators);
 
     this.backdrop.tint = PALETTE.background;
+    // Everything the post pass may touch goes in the group; everything that must
+    // stay beyond the reach of light goes above it.
+    this.worldGroup.addChild(this.backdrop, this.floorSprite, this.bloom.output);
     this.app.stage.addChild(
-      this.backdrop,
-      this.structureLayer,
-      this.bloom.output,
+      this.worldGroup,
+      // Above the entities *and* above post, so an overhanging slab occludes the
+      // ship walking beneath it and no amount of light can lift it from below.
+      this.massSprite,
+      this.ghostSprite,
       this.screenLayer,
     );
 
-    this.drawRuins();
     this.layout();
     this.camera.snapTo(world.player.x, world.player.y);
     window.addEventListener('resize', () => this.layout());
@@ -249,9 +330,26 @@ export class Renderer {
     this.camera.setViewSize(this.viewWidth, VIEW_HEIGHT);
     this.backdrop.width = this.app.screen.width;
     this.backdrop.height = this.app.screen.height;
+    for (const sprite of [this.floorSprite, this.massSprite]) {
+      sprite.width = this.app.screen.width;
+      sprite.height = this.app.screen.height;
+    }
+    // The bloom texture is recreated on resize, so the ghost has to be pointed
+    // at the new one or it keeps drawing the old frame forever.
+    if (this.bloom) this.ghostSprite.texture = this.bloom.source;
     this.bloom.resize();
     this.lights?.resize();
+    this.masks?.resize();
     if (this.lights) this.post.setLightTexture(this.lights.source);
+    if (this.lights) {
+      this.shellMass.setLight(
+        this.lights.source,
+        SHELL.massLit,
+        this.app.screen.width,
+        this.app.screen.height,
+      );
+    }
+    if (this.masks) this.post.setMaskTexture(this.masks.source);
   }
 
   /** Visible world size right now, zoom included. */
@@ -296,12 +394,18 @@ export class Renderer {
     const worldX = this.viewW / 2 - this.camera.x;
     const worldY = this.viewH / 2 - this.camera.y;
 
-    for (const layer of [this.structureLayer, this.worldLayer]) {
+    for (const layer of [this.worldLayer]) {
       layer.scale.set(scale);
       layer.position.set(offsetX + worldX * scale, offsetY + worldY * scale);
     }
     this.screenLayer.scale.set(scale);
     this.screenLayer.position.set(offsetX, offsetY);
+
+    // The same mapping the layers just took, kept as numbers for the shell —
+    // which has no transform and needs the camera as uniforms.
+    this.originX = offsetX + worldX * scale;
+    this.originY = offsetY + worldY * scale;
+    this.originScale = scale;
   }
 
   // ------------------------------------------------------------------- frame
@@ -312,6 +416,33 @@ export class Renderer {
    */
   setBeat(beat: { beat: number; pulse: number; bpm: number } | null): void {
     this.beat = beat;
+  }
+
+  /**
+   * A monotonic count of quarter-notes, which the audio clock does not provide.
+   *
+   * `beat.beat` is sixteenths *within the bar*, so it wraps to zero four times a
+   * measure — hand that straight to the shell and every block in the arena
+   * re-rolls to the same four values forever. Unwrapping it here is what lets
+   * the architecture keep going somewhere instead of looping.
+   *
+   * With the audio off it free-runs at the arrangement's base tempo, because a
+   * muted player should still see the room move.
+   */
+  private advanceQuarter(dt: number): void {
+    const beat = this.beat;
+    if (!beat) {
+      this.quarter += (dt * 112) / 60;
+      this.lastQuarterInBar = -1;
+      return;
+    }
+    const inBar = beat.beat / 4;
+    if (this.lastQuarterInBar >= 0) {
+      const step = inBar - this.lastQuarterInBar;
+      // A negative step is the bar wrapping; anything else is ordinary progress.
+      this.quarter += step < 0 ? step + 4 : step;
+    }
+    this.lastQuarterInBar = inBar;
   }
 
   setBeatSync(on: boolean): void {
@@ -379,7 +510,9 @@ export class Renderer {
     const heat = Math.min(1, world.budget.heat / 100);
     const tier = world.budget.tier;
 
-    this.drawGrid(world);
+    this.gateShake = 0;
+    this.updateLevelBounds(world);
+    this.updateShell(world, frameDt);
     this.drawTerminals(world);
     this.drawContainment(world);
     this.drawZones(world);
@@ -405,19 +538,44 @@ export class Renderer {
     // The world overexposes.
     // §21b.4 — the biome you are standing in tints the world. Approached rather
     // than snapped, so crossing a boundary reads as walking into somewhere.
-    const biomeTint = world.biome?.tint ?? PALETTE.background;
+    // §21b — the room you are in colours its structure. A biome overrides the
+    // level when you are standing in one, so a Freezer inside a level still
+    // reads as the Freezer.
+    const biome = world.biome;
+    const biomeTint = biome?.tint ?? world.currentLevel?.tint ?? PALETTE.background;
     this.tint = mix(this.tint, biomeTint, Math.min(1, frameDt * 1.5));
+    // The shell takes the biome as a colour over the whole surface, so a biome
+    // is the room being a different room rather than a slightly different black
+    // showing through the gaps in the grid.
+    this.shellTint = mix(this.shellTint, biomeTint, Math.min(1, frameDt * 1.5));
+    this.shellTintAmount += ((biome ? 0.5 : 0) - this.shellTintAmount) * Math.min(1, frameDt * 1.5);
+    for (const shell of this.shells) shell.setTint(this.shellTint, this.shellTintAmount);
+
+    // §21b.4 — the biome's screen-space field, ramped by how far in the player
+    // stands rather than switched at the boundary. Four hundred units of ramp
+    // is about half a screen, so walking into the Freezer is a thing you watch
+    // arrive; stepping one pixel over the line barely registers, which is what
+    // stops a boundary you are pacing along from strobing.
+    if (biome?.field) this.fieldKind = FIELD_KIND[biome.field] ?? 0;
+    const inset = biome
+      ? Math.min(
+          Math.min(world.player.x - biome.x, biome.x + biome.w - world.player.x),
+          Math.min(world.player.y - biome.y, biome.y + biome.h - world.player.y),
+        )
+      : 0;
+    const wanted = biome?.field ? Math.min(1, Math.max(0, inset) / 400) : 0;
+    this.fieldAmount += (wanted - this.fieldAmount) * Math.min(1, frameDt * 2.5);
+    if (this.fieldAmount < 0.002) this.fieldKind = 0;
+    this.post.setField(this.fieldKind, this.fieldAmount);
     const background = mix(this.tint, 0x243044, Math.min(0.85, melt * 0.55));
     this.app.renderer.background.color = background;
     this.backdrop.tint = background;
     // §16.7 — the degradation ladder pushes whatever preset the player chose
     // further than they asked, which is how Heat and Meltdown stay legible as
     // *damage to the picture* rather than as a separate effect.
-    // §21b.5 — the structure layer is static except when a gate opens.
-    if (world.ruins.length !== this.ruinCount) this.drawRuins();
-
     this.emitGlitchFields(world);
     this.emitLights(world, heat, melt, frameDt);
+    this.emitState(world);
     this.post.update(
       VIEW,
       Math.max(heat * 0.6, melt),
@@ -429,8 +587,13 @@ export class Renderer {
     // even for a player who turned every effect off — otherwise Suppressors
     // become invisible on a Schematic preset, which is worse than the ring was.
     const off =
-      PostPass.isOff(VIEW) && heat < 0.02 && melt < 0.02 && this.glitchFields.length === 0;
-    this.app.stage.filters = off ? [] : [this.post.filter];
+      PostPass.isOff(VIEW) &&
+      heat < 0.02 &&
+      melt < 0.02 &&
+      this.glitchFields.length === 0 &&
+      this.masks.empty &&
+      this.fieldAmount < 0.002;
+    this.worldGroup.filters = off ? [] : [this.post.filter];
 
     this.bloom.compose();
   }
@@ -611,6 +774,39 @@ export class Renderer {
       lights.point(item.x, item.y, 48, PALETTE.xp, 0.1);
     }
 
+    // §21b.5 — the lock in a sealed gate lights its own doorway, so the red is
+    // in the air of the passage rather than a decal on the floor.
+    for (const gate of world.arena.gates ?? []) {
+      if (world.openBiomes.has(gate.opens)) continue;
+      const bar = gate.barrier;
+      const cx = bar.x + bar.w / 2;
+      const cy = bar.y + bar.h / 2;
+      if (!this.camera.isVisible(cx, cy, 300)) continue;
+      // The flood. This is the whole effect — the seam is nothing, the room
+      // being full of red is everything.
+      //
+      // Sized against the exposure limiter, not by eye.
+      //
+      // The first attempt asked for radius 620 at 0.85, which carries the energy
+      // of a Nova — the field's limiter saw a frame about to clip, ducked to its
+      // floor, and took the entire picture down to a fifth with it. The gate lit
+      // nothing and everything else went dark. Energy is intensity times area,
+      // so radius is the expensive term: two modest areas and one tight core
+      // read as a flood and leave the limiter alone.
+      const swell = 0.82 + 0.18 * Math.sin(this.clock * 1.15);
+      // Thrown out of the mouth, not from inside the door.
+      //
+      // Centred on the seam, almost all of it landed on the frame — and mass
+      // only takes `massLit` of the light field, so the flood went into the one
+      // surface built to swallow it. Pushed a little into the room it lands on
+      // open floor instead, which is both what the reference does and what the
+      // light is physically doing: leaking out of a gap.
+      const ox = cx - bar.w * 0.75;
+      lights.area(ox, cy, 480 * swell, PALETTE.signal, 0.42 * swell);
+      lights.area(ox, cy, 250 * swell, PALETTE.signal, 0.5 * swell);
+      lights.point(cx, cy, 120, 0xff6a58, 1.1 * swell);
+    }
+
     // §13.2 — Meltdown lights the whole arena from nowhere, which is the world
     // overexposing rather than any object getting brighter. An area, not a
     // point: the whole screen is lit, not a lamp standing where the player is.
@@ -624,6 +820,63 @@ export class Renderer {
     const worldX = this.viewW / 2 - this.camera.x;
     const worldY = this.viewH / 2 - this.camera.y;
     lights.render(scale, offsetX + worldX * scale, offsetY + worldY * scale, dt);
+  }
+
+  /**
+   * §10.4 — write this frame's state field.
+   *
+   * The rule for what earns a channel: it must be something the player has to
+   * *act differently* about, and it must be a property of the creature rather
+   * than of the fight. A Charged Mote is not a Mote with a symbol on it — the
+   * air over it is moving, and that is visible from further away than any glyph
+   * at band 5 could ever be.
+   *
+   * Everything here is culled against the camera and capped by the field. A
+   * hundred charged enemies is one shimmering region, which is correct.
+   */
+  private emitState(world: World): void {
+    const masks = this.masks;
+    masks.begin();
+
+    for (const e of world.enemies) {
+      if (!this.camera.isVisible(e.x, e.y, e.radius + 90)) continue;
+      const def = getEnemy(e.defId);
+      let charge = 0;
+      let corrupt = 0;
+      let phase = 0;
+
+      if (def.marks?.includes('charge')) {
+        // Breathes, so it reads as building rather than as being hot.
+        charge = 0.55 + 0.25 * Math.sin(this.clock * 5 + e.id);
+      }
+      // A Charger mid-wind-up is the same statement with a timer on it, and the
+      // one moment in the game where "get out of the way" has to arrive early.
+      if (e.state === 'windup') charge = Math.max(charge, 0.75);
+      // Volatile is a detonation that has not happened yet.
+      if (e.affixes.includes('volatile')) charge = Math.max(charge, 0.5);
+
+      // §12.4 — out of a Cache, or wearing affixes. Both mean "this one does not
+      // obey the numbers the rest of its family obeys".
+      if (e.hardened) corrupt = 0.6;
+      if (e.affixes.length > 0) corrupt = Math.max(corrupt, 0.35 + e.affixes.length * 0.2);
+
+      // Half-there, and looking it.
+      if (e.phased) phase = 0.85;
+      else if (def.marks?.includes('phase')) phase = 0.4;
+
+      // The radius is generous on purpose: these are regions of air, and a mark
+      // the size of the creature would just be a differently-coloured creature.
+      masks.mark(e.x, e.y, e.radius * 3.4 + 26, charge, corrupt, phase);
+    }
+
+    const scale = this.scale;
+    const offsetX = (this.app.screen.width - this.viewW * scale) / 2 + this.shakeX;
+    const offsetY = (this.app.screen.height - this.viewH * scale) / 2 + this.shakeY;
+    const worldX = this.viewW / 2 - this.camera.x;
+    const worldY = this.viewH / 2 - this.camera.y;
+    masks.render(scale, offsetX + worldX * scale, offsetY + worldY * scale);
+    this.post.setMaskTexture(masks.source);
+    this.post.setState(masks.empty ? 0 : VISUAL.degradationIntensity);
   }
 
   /**
@@ -760,7 +1013,13 @@ export class Renderer {
 
   private updateShake(dt: number): void {
     this.shake = Math.max(0, this.shake - VISUAL.shakeDecay * dt);
-    const magnitude = this.shake * VISUAL.degradationIntensity * VIEW.shake;
+    // A gate asks for shake by score rather than by event, so it is added here
+    // rather than decayed: the sequence says how much is wanted *now*, and when
+    // the sequence ends it says zero and stops on its own.
+    const magnitude =
+      (this.shake + this.gateShake * VISUAL.shakeMax * SHELL.gateShake) *
+      VISUAL.degradationIntensity *
+      VIEW.shake;
     this.shakeX = this.jitter(magnitude);
     this.shakeY = this.jitter(magnitude);
   }
@@ -774,24 +1033,101 @@ export class Renderer {
   // --------------------------------------------------------------- structure
 
   /**
-   * §16.5 — the grid is an instrument. It brightens and distorts around the
-   * avatar in proportion to dynamic Cycle load: your engine's draw is visible in
-   * the fabric of the world. During Overheat it tears locally.
+   * §21b.5 — the thing holding the door shut.
+   *
+   * A sealed gate needs something to be *doing* the sealing, or the wall is just
+   * a wall in a fancy frame and the terminal is a floating instruction. So there
+   * is a seal in the middle of the door, in signal red because §16.2 reserves
+   * that hue for "this is against you" and a door you cannot pass is exactly
+   * that.
+   *
+   * This used to be three nested rectangles in the emissive layer and it never
+   * once looked like it was burning. The reason was structural rather than a
+   * matter of brightness: the emissive layer composites *under* the mass, and
+   * the seal is embedded in a door made of mass. Its bloom was being painted
+   * over by the very thing it was supposed to be melting through. So nothing is
+   * drawn here now — the seal goes to the mass pass as four numbers and burns
+   * there, above the door, where it also gets to warp the blocks around it.
+   *
+   * It breathes on its own slow clock and quickens with the beat, and it is gone
+   * the instant the gate opens, because by then it has lost.
    */
-  private drawGrid(world: World): void {
-    const g = this.gGrid;
-    g.clear();
+  private collectSeals(world: World): ShellSeal[] {
+    const seals: ShellSeal[] = [];
+    const beat = this.beat ? this.beat.pulse : 0;
+    for (const gate of world.arena.gates ?? []) {
+      if (world.openBiomes.has(gate.opens)) continue;
+      const b = gate.barrier;
+      const cx = b.x + b.w / 2;
+      const cy = b.y + b.h / 2;
+      if (!this.camera.isVisible(cx, cy, 520)) continue;
+      const breathe = 0.86 + 0.14 * Math.sin(this.clock * 1.15);
+      seals.push({
+        x: cx,
+        y: cy,
+        radius: b.h * SHELL.sealRadius,
+        intensity: SHELL.sealGlow * breathe * (1 + beat * 0.35),
+        halfW: b.w / 2,
+        halfH: b.h / 2,
+        jambGlow: SHELL.jambGlow,
+        motes: SHELL.gateMotes,
+      });
+    }
+    return seals;
+  }
 
+  /**
+   * §21b — confine the camera to the levels that are open.
+   *
+   * The next room is walled off *and* off camera until its gate is held, so
+   * opening one is a reveal rather than a door. The bounds are eased rather than
+   * snapped: the moment the wall comes down the view can travel further, and
+   * watching that reach happen is most of the moment.
+   */
+  private updateLevelBounds(world: World): void {
+    const levels = world.unlockedLevels;
+    if (levels.length === 0) return;
+    let x0 = Infinity;
+    let y0 = Infinity;
+    let x1 = -Infinity;
+    let y1 = -Infinity;
+    for (const l of levels) {
+      x0 = Math.min(x0, l.x);
+      y0 = Math.min(y0, l.y);
+      x1 = Math.max(x1, l.x + l.w);
+      y1 = Math.max(y1, l.y + l.h);
+    }
+    // Gates sit *on* a level boundary, so clamping to the level alone pinned the
+    // doorway to the edge of the frame — you could never look straight at the
+    // thing you were being asked to stand in and hold. Every barrier is unioned
+    // in, which buys exactly enough travel to centre it and no more.
+    for (const gate of world.arena.gates ?? []) {
+      const b = gate.barrier;
+      x0 = Math.min(x0, b.x);
+      y0 = Math.min(y0, b.y);
+      x1 = Math.max(x1, b.x + b.w);
+      y1 = Math.max(y1, b.y + b.h);
+    }
+    this.camera.setBounds(x0, y0, x1 - x0, y1 - y0);
+  }
+
+  /**
+   * §16.5, §21b — hand this frame's world to the shell shader.
+   *
+   * Nothing is drawn here. The walls are culled to the view, the things that
+   * bend space are collected, the gate animation is advanced, and all of it
+   * goes across as uniforms; the surface itself is one full-screen pass.
+   */
+  private updateShell(world: World, dt: number): void {
+    this.advanceQuarter(dt);
     const view = this.camera.view;
-    const step = VISUAL.gridSpacing;
     const load = world.budget.staticFraction;
-    const arena = world.arena;
 
     // Everything that bends the world, in one list. The avatar pushes space
     // outward under load; a vortex pulls it in and twists it. Drawing Pull as a
-    // distortion of the grid rather than a wad of strokes on top of it is the
+    // distortion of the ground rather than a wad of strokes on top of it is the
     // difference between "an ugly thing is here" and "space is wrong here".
-    const sources: WarpSource[] = [
+    const warp: ShellWarp[] = [
       {
         x: world.player.x,
         y: world.player.y,
@@ -801,11 +1137,11 @@ export class Renderer {
       },
     ];
     for (const z of world.zones) {
-      if (z.force <= 0) continue;
+      if (z.force <= 0 || warp.length >= 6) continue;
       const t = Math.max(0, z.life / z.maxLife);
       // Peaks just after it lands and eases off as it dies, like the pull itself.
       const strength = Math.sin(Math.min(1, (1 - t) * 3) * Math.PI * 0.5) * t;
-      sources.push({
+      warp.push({
         x: z.x,
         y: z.y,
         radius: z.radius * 1.35,
@@ -813,120 +1149,63 @@ export class Renderer {
         swirl: 1.15 * strength,
       });
     }
-    const warping = sources.some((s) => Math.abs(s.pull) > 0.05);
+    for (const shell of this.shells) shell.setWarp(warp);
+    this.shellMass.setSeals(this.collectSeals(world));
 
-    const x0 = Math.max(0, Math.floor(view.x / step) * step);
-    const x1 = Math.min(arena.width, view.x + view.width + step);
-    const y0 = Math.max(0, Math.floor(view.y / step) * step);
-    const y1 = Math.min(arena.height, view.y + view.height + step);
+    // Walls: the live ruin list, culled to what can be on screen. The shader
+    // loops over these per pixel, so what is off-camera must not be paid for.
+    const walls = this.wallScratch;
+    walls.length = 0;
+    const pad = 120;
+    const vx0 = view.x - pad;
+    const vy0 = view.y - pad;
+    const vx1 = view.x + view.width + pad;
+    const vy1 = view.y + view.height + pad;
 
-    // Vertical lines, subdivided so they can bend around the avatar.
-    for (let x = x0; x <= x1; x += step) {
-      this.warpedLine(g, x, Math.max(0, view.y - step), x, Math.min(arena.height, y1), sources, warping);
-    }
-    for (let y = y0; y <= y1; y += step) {
-      this.warpedLine(g, Math.max(0, view.x - step), y, Math.min(arena.width, x1), y, sources, warping);
-    }
-    // §18.2, read backwards. The grid breathes on the quarter note.
+    // Gates first, and deliberately so. `setWalls` keeps only the first
+    // fourteen, and a screen busy enough to fill that is exactly the screen a
+    // gate is opening on — put the barrier last and the one wall the player is
+    // watching is the one that gets dropped.
+    // §21b.5 — a gate does not delete its wall, it opens it.
     //
-    // This is the cheapest possible version of "the picture is on the beat" and
-    // by far the highest-value: nothing new is drawn, an existing alpha just
-    // takes its ripple from the audio clock instead of from nothing. Play with
-    // the sound off and this is invisible; play with it on and the whole arena
-    // is entrained before a single detonation lands.
-    //
-    // It lives on the grid specifically because §16.2 reserves the bright bands
-    // for things that matter. Structure is the one layer that can pulse without
-    // ever competing with a threat, and the amount is small enough that it reads
-    // as the room having a pulse rather than as the grid flashing at you.
-    const pulse = this.beat ? this.beat.pulse : 0;
-    g.stroke({
-      width: 1,
-      color: PALETTE.structure,
-      alpha: BAND.structure * (0.75 + load * 0.9) * (1 + pulse * 0.85),
-    });
-
-    g.rect(0, 0, arena.width, arena.height).stroke({
-      width: 2,
-      color: PALETTE.structure,
-      alpha: BAND.structure * 1.6 * (1 + pulse * 0.5),
-    });
-  }
-
-  private warpedLine(
-    g: Graphics,
-    ax: number,
-    ay: number,
-    bx: number,
-    by: number,
-    sources: WarpSource[],
-    warping: boolean,
-  ): void {
-    if (!warping) {
-      g.moveTo(ax, ay).lineTo(bx, by);
-      return;
+    // The sim removes the barrier ruin the instant the hold completes, because
+    // collision and pathing must agree immediately. The picture is allowed to
+    // disagree for a few seconds: the barrier keeps being submitted while
+    // GATE_SEQUENCE plays out over it. The renderer only advances a clock and
+    // reads the score — what the beats *are* lives in visual.ts.
+    for (const gate of world.arena.gates ?? []) {
+      if (!world.openBiomes.has(gate.opens)) continue;
+      const t = (this.gateOpen.get(gate.id) ?? 0) + dt;
+      this.gateOpen.set(gate.id, t);
+      const step = sampleGate(t);
+      if (step.done) continue;
+      this.gateShake = Math.max(this.gateShake, step.shake);
+      // The cut burns the colour of the room it opens into — light from the
+      // other side belongs to the other side.
+      const into = (world.arena.levels ?? []).find((l) => l.id === gate.opens);
+      this.shellMass.setCutColor(into?.light ?? PALETTE.beacon);
+      const b = gate.barrier;
+      if (b.x > vx1 || b.x + b.w < vx0 || b.y > vy1 || b.y + b.h < vy0) continue;
+      walls.push({
+        x: b.x,
+        y: b.y,
+        w: b.w,
+        h: b.h,
+        open: step.open,
+        glow: step.glow,
+        reach: reachFor(b.w, b.h),
+      });
     }
-    // Subdivide by length, not by a fixed count: a 260-unit warp radius needs
-    // vertices inside it, and the grid line may span the whole arena.
-    const length = Math.hypot(bx - ax, by - ay);
-    const steps = Math.max(VISUAL.gridSubdivisions, Math.ceil(length / VISUAL.gridWarpStep));
-    for (let i = 0; i <= steps; i++) {
-      const t = i / steps;
-      const bareX = ax + (bx - ax) * t;
-      const bareY = ay + (by - ay) * t;
-      let x = bareX;
-      let y = bareY;
-      for (const s of sources) {
-        if (Math.abs(s.pull) < 0.05) continue;
-        const dx = bareX - s.x;
-        const dy = bareY - s.y;
-        const d = Math.hypot(dx, dy);
-        if (d >= s.radius || d < 0.001) continue;
-        // Radial displacement, strongest at the centre and vanishing at the rim.
-        const falloff = (1 - d / s.radius) ** 2;
-        const shift = (falloff * s.pull) / d;
-        x -= dx * shift;
-        y -= dy * shift;
-        // Tangential twist. This is what makes a vortex read as a vortex: the
-        // straight lines of the world visibly wind up around it.
-        if (s.swirl !== 0) {
-          const twist = falloff * s.swirl;
-          const c = Math.cos(twist);
-          const sn = Math.sin(twist);
-          x += (dx * c - dy * sn - dx);
-          y += (dx * sn + dy * c - dy);
-        }
-      }
-      if (i === 0) g.moveTo(x, y);
-      else g.lineTo(x, y);
+    for (const r of world.ruins) {
+      if (r.x > vx1 || r.x + r.w < vx0 || r.y > vy1 || r.y + r.h < vy0) continue;
+      walls.push({ x: r.x, y: r.y, w: r.w, h: r.h, open: 0, glow: 0, reach: reachFor(r.w, r.h) });
     }
-  }
+    for (const shell of this.shells) shell.setWalls(walls);
 
-  /** §22 — structure ruins. Blueprint hatching, not a filled block. */
-  private drawRuins(): void {
-    const g = this.gRuins;
-    g.clear();
-    // The live list, not the arena's: §21b.5 barriers are ruins that come down.
-    this.ruinCount = this.world.ruins.length;
-    for (const r of this.world.ruins) {
-      g.rect(r.x, r.y, r.w, r.h);
+    for (const shell of this.shells) {
+      shell.setCamera(this.originX, this.originY, this.originScale, this.playerX, this.playerY);
+      shell.update(this.beat ? this.beat.pulse : 0, this.quarter, load, dt);
     }
-    g.fill({ color: PALETTE.structure, alpha: 0.16 });
-
-    for (const r of this.world.ruins) {
-      g.rect(r.x, r.y, r.w, r.h);
-      // Interior scanline hatch — reads as material, stays at band 5.
-      for (let y = r.y + 9; y < r.y + r.h; y += 9) {
-        g.moveTo(r.x + 3, y).lineTo(r.x + r.w - 3, y);
-      }
-      // Dimension ticks at the corners: the schematic annotation vocabulary.
-      const t = 7;
-      g.moveTo(r.x, r.y - t).lineTo(r.x, r.y);
-      g.moveTo(r.x + r.w, r.y - t).lineTo(r.x + r.w, r.y);
-      g.moveTo(r.x - t, r.y).lineTo(r.x, r.y);
-      g.moveTo(r.x - t, r.y + r.h).lineTo(r.x, r.y + r.h);
-    }
-    g.stroke({ width: 1, color: PALETTE.structure, alpha: BAND.structure * 1.5 });
   }
 
   // ---------------------------------------------------------------- entities
@@ -952,12 +1231,28 @@ export class Renderer {
         // ring you can see from across the arena, filling as you stand in it.
         const gate = world.arena.gates?.find((x) => x.id === t.gateId);
         const hold = gate?.radius ?? 240;
+        // Markings on the floor, and nothing else.
+        //
+        // This used to fill the disc, which put a pale wash across the whole
+        // mouth of the gate — the one place in the game with a coloured light
+        // worth looking at. Paint over a light and you have neither. So: a ring,
+        // a progress arc, and hatch ticks that thicken as it fills. It reads as
+        // ground you have to stand on because that is what it is drawn as.
         g.circle(t.x, t.y, hold).stroke({ width: 2, color, alpha: BAND.structure * 2.2 });
-        // The fill sweeps round from the top, and the whole disc lifts with it.
+        const ticks = 24;
+        for (let i = 0; i < ticks; i++) {
+          const a = (i / ticks) * Math.PI * 2;
+          const lit = i / ticks <= t.progress;
+          const len = lit ? 16 : 8;
+          const ca = Math.cos(a);
+          const sa = Math.sin(a);
+          g.moveTo(t.x + ca * (hold - len), t.y + sa * (hold - len));
+          g.lineTo(t.x + ca * hold, t.y + sa * hold);
+        }
+        g.stroke({ width: 2, color, alpha: BAND.structure * 2 });
         if (t.progress > 0) {
           arcSegment(g, t.x, t.y, hold, -Math.PI / 2, -Math.PI / 2 + t.progress * Math.PI * 2);
           g.stroke({ width: 6, color, alpha: BAND.telegraph });
-          g.circle(t.x, t.y, hold).fill({ color, alpha: 0.05 + t.progress * 0.09 });
         }
         // Chevrons pointing at the wall it opens: where this goes, before you
         // have paid for it. §21b.5 — a gate you can see is a promise.
@@ -2158,6 +2453,21 @@ export class Renderer {
 }
 
 const HUE_ORDER: readonly Hue[] = ['thermal', 'voltaic', 'void'];
+
+/**
+ * How far a wall's blocks may churn past it, in world units.
+ *
+ * Proportional to the wall's short side and hard-capped. A barrier ninety units
+ * across cannot grow by two hundred and still describe where the collision is —
+ * and since the mass only ever dilates, the excursion is the whole error budget
+ * between what you see and what you walk into.
+ */
+function reachFor(w: number, h: number): number {
+  return Math.min(SHELL.ruinReachMax, Math.min(w, h) * SHELL.ruinReach);
+}
+
+/** §21b.4 — biome field names, as the post shader's selector. */
+const FIELD_KIND: Record<string, number> = { frost: 1, ember: 2, static: 3 };
 
 /** Terminals are told apart by colour as well as by frame (§16.4). */
 const TERMINAL_COLOR: Record<TerminalKind, number> = {

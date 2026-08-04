@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "packageManager": "pnpm@10.30.1",
-  "description": "Bullet-heaven / build-crafting roguelite. Codename only — see src/branding.ts for player-facing naming.",
+  "description": "Bullet-heaven / build-crafting roguelite. Codename only \u2014 see src/branding.ts for player-facing naming.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -14,18 +14,24 @@
     "test:watch": "vitest",
     "sim": "tsx src/harness/headless.ts",
     "inspect": "tsx src/harness/inspect.ts",
-    "probe": "tsx src/harness/probe.ts"
+    "probe": "tsx src/harness/probe.ts",
+    "lint": "biome lint src",
+    "lint:fix": "biome lint src --write",
+    "check": "pnpm typecheck && pnpm lint && pnpm test"
   },
   "engines": {
     "node": ">=20"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   },
   "dependencies": {
     "pixi.js": "^8.19.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.7",
     "@types/node": "^26.1.2",
     "tsx": "^4.23.1",
     "typescript": "^7.0.2",
@@ -33,5 +39,3 @@
     "vitest": "^4.1.10"
   }
 }
-
-

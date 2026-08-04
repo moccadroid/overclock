@@ -12,12 +12,12 @@
  * everything twice.
  */
 import {
-  Application,
+  type Application,
   BlurFilter,
   Container,
   RenderTexture,
   Sprite,
-  Texture,
+  type Texture,
   type ColorSource,
 } from 'pixi.js';
 import { VISUAL } from '../visual';
@@ -29,6 +29,17 @@ export class BloomPipeline {
   readonly output = new Container();
 
   private texture: RenderTexture;
+
+  /**
+   * The raw emissive layer, before any blur. Everything that glows, once.
+   *
+   * Exposed so the shell's mass pass can be given a faint additive copy of it
+   * on top: standing under an overhang should occlude you, but vanishing
+   * completely while your own light carries on through is worse than either.
+   */
+  get source(): Texture {
+    return this.texture;
+  }
   private readonly base = new Sprite();
   /** An unblurred additive copy — see setGlow. */
   private readonly hot = new Sprite();

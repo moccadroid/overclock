@@ -55,7 +55,7 @@
     "contactDamage": 10,
     "xp": 6,
     "shieldArc": 1.5,
-    "description": "Slow and heavy. Blocks projectiles hitting its front arc — attack it from the side or behind.",
+    "description": "Slow and heavy. Blocks projectiles hitting its front arc \u2014 attack it from the side or behind.",
     "hue": "void"
   },
   {
@@ -164,7 +164,8 @@
     ],
     "substitutes": {
       "fromThreat": 4,
-      "share": 0.3
+      "share": 0.3,
+      "tier": 1
     },
     "hue": "thermal",
     "description": "Mote with an armoured front arc. Projectiles hitting the front do nothing."
@@ -189,7 +190,8 @@
     },
     "substitutes": {
       "fromThreat": 6,
-      "share": 0.22
+      "share": 0.22,
+      "tier": 1
     },
     "hue": "thermal",
     "description": "Mote that detonates when killed: 14 damage, 95 units."
@@ -212,7 +214,8 @@
     "phaseDuration": 0.9,
     "substitutes": {
       "fromThreat": 9,
-      "share": 0.16
+      "share": 0.16,
+      "tier": 2
     },
     "hue": "thermal",
     "description": "Mote that is untargetable for 0.9s out of every 2.5s."
@@ -237,7 +240,8 @@
     },
     "substitutes": {
       "fromThreat": 5,
-      "share": 0.28
+      "share": 0.28,
+      "tier": 1
     },
     "hue": "void",
     "description": "Drifter that splits into 4 Motes when killed."
@@ -259,7 +263,8 @@
     ],
     "substitutes": {
       "fromThreat": 8,
-      "share": 0.24
+      "share": 0.24,
+      "tier": 1
     },
     "hue": "void",
     "description": "Drifter with an armoured front arc. 90 HP."
@@ -280,7 +285,8 @@
     ],
     "substitutes": {
       "fromThreat": 11,
-      "share": 0.2
+      "share": 0.2,
+      "tier": 2
     },
     "hue": "void",
     "description": "Faster Drifter. 16 contact damage instead of 6."
@@ -304,7 +310,8 @@
     "dashDuration": 0.45,
     "substitutes": {
       "fromThreat": 9,
-      "share": 0.22
+      "share": 0.22,
+      "tier": 1
     },
     "hue": "thermal",
     "description": "Charger with 140 HP, a shorter telegraph and a longer dash."
@@ -332,7 +339,8 @@
     },
     "substitutes": {
       "fromThreat": 12,
-      "share": 0.2
+      "share": 0.2,
+      "tier": 2
     },
     "hue": "thermal",
     "description": "Charger that detonates when killed: 22 damage, 130 units."

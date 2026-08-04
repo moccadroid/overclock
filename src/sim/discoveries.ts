@@ -120,7 +120,7 @@ export class DiscoveryTracker {
     for (const d of DISCOVERIES) {
       if (this.earned.has(d.id)) continue;
       const check = DISCOVERY_CHECKS[d.id];
-      if (!check || !check(world, this.state)) continue;
+      if (!check?.(world, this.state)) continue;
       this.earned.add(d.id);
       // Already in the Library: it still counts for score, but the stinger is
       // for the first time. Nobody wants to be taught the same thing twice.

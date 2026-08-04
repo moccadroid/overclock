@@ -639,7 +639,7 @@ export class Engine {
           return la - lb || a - b;
         });
       for (const i of order) {
-        const slot = this.programs[i]!.modifierIds.findIndex((m) => m === null);
+        const slot = this.programs[i]!.modifierIds.indexOf(null);
         if (slot >= 0) {
           this.programs[i]!.modifierIds[slot] = nodeId;
           this.recompile();

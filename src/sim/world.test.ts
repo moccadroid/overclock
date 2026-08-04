@@ -7,7 +7,7 @@ import { Rng } from './rng';
 import { botInput } from '../harness/bot';
 import { applyDraft, purgeCard, rollDraft } from './draft';
 import { inertFields } from './engine';
-import { NODE_BY_ID } from '../content/index';
+import { ENEMY_BY_ID, NODE_BY_ID, WAVE_BY_ID, WAVE_EVENTS } from '../content/index';
 import { atan2 as patan2, cos as pcos, hypot, pow as ppow, sin as psin } from './num';
 
 /** Run with the harness pilot, which actually collects XP. */
@@ -135,6 +135,11 @@ describe('navigation (GDD §22 — ruins are cover, not walls that trap)', () =>
 
   it('leaves open-field pursuit alone', () => {
     const w = new World({ seed: 'nav-open', axiomId: 'ignition' });
+    // Open field means open field. The test used to borrow whatever happened to
+    // be empty in the shipped arena, so re-laying the level's ruins broke a test
+    // about pathing — clear the corridor explicitly and it asserts the behaviour
+    // rather than the content.
+    w.clearRuins((r) => r.x <= 1400 && r.y <= 1600);
     w.player.x = 700;
     w.player.y = 700;
     w.enemies.length = 0;
@@ -972,7 +977,7 @@ describe('the action roster (GDD §5.4)', () => {
     const alive = new Map(w.enemies.map((e) => [e.id, e]));
     const damaged = line.filter((id) => {
       const e = alive.get(id);
-      return !e || !e.alive || e.hp < e.maxHp;
+      return !e?.alive || e.hp < e.maxHp;
     }).length;
     expect(damaged).toBeGreaterThanOrEqual(4);
   });
@@ -1142,10 +1147,13 @@ describe('pressure attacks the build, not the health bar (GDD §11)', () => {
     // spawnEnemy deliberately has no ceiling (a Splitter's children must always
     // arrive).
     const queue = (w as unknown as {
-      queueSpawn(e: string, x: number, y: number, s: number, d: number, en: boolean): void;
+      queueSpawn(e: string, x: number, y: number, s: number, d: number, via: unknown[]): void;
     }).queueSpawn.bind(w);
+    // An empty chain: spawn exactly what is asked for. The ceiling is what is
+    // under test, not the roster remap that would otherwise turn these into
+    // something the room prefers.
     for (let i = 0; i < 40; i++) {
-      queue('suppressor', w.player.x + 900, w.player.y + 900, 40, i * 0.05, false);
+      queue('suppressor', w.player.x + 900, w.player.y + 900, 40, i * 0.05, []);
       w.advance(NO_INPUT);
     }
     for (let i = 0; i < 300; i++) w.advance(NO_INPUT);
@@ -1247,10 +1255,17 @@ describe('pressure attacks the build, not the health bar (GDD §11)', () => {
     for (const p of w.engine.programs) p.actionId = null;
     w.engine.recompile();
     const integrityBefore = w.player.integrity;
-    w.spawnEnemy('leech', w.player.x + 25, w.player.y, 'void');
+    const leech = w.spawnEnemy('leech', w.player.x + 25, w.player.y, 'void')!;
     // Long enough that it must be touching repeatedly: one hit decays away
     // inside two seconds, so a Leech that fires once is a Leech with no teeth.
-    for (let i = 0; i < 60 * 8; i++) w.advance(NO_INPUT);
+    //
+    // The director keeps working through all eight seconds, and anything else it
+    // sends can land an ordinary hit — which would be read here as the Leech
+    // drawing blood. Keep the room to the two of them.
+    for (let i = 0; i < 60 * 8; i++) {
+      for (const e of w.enemies) if (e !== leech) e.alive = false;
+      w.advance(NO_INPUT);
+    }
     expect(w.budget.heat).toBeGreaterThan(10);
     expect(w.player.integrity).toBe(integrityBefore);
   });
@@ -1471,3 +1486,242 @@ describe('Rng', () => {
     }
   });
 });
+
+describe('a detonation gets to finish (GDD §20.1)', () => {
+  type PushFx = (
+    kind: string,
+    hue: string,
+    x: number,
+    y: number,
+    radius: number,
+    points: number[],
+    life: number,
+  ) => void;
+
+  function fxWorld(seed: string): { w: World; push: PushFx } {
+    const w = new World({ seed, axiomId: 'ignition' });
+    w.enemies.length = 0;
+    w.fx.length = 0;
+    const push = (w as unknown as { pushFx: PushFx }).pushFx.bind(w) as PushFx;
+    return { w, push };
+  }
+
+  it('drops a detonation landing on top of a young identical one', () => {
+    const { w, push } = fxWorld('crowd');
+    push('burst', 'thermal', 1000, 1000, 120, [], 0.22);
+    push('burst', 'thermal', 1010, 1005, 120, [], 0.22);
+    expect(w.fx.length).toBe(1);
+
+    // A different hue is a different thing happening and always gets through.
+    push('burst', 'voltaic', 1000, 1000, 120, [], 0.22);
+    // So does one far enough away to be about somewhere else.
+    push('burst', 'thermal', 1400, 1000, 120, [], 0.22);
+    expect(w.fx.length).toBe(3);
+  });
+
+  it('never lets the survivor outlive its own life', () => {
+    // The regression this guards is a real one that shipped for a commit: a
+    // merge that refreshed the survivor produced a ring which sat on the player
+    // forever. Suppression must leave the survivor completely alone.
+    const { w, push } = fxWorld('immortal');
+    push('burst', 'thermal', 1000, 1000, 120, [], 0.22);
+    const born = w.fx[0]!;
+    for (let i = 0; i < 60; i++) {
+      push('burst', 'thermal', 1000, 1000, 120, [], 0.22);
+      w.advance(NO_INPUT);
+    }
+    expect(born.life).toBeLessThanOrEqual(0.22);
+    expect(w.fx.some((f) => f === born && f.alive)).toBe(false);
+  });
+
+  it('under a cascade, no detonation is cut off part-way', () => {
+    // The failure looked like "explosions appear and disappear". The draw never
+    // changed — the budget started evicting live effects, and a ring killed at
+    // 70% life has grown from 0.80r to 0.96r of its 1.08r finish, which is not
+    // an explosion, it is a flash.
+    //
+    // So this asserts the thing the picture actually needs: once an effect is
+    // accepted it is never removed while it still has life left. Scattered
+    // positions on purpose, so crowd suppression cannot be what carries the
+    // test — this is the budget's policy under a rate no suppression can help.
+    const { w, push } = fxWorld('cascade');
+    const rng = new Rng('cascade-positions');
+    const lastSeen = new Map<number, number>();
+    let truncated = 0;
+    let peak = 0;
+
+    for (let tick = 0; tick < 120; tick++) {
+      for (let i = 0; i < 120; i++) {
+        push('burst', 'thermal', rng.next() * 4000, rng.next() * 3000, 110, [], 0.22);
+      }
+      w.advance(NO_INPUT);
+      peak = Math.max(peak, w.fx.length);
+      const present = new Set<number>();
+      for (const f of w.fx) {
+        present.add(f.id);
+        lastSeen.set(f.id, f.life);
+      }
+      for (const [id, life] of lastSeen) {
+        if (present.has(id)) continue;
+        // Gone from the pool. Fine if it had run out; a truncation if it had not.
+        if (life > SIM_DT * 1.5) truncated++;
+        lastSeen.delete(id);
+      }
+    }
+
+    expect(peak).toBeLessThanOrEqual(TUNABLE.maxFx);
+    expect(lastSeen.size).toBeGreaterThan(0);
+    expect(truncated).toBe(0);
+  });
+});
+
+describe('a room announces itself once (GDD §21b)', () => {
+  it('fires on first entry, never for the starting room, never twice', () => {
+    const w = new World({ seed: 'breach', axiomId: 'ignition' });
+    const levels = w.arena.levels ?? [];
+    expect(levels.length).toBeGreaterThan(1);
+
+    // Drains, like the app does — the sim accumulates cues and the audio layer
+    // empties them, so counting has to do the same or every check sees history.
+    const drain = (): number => {
+      const n = w.audioCues.filter((c) => c.kind === 'breach').length;
+      w.audioCues.length = 0;
+      return n;
+    };
+
+    // The room the run starts in is your own front door.
+    w.advance(NO_INPUT);
+    expect(drain()).toBe(0);
+
+    // Cross into the second room. The gate is not involved — the roster is
+    // positional, so standing in it is what makes its families legal.
+    const next = levels[1]!;
+    w.player.x = next.x + next.w / 2;
+    w.player.y = next.y + next.h / 2;
+    w.advance(NO_INPUT);
+    expect(drain()).toBe(1);
+
+    // Staying there is not a second breach.
+    for (let i = 0; i < 30; i++) w.advance(NO_INPUT);
+    expect(drain()).toBe(0);
+
+    // Neither is going back and returning.
+    const first = levels[0]!;
+    w.player.x = first.x + first.w / 2;
+    w.player.y = first.y + first.h / 2;
+    w.advance(NO_INPUT);
+    w.player.x = next.x + next.w / 2;
+    w.player.y = next.y + next.h / 2;
+    w.advance(NO_INPUT);
+    expect(drain()).toBe(0);
+  });
+});
+
+describe('the wave transform chain (GDD §12.5)', () => {
+  type Via = readonly unknown[];
+  type ApplyVia = (enemy: string, via: Via) => { enemy: string; affixes: number; hpScale: number };
+
+  function chainOf(seed: string, threat: number): ApplyVia {
+    const w = new World({ seed, axiomId: 'ignition' });
+    w.enemies.length = 0;
+    w.threat = threat;
+    return (w as unknown as { applyVia: ApplyVia }).applyVia.bind(w) as ApplyVia;
+  }
+
+  const rosterOf = (id: string) => {
+    const w = new World({ seed: 'x', axiomId: 'ignition' });
+    const level = (w.arena.levels ?? []).find((l) => l.id === id)!;
+    return {
+      op: 'roster' as const,
+      tier: level.roster.tier,
+      families: level.roster.families,
+    };
+  };
+
+  it('bounds escalation by the roster it was handed, not by the player position', () => {
+    // The whole reason the chain carries a resolved roster instead of looking
+    // one up: a gate siege standing in The Heap fields The Sink's garrison.
+    const apply = chainOf('rooms', 40);
+    const heap = apply('mote', [rosterOf('heap'), { op: 'escalate', mode: 'best', ceiling: true }]);
+    const sink = apply('mote', [rosterOf('sink'), { op: 'escalate', mode: 'best', ceiling: true }]);
+    expect(NODE_TIER(heap.enemy)).toBeLessThan(NODE_TIER(sink.enemy));
+    expect(NODE_TIER(sink.enemy)).toBe(rosterOf('sink').tier);
+  });
+
+  it("'best' takes the hardest legal variant; 'roll' is a mix", () => {
+    const apply = chainOf('modes', 40);
+    const via = (mode: 'roll' | 'best') => [rosterOf('sink'), { op: 'escalate', mode }];
+    // best is deterministic: same answer every time.
+    const bests = new Set(Array.from({ length: 20 }, () => apply('mote', via('best')).enemy));
+    expect(bests.size).toBe(1);
+    // roll is a texture: at high Threat it must produce more than one answer.
+    const rolls = new Set(Array.from({ length: 60 }, () => apply('mote', via('roll')).enemy));
+    expect(rolls.size).toBeGreaterThan(1);
+  });
+
+  it("'ceiling' ignores Threat where a lead does not", () => {
+    const early = chainOf('reach', 0);
+    const sink = rosterOf('sink');
+    const lead = early('mote', [sink, { op: 'escalate', mode: 'best', lead: 2 }]);
+    const ceiling = early('mote', [sink, { op: 'escalate', mode: 'best', ceiling: true }]);
+    // At Threat 0 a Cache reaches almost nothing; a siege reaches the ceiling.
+    expect(NODE_GATE(lead.enemy)).toBeLessThanOrEqual(2);
+    expect(NODE_GATE(ceiling.enemy)).toBeGreaterThan(NODE_GATE(lead.enemy));
+  });
+
+  it('accumulates affixes and the one honest multiplier', () => {
+    const apply = chainOf('affix', 10);
+    const plain = apply('mote', []);
+    expect(plain.affixes).toBe(0);
+    expect(plain.hpScale).toBe(1);
+    const hard = apply('mote', [{ op: 'affix', count: 2 }, { op: 'toughen', hp: 4 }]);
+    expect(hard.affixes).toBe(2);
+    expect(hard.hpScale).toBe(4);
+  });
+});
+
+describe('called waves are data (GDD §12.5)', () => {
+  it('every shipped event names a pool the registry knows', () => {
+    for (const e of WAVE_EVENTS) {
+      expect(e.parcels.length).toBeGreaterThan(0);
+      if (e.pool) expect(WAVE_BY_ID.get(e.pool)).toBeDefined();
+    }
+  });
+
+  it('the gate siege is the hardest thing on the list', () => {
+    const total = (id: string): number => {
+      const e = WAVE_EVENTS.find((w) => w.id === id)!;
+      return e.parcels.reduce((sum, p) => sum + p.share, 0);
+    };
+    // The ordering the design asks for: siege > cache > beacon.
+    expect(total('gate_siege')).toBeGreaterThan(total('cache_menagerie'));
+    expect(total('cache_menagerie')).toBeLessThan(total('beacon_call') + 1);
+    const affixes = (id: string): number => {
+      const e = WAVE_EVENTS.find((w) => w.id === id)!;
+      return e.via.reduce((n, v) => (v.op === 'affix' ? n + v.count : n), 0);
+    };
+    expect(affixes('gate_siege')).toBeGreaterThan(affixes('cache_menagerie'));
+    expect(affixes('beacon_call')).toBe(0);
+  });
+
+  it('a parcel schedule arrives spread out, not all at once', () => {
+    const siege = WAVE_EVENTS.find((w) => w.id === 'gate_siege')!;
+    const ats = siege.parcels.map((p) => p.at);
+    expect(ats).toEqual([...ats].sort((a, b) => a - b));
+    // Nothing at zero: brushing the ring must not start the boss wave.
+    expect(ats[0]).toBeGreaterThan(0);
+    // And it is a score, not a ramp — at least one parcel smaller than the one
+    // before it, or the "lull then wall" shape is not actually in the data.
+    const dips = siege.parcels.filter((p, i) => i > 0 && p.share < siege.parcels[i - 1]!.share);
+    expect(dips.length).toBeGreaterThan(0);
+  });
+});
+
+/** The Threat a substitute unlocks at; 0 for a base creature. */
+function NODE_GATE(id: string): number {
+  return ENEMY_BY_ID.get(id)?.substitutes?.fromThreat ?? 0;
+}
+/** The roster tier a substitute belongs to; 0 for a base creature. */
+function NODE_TIER(id: string): number {
+  return ENEMY_BY_ID.get(id)?.substitutes?.tier ?? 0;
+}

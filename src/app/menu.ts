@@ -23,6 +23,7 @@ import { renderPrimer } from './primer';
 import { applyEffects, presetFor, VIEW_EFFECTS, VIEW_PRESETS } from './visual';
 import type { Audio } from '../audio/audio';
 import { MusicLab } from './lab';
+import { WaveLab } from './wavelab';
 
 /**
  * §19.1–19.3 — five sections, not six tabs.
@@ -34,13 +35,14 @@ import { MusicLab } from './lab';
  * Library and Codex are both "what exists and what I have met", so they are one
  * section with sub-tabs rather than two headings competing for the same shelf.
  */
-type Pane = 'play' | 'codex' | 'music' | 'settings' | 'credits';
+type Pane = 'play' | 'codex' | 'music' | 'waves' | 'settings' | 'credits';
 type CodexTab = 'primer' | 'library' | 'enemies';
 
 const PANES: { id: Pane; label: string }[] = [
   { id: 'play', label: 'PLAY' },
   { id: 'codex', label: 'CODEX' },
   { id: 'music', label: 'MUSIC' },
+  { id: 'waves', label: 'WAVES' },
   { id: 'settings', label: 'SETTINGS' },
   { id: 'credits', label: 'CREDITS' },
 ];
@@ -74,6 +76,8 @@ export class TitleScreen {
   private axiomId = 'ignition';
   private resolve: ((r: SetupResult) => void) | null = null;
   private readonly lab: MusicLab;
+  /** §12.5 — the tuning surface for called waves. */
+  private readonly waveLab = new WaveLab();
   private readonly onKey = (ev: KeyboardEvent): void => this.handleKey(ev);
 
   constructor(
@@ -200,6 +204,8 @@ export class TitleScreen {
           ? this.renderCodexPane()
           : this.pane === 'music'
             ? this.renderMusic()
+            : this.pane === 'waves'
+              ? this.waveLab.render()
             : this.pane === 'settings'
               ? this.renderSettings()
               : this.renderCredits()) +
@@ -291,6 +297,7 @@ export class TitleScreen {
     });
 
     if (this.pane === 'music') this.lab.bind(panel, () => this.render());
+    if (this.pane === 'waves') this.waveLab.bind(panel, () => this.render());
   }
 
   private renderSetup(): string {

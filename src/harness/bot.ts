@@ -216,7 +216,7 @@ function hueShare(world: World, hue: string): number {
   for (const p of world.engine.programs) {
     if (!p.actionId) continue;
     const node = NODE_BY_ID.get(p.actionId);
-    if (!node || node.kind !== 'action') continue;
+    if (node?.kind !== 'action') continue;
     total++;
     if (node.hue === hue) matching++;
   }

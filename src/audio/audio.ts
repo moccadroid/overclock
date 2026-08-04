@@ -30,17 +30,24 @@ import type { Hue } from '../sim/types';
 import { Clock } from './clock';
 import {
   bass,
+  breach,
+  gate,
   gatedChord,
   hat,
   hurt,
   kick,
+  meltdown,
   motif,
   perc,
   playHue,
   playPart,
   semiHz,
+  siegeDrone,
+  siegeHit,
+  siegeScream,
   stab,
   sub,
+  summons,
   ui as uiVoice,
   type UiSound,
   type VoiceCtx,
@@ -78,6 +85,36 @@ const HUE_COLOUR: Record<Hue, number> = { thermal: 1, voltaic: 1.45, void: 0.7 }
 
 /** §18 — techno moves in 16-bar phrases. Everything automated rides this. */
 const PHRASE_BARS = 16;
+
+/**
+ * §21b.7 — what the siege screams, as a line rather than a note.
+ *
+ * The first version played one pitch on alternate bars and the report was that
+ * it got annoying, which is exactly right: the ear files an unchanging shape as
+ * furniture after about three repeats, however ugly the timbre is, and after
+ * that it is only irritating. Something that keeps *moving* stays a threat.
+ *
+ * Degrees are semitones over the drone's root, from the Phrygian set — root, ♭2,
+ * ♭3, 4, 5, ♭6, ♭7. Every interval in it is minor or flat, so the line can
+ * wander without ever landing anywhere consoling, and the ♭2 against the drone
+ * is the same semitone rub the Meltdown and breach voices are built on.
+ *
+ * Lengths and directions vary per entry, and the walk is ten long against a hold
+ * that fires it maybe eight times, so it does not come back round inside one
+ * gate. `up` is not a strict alternation, because that is itself a pattern.
+ */
+const SIEGE_CRIES: readonly { deg: number; len: number; up: boolean }[] = [
+  { deg: 0, len: 3.4, up: true },
+  { deg: 8, len: 2.0, up: false },
+  { deg: 1, len: 4.2, up: true },
+  { deg: 5, len: 1.6, up: true },
+  { deg: 3, len: 2.8, up: false },
+  { deg: 10, len: 1.4, up: false },
+  { deg: 1, len: 5.0, up: true },
+  { deg: 7, len: 2.2, up: false },
+  { deg: 3, len: 3.0, up: true },
+  { deg: 0, len: 6.0, up: false },
+];
 /**
  * How many bars before the melodic material is reselected. Two phrases at 112
  * BPM is a little over a minute — long enough that the line is a hook rather
@@ -122,6 +159,8 @@ export interface AudioState {
   stalled: boolean;
   /** §13.2 — Meltdown detunes, dirties, and finally moves the tempo. */
   meltdown: number;
+  /** §21b.7 — 0, or how full the gate bar the player is holding is. */
+  siege: number;
 }
 
 /**
@@ -188,6 +227,54 @@ export class Audio {
   private punchBus!: GainNode;
   /** Bass, pad, hats. Ducked on every kick. */
   private musicBus!: GainNode;
+  /**
+   * §21b.7 — the siege score's own bus.
+   *
+   * Separate from `musicBus` because the two cross-fade: while a gate is held
+   * the run's arrangement goes away entirely and this takes the room. Routed to
+   * musicGroup rather than through musicFilter, since the phrase filter is part
+   * of the arrangement's shape and the siege is not participating in that.
+   */
+  private siegeBus!: GainNode;
+  /**
+   * The run's whole arrangement, on one fader, so the siege can take it away.
+   *
+   * It has to be its own node. The first version scaled `musicBus.gain`
+   * directly and the fade did not happen: `duck()` calls
+   * `cancelScheduledValues` on that param every kick and ramps it back to full,
+   * so the sidechain and the crossfade were writing the same AudioParam and the
+   * sidechain won four times a bar. Two things that both want to control a
+   * level need two nodes.
+   */
+  private scoreTrim!: GainNode;
+  /**
+   * §21b.7 — the drone, on its own node, so the kick can duck it.
+   *
+   * This is the whole reason the beat pounds instead of merely being loud. The
+   * drone saturates the low band by design, which is the same band the kick
+   * lives in — turning the kick up just adds to a wall that is already there.
+   * Ducking the drone for a fifth of a beat under each hit carves a hole for it
+   * instead, and the hole is what the ear hears as impact. Standard sidechain,
+   * and the one technique this genre is actually built on.
+   */
+  private siegeDroneBus!: GainNode;
+  /**
+   * §21b.7 — the siege's treatment of the Engine's own sounds.
+   *
+   * Every shot, kill and pickup keeps firing during a hold: they are the
+   * player's feedback and muting them would be a lie about what their build is
+   * doing. But they belong to the run's soundtrack, and during a siege the run's
+   * soundtrack is gone — unprocessed they sit on top of the drone sounding like
+   * a different game leaking in.
+   *
+   * So they get bent rather than removed. A resonant bandpass throws away the
+   * top and the bottom, and a ring modulator tears what is left. Same reason the
+   * drone uses one: the graph has no saturation stage and is not getting one,
+   * and ring modulation is harsher than a waveshaper anyway. Crossfaded, so
+   * nothing changes outside a hold.
+   */
+  private fxDry!: GainNode;
+  private fxWet!: GainNode;
   private engineBus!: GainNode;
   /**
    * The guarantee. GDD §18.4.
@@ -235,6 +322,7 @@ export class Audio {
     heat: 0,
     stalled: false,
     meltdown: 0,
+    siege: 0,
   };
 
   private pending: AudioCue[] = [];
@@ -281,6 +369,21 @@ export class Audio {
   private lastPartHz: number[] = [];
   /** Smoothed, so the arrangement never flickers between layers frame to frame. */
   private smoothed = 0;
+  /**
+   * How far the siege score has taken over, smoothed.
+   *
+   * Smoothed rather than switched for the obvious reason and one less obvious
+   * one: `siege` is a hold bar that drains, so it flickers around zero every
+   * time the player steps a pixel outside the ring, and a hard gate on it would
+   * chop the whole soundtrack in and out.
+   */
+  private siegeMix = 0;
+  /** Where in SIEGE_CRIES the line has got to. */
+  private siegeCry = 0;
+  /** §13.2 — so the arrangement is rebuilt once when the phase turns. */
+  private wasMeltdown = false;
+  /** A pending plan that may land on the next bar instead of the next phrase. */
+  private pendingUrgent = false;
 
   get enabled(): boolean {
     return this.ctx !== null && !this.muted;
@@ -381,9 +484,15 @@ export class Audio {
     this.uiLevel.gain.value = this.sfxVolume;
     this.uiLevel.connect(this.master);
 
+    // Everything the run's arrangement makes goes through here, and nothing the
+    // siege makes does.
+    this.scoreTrim = ctx.createGain();
+    this.scoreTrim.gain.value = 1;
+    this.scoreTrim.connect(this.musicGroup);
+
     this.punchBus = ctx.createGain();
     this.punchBus.gain.value = 0.95;
-    this.punchBus.connect(this.musicGroup);
+    this.punchBus.connect(this.scoreTrim);
 
     // Chrome sits *after* the limiter, and it is the only thing that does.
     //
@@ -407,11 +516,19 @@ export class Audio {
     this.musicFilter.type = 'lowpass';
     this.musicFilter.frequency.value = 2200;
     this.musicFilter.Q.value = 1.1;
-    this.musicFilter.connect(this.musicGroup);
+    this.musicFilter.connect(this.scoreTrim);
 
     this.musicBus = ctx.createGain();
     this.musicBus.gain.value = 0.9;
     this.musicBus.connect(this.musicFilter);
+
+    this.siegeBus = ctx.createGain();
+    this.siegeBus.gain.value = 0;
+    this.siegeBus.connect(this.musicGroup);
+
+    this.siegeDroneBus = ctx.createGain();
+    this.siegeDroneBus.gain.value = 1;
+    this.siegeDroneBus.connect(this.siegeBus);
 
     // Dotted eighth is the classic dub delay: it lands between the beats rather
     // than on them, so the echoes read as counter-rhythm instead of as a
@@ -433,7 +550,36 @@ export class Audio {
 
     this.engineBus = ctx.createGain();
     this.engineBus.gain.value = 0.5;
-    this.engineBus.connect(this.sfxGroup);
+
+    // Two paths out of the engine bus, summed. Dry is what the game has always
+    // sounded like; wet is what it sounds like from inside a siege.
+    this.fxDry = ctx.createGain();
+    this.fxDry.gain.value = 1;
+    this.engineBus.connect(this.fxDry).connect(this.sfxGroup);
+
+    const fxBand = ctx.createBiquadFilter();
+    fxBand.type = 'bandpass';
+    // Narrow and high. Everything below about 700Hz and above 3kHz goes, which
+    // takes the body out of a shot and leaves the part that sounds broken.
+    fxBand.frequency.value = 1500;
+    fxBand.Q.value = 2.4;
+
+    // Ring modulation at 180Hz — low enough that the sidebands land inside the
+    // band the filter kept, so it reads as the sound being torn rather than as a
+    // second tone playing underneath it.
+    const fxRing = ctx.createGain();
+    fxRing.gain.value = 0;
+    const fxMod = ctx.createOscillator();
+    fxMod.type = 'square';
+    fxMod.frequency.value = 180;
+    const fxModDepth = ctx.createGain();
+    fxModDepth.gain.value = 1;
+    fxMod.connect(fxModDepth).connect(fxRing.gain);
+    fxMod.start();
+
+    this.fxWet = ctx.createGain();
+    this.fxWet.gain.value = 0;
+    this.engineBus.connect(fxBand).connect(fxRing).connect(this.fxWet).connect(this.sfxGroup);
 
     this.clock = new Clock(ctx);
     this.clock.onStep((step) => this.onStep(step.time, step.index, step.count));
@@ -562,6 +708,9 @@ export class Audio {
     const next = arrange({
       ...input,
       variation: this.variation,
+      // §13.2 — the phase is not the caller's business to remember. The audio
+      // layer already has it every frame, so it merges it in here.
+      meltdown: this.state.meltdown,
       // What is playing right now, so a variation pass moves off it rather than
       // reselecting the same cell and calling it a change.
       avoid: {
@@ -653,6 +802,7 @@ export class Audio {
       dominant: 'thermal',
       heat: 0,
       stalled: false,
+      siege: 0,
       meltdown: 0,
     };
     if (this.clock) this.clock.bpm = 112;
@@ -672,7 +822,7 @@ export class Audio {
     this.adopt(plan);
     this.setParts(parts);
     this.smoothed = intensity;
-    this.state = { intensity, dominant: 'thermal', heat: 0, stalled: false, meltdown: 0 };
+    this.state = { intensity, dominant: 'thermal', heat: 0, stalled: false, meltdown: 0, siege: 0 };
     if (this.clock) this.clock.bpm = 112;
   }
 
@@ -712,9 +862,47 @@ export class Audio {
     // Meltdown and wrong as a continuous ramp: a groove needs a stable pulse,
     // and the earlier build moved it every frame. Tempo now sits at 112 and only
     // Meltdown — a once-per-run, permanent, announced event — shifts it.
+    // §13.2 — act three gets its own material, once, on the edge.
+    //
+    // The arrangement is only rebuilt when the Engine changes, so without this
+    // the harmony clamp would not land until the next Draft — which could be
+    // minutes, or never. Guarded on the edge rather than the value: rebuilding
+    // every frame would thrash the phrase-boundary handover.
+    if (state.meltdown > 0 && !this.wasMeltdown) {
+      this.wasMeltdown = true;
+      if (this.lastInput) {
+        this.setEngine(this.lastInput);
+        // and it does not wait sixteen bars for a phrase boundary. That rule
+        // exists so an arrangement change lands where the ear expects one, and
+        // it is right for a Draft — but Meltdown is announced, once, with five
+        // seconds of stinger over it, and half a minute later is not "the music
+        // changed when the containment failed".
+        this.pendingUrgent = true;
+      }
+    }
+
     this.clock.bpm = 112 + state.meltdown * 12;
     this.delay.delayTime.setTargetAtTime((60 / this.clock.bpm) * 0.75, this.ctx.currentTime, 0.2);
     this.echoSend.gain.setTargetAtTime(this.plan.echo, this.ctx.currentTime, 0.3);
+
+    // §21b.7 — the handover, on two faders that belong to nobody else.
+    const wanted = state.siege > 0.01 ? 1 : 0;
+    this.siegeMix += (wanted - this.siegeMix) * 0.06;
+    if (this.siegeMix < 0.002) this.siegeMix = 0;
+    const now = this.ctx.currentTime;
+    this.siegeBus.gain.setTargetAtTime(this.siegeMix, now, 0.25);
+    // All the way out.
+    //
+    // This kept 12% of the run's arrangement underneath, on the theory that a
+    // trace of it made the siege read as something happening *to* your music. In
+    // practice the two are in unrelated keys over unrelated pulses, and the
+    // residue was mud under the drone — and the drone is the point.
+    this.scoreTrim.gain.setTargetAtTime(1 - this.siegeMix, now, 0.25);
+    // The Engine's own sounds bend rather than vanish, and not all the way: a
+    // little dry left in keeps a shot legible as *your shot*, which is the one
+    // thing this must not take away.
+    this.fxDry.gain.setTargetAtTime(1 - this.siegeMix * 0.72, now, 0.25);
+    this.fxWet.gain.setTargetAtTime(this.siegeMix * 1.35, now, 0.25);
 
     // Busier means dirtier, not louder. Drive climbs with intensity while the
     // trim comes down to pay for the layers that intensity added.
@@ -726,6 +914,45 @@ export class Audio {
       // that must feel like an interruption feel like part of the song.
       if (cue.kind === 'hurt') {
         hurt(this.voice(this.engineBus), this.ctx.currentTime, 0.9);
+        continue;
+      }
+      // §21b.5 — the gate. Played the instant it is asked for and never
+      // quantised: it is six seconds long and its own event, so snapping its
+      // start to a sixteenth would only delay it, and nothing about it is
+      // rhythmic enough for the grid to help.
+      if (cue.kind === 'gate') {
+        gate(this.voice(this.engineBus), this.ctx.currentTime, 6.4, 0.62);
+        continue;
+      }
+      // §21b — a breach: the room past the gate noticing you. Unquantised for
+      // the same reason as the other two, and short, because unlike Meltdown it
+      // is not a state you are now in, it is a thing that just happened.
+      if (cue.kind === 'breach') {
+        breach(this.voice(this.engineBus), this.ctx.currentTime, 3.2, 0.66);
+        continue;
+      }
+      // §12.3 / §12.4 — a wave the player asked for. The Cache's is a tier up:
+      // same voice, affixes on everything, and it says so before they arrive.
+      // §21b.7 — the gate refusing you. The heaviest thing in the game short of
+      // Meltdown, because unlike everything else on this list it is not an
+      // arrival, it is the next twenty-two seconds announcing themselves.
+      if (cue.kind === 'siege') {
+        summons(this.voice(this.engineBus), this.ctx.currentTime, 4.2, 0.78, true);
+        continue;
+      }
+      if (cue.kind === 'summons' || cue.kind === 'hardened') {
+        summons(
+          this.voice(this.engineBus),
+          this.ctx.currentTime,
+          cue.kind === 'hardened' ? 3.4 : 2.6,
+          cue.kind === 'hardened' ? 0.62 : 0.5,
+          cue.kind === 'hardened',
+        );
+        continue;
+      }
+      // §13.2 — Meltdown, likewise. Five seconds and its own event.
+      if (cue.kind === 'meltdown') {
+        meltdown(this.voice(this.engineBus), this.ctx.currentTime, 5, 0.7);
         continue;
       }
       if (cue.kind === 'level' || cue.kind === 'overheat') {
@@ -787,7 +1014,10 @@ export class Audio {
     if (index === 0) {
       this.bar = Math.floor(count / 16);
       // A new arrangement lands on a phrase boundary and nowhere else.
-      if (this.pendingPlan && this.bar % PHRASE_BARS === 0) this.adopt(this.pendingPlan);
+      if (this.pendingPlan && (this.pendingUrgent || this.bar % PHRASE_BARS === 0)) {
+        this.pendingUrgent = false;
+        this.adopt(this.pendingPlan);
+      }
       this.maybeVary();
     }
     const tones = this.chordTones();
@@ -813,6 +1043,10 @@ export class Audio {
     const claimed = this.claim > 0;
     if (claimed) this.claim--;
 
+    const bleak = this.state.meltdown > 0;
+
+
+
     const kickStep = step(cells.kick, count);
     if (kickStep) {
       kick(punch, at, 0.95 * kickStep.gain, plan.kickVoice);
@@ -832,10 +1066,20 @@ export class Audio {
       perc(punch, at, (0.5 + 0.3 * i) * percStep.gain, plan.percVoice);
     }
 
+    // §13.2 — Meltdown takes layers away rather than adding them.
+    //
+    // The instinct is to pile on for act three, and it is the wrong one: this
+    // genre gets frightening when the room empties, not when it fills. The hats,
+    // the stab and the lead are what make the track *pleasant* — they are the
+    // groove and the tune. Strip them and what is left is a kick, a sub, a
+    // bassline and one held minor chord, which is the same room with nobody
+    // enjoying it. The kick never goes; the pulse is what the player is
+    // surviving to.
+
     const hatStep = step(cells.hats, count);
     const drive = i * plan.drive;
-    if (hatStep && drive > 0.08) {
-      hat(music, swung, 0.8 * hatStep.gain, hatStep.open);
+    if (hatStep && drive > 0.08 && (!bleak || index % 8 === 4)) {
+      hat(music, swung, (bleak ? 0.45 : 0.8) * hatStep.gain, hatStep.open);
     }
 
     // The bassline walks the chord: cell values index into its tones, so the
@@ -860,7 +1104,7 @@ export class Audio {
     // The stab. Enters a quarter of the way into a phrase and is most of what
     // reads as melody in this genre.
     const stabStep = step(cells.stab, count);
-    if (stabStep && (phrase > 0.24 || i > 0.5)) {
+    if (stabStep && !bleak && (phrase > 0.24 || i > 0.5)) {
       stab(music, swung, tones, 0.9 * stabStep.gain, plan.stabVoice);
       if (plan.echo > 0.01) {
         stab(this.voice(this.echoSend), swung, tones, 0.9 * stabStep.gain, plan.stabVoice);
@@ -876,7 +1120,7 @@ export class Audio {
     // and it costs nothing but a transposition.
     const answering = phrase >= 0.5 && phrase < 0.875;
     const resting = phrase >= 0.875;
-    const motifStep = resting ? null : step(cells.motif, count);
+    const motifStep = resting || bleak ? null : step(cells.motif, count);
     if (motifStep && !motifStep.hold && (phrase > 0.48 || i > 0.65)) {
       const hz = semiHz(tone(tones, motifStep) + (answering ? 36 : 24));
       motif(music, swung, hz, 0.9, plan.leadVoice, this.lastLeadHz);
@@ -889,12 +1133,106 @@ export class Audio {
     // The chord, chopped onto the grid. A sustained pad swells with no
     // relationship to the beat, which is what made the old one sound ethereal
     // and disconnected; harmony in this genre is carried rhythmically.
-    if (i > 0.3 && index % 8 === 4) {
+    // Under Meltdown it stops being chopped and is held across the bar instead.
+    // A gated chord is a rhythm part; the same notes sustained are a drone, and
+    // with the lead gone that is the only thing left carrying the harmony.
+    if (bleak) {
+      if (index === 0) gatedChord(music, swung, tones, 0.6, beat * 3.6, plan.padWave);
+    } else if (i > 0.3 && index % 8 === 4) {
       gatedChord(music, swung, tones, 0.85, beat * 0.45, plan.padWave);
     }
 
     this.playParts(music, swung, index, tones);
+    this.siegeStep(at, index, beat);
     this.flush(at, i);
+  }
+
+  /**
+   * §21b.7 — the siege score.
+   *
+   * A different piece of music, not a treatment of the existing one. That was
+   * the lesson of the version before this: sagging the arrangement's pitch and
+   * tempo was reported as "the music doesn't change", and it was right — a
+   * modification of something familiar reads as the familiar thing, slightly
+   * off. A replacement reads as a replacement.
+   *
+   * Three ideas and nothing else. A drone with no chord movement, because
+   * harmony implies somewhere to go. A blunt four-on-the-floor that doubles as
+   * the bar fills, because the only structure here is time passing. And
+   * something screaming above both from a third of the way in, inharmonic so it
+   * never becomes a tune you could hum.
+   *
+   * It ignores the key, the plan and the phrase entirely. The run's arrangement
+   * is a thing your Engine wrote; this is not yours.
+   */
+  private siegeStep(at: number, index: number, beat: number): void {
+    if (this.siegeMix < 0.01 || !this.ctx) return;
+    const v = this.voice(this.siegeBus);
+    const s = this.state.siege;
+
+    // The beat. Four on the floor, all four the same size: BAM BAM BAM BAM,
+    // with nothing in between to soften it. The offbeat eighths are gone and
+    // every downbeat is a full hit rather than one in two — anything else was
+    // filling the gaps that make it pound.
+    //
+    // The gain still looks small for "pounding" and it still is not the lever.
+    // Weight comes from the voice — a steeper pitch drop, a sub under the
+    // landing, a noise crack on the transient — and from the duck below, which
+    // is what actually makes it land: the drone owns the low band, so the kick
+    // has to be given a hole in it rather than shouted over the top of it.
+    if (index % 4 === 0) {
+      siegeHit(v, at, 0.62, true);
+      this.duckDrone(at, beat);
+    }
+
+    // The floor. Retriggered a bar at a time so it never quite decays, on a
+    // fixed low E that has nothing to do with whatever key the run is in.
+    if (index === 0) {
+      // The gains here are small and the reason is worth writing down: a
+      // resonant filter with Q up to 14 is an amplifier. Four oscillators
+      // through it at what looked like a sane 0.5 rendered at peak 3.3 — more
+      // than twice the loudest one-shot in the game — which would have pinned
+      // the limiter flat for twenty-two seconds and ducked everything else to
+      // nothing. Measured, not guessed.
+      siegeDrone({ ctx: this.ctx, out: this.siegeDroneBus }, at, beat * 4.2, 41.2, 0.28 + s * 0.12, s);
+    }
+
+    // And the line above it, from a third of the way in. Each entry is a
+    // different pitch, length and direction, and the walk is long enough that it
+    // does not come back round inside a single hold.
+    //
+    // The gains are large because a bandpass at Q 3.2 over an FM carrier throws
+    // most of the energy away — at what looked like a reasonable 0.13 this
+    // rendered at peak 0.05 and was inaudible.
+    if (index === 8 && s > 0.3) {
+      const cry = SIEGE_CRIES[this.siegeCry % SIEGE_CRIES.length]!;
+      this.siegeCry++;
+      // Two octaves clear of the drone, so it is a separate register rather than
+      // a melody the bass could be accompanying.
+      siegeScream(v, at, beat * cry.len * 0.6, semiHz(cry.deg + 4) * 8, 0.13 + s * 0.15, s, cry.up);
+    }
+    // Past three quarters it stops waiting its turn and answers itself.
+    if (index === 4 && s > 0.75) {
+      const cry = SIEGE_CRIES[(this.siegeCry + 3) % SIEGE_CRIES.length]!;
+      siegeScream(v, at, beat * 1.5, semiHz(cry.deg + 11) * 8, 0.11 + s * 0.12, s, !cry.up);
+    }
+  }
+
+  /**
+   * §21b.7 — sidechain the drone to the siege kick.
+   *
+   * Down to a quarter on the hit, back over the next two fifths of a beat. Fast
+   * enough that it reads as the kick punching a hole rather than as the bass
+   * being turned down, which is the entire difference between a sidechain and a
+   * fault. It is also why the kick's own gain can stay modest: the impact comes
+   * from the low end getting out of the way, not from the hit being louder than
+   * the thing it competes with.
+   */
+  private duckDrone(at: number, beat: number): void {
+    const g = this.siegeDroneBus.gain;
+    g.cancelScheduledValues(at);
+    g.setValueAtTime(0.26, at);
+    g.linearRampToValueAtTime(1, at + beat * 0.42);
   }
 
   /**
@@ -949,7 +1287,7 @@ export class Audio {
   private playParts(music: VoiceCtx, swung: number, index: number, tones: number[]): void {
     for (let p = 0; p < this.parts.length; p++) {
       const part = this.parts[p];
-      if (!part || !part.pattern[index]) {
+      if (!part?.pattern[index]) {
         if (part) this.lastPartHz[p] = 0;
         continue;
       }

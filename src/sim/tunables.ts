@@ -311,6 +311,22 @@ export const TUNABLE = {
    * live effects and cost 65ms a frame, 58 of them inside the bloom composite.
    */
   maxFx: 300,
+  /**
+   * §20.1 — how close a live detonation has to be for a new one of the same hue
+   * to be redundant, as a fraction of the new one's radius.
+   *
+   * Half a radius is deep overlap: the two rings are the same ring. Raising it
+   * starts eating detonations that were telling you about a different place.
+   */
+  fxCrowdRadius: 0.5,
+  /**
+   * ...and how much life the one already there must have left, as a fraction.
+   *
+   * Above half, so the ring on screen is still early enough to read as the
+   * explosion the suppressed one would have drawn. A ring that is nearly done
+   * is not standing in for anything, and the new detonation is allowed.
+   */
+  fxCrowdLife: 0.55,
 
   // ---- §21b.4 the Cooler ----
   /**
@@ -330,13 +346,52 @@ export const TUNABLE = {
   cacheChannelTime: 2.2,
   cacheInterval: 75,
   cacheFromTime: 45,
-  /** How big the menagerie is, as a share of the director's density target. */
-  cacheWaveFraction: 1.15,
+  /**
+   * How big the menagerie is, as a share of the director's density target.
+   *
+   * Came down from 1.15 once the gate siege existed to be the hard thing. A
+   * Cache is a purchase — you get a card and pay for it — and it was landing at
+   * more than a full density target of hardened enemies on top of the flow,
+   * which is siege weight for a box you walk past.
+   */
+  cacheWaveFraction: 0.8,
   /**
    * The ring the menagerie arrives in, around the Cache itself. Wide, because
    * everything landing on top of you is a shove rather than a fight, and it
    * should read as the *place* waking up.
    */
+  /**
+   * §12.4 — how far past the run's current Threat a Cache may reach when it
+   * hardens a wave, in Threat points.
+   *
+   * This is the whole "strong upgrade, not a jump to the ceiling" dial. At 0 a
+   * Cache spawns exactly the wave you were already fighting and the price is
+   * fake; far too high and it is the old behaviour, where minute two and minute
+   * twenty opened the same box. The room's roster tier caps it regardless.
+   */
+  cacheThreatLead: 2,
+  /**
+   * §21b.7 — the gate siege. Holding a gate is the boss wave.
+   *
+   * `siegeDensity` is a multiple of the director's live target *per pulse*, and
+   * the number that matters is the sum across the hold, not this. Six pulses
+   * under the ramp below come to roughly 1.9x the live target — a wall, arriving
+   * in instalments, on top of the normal flow and made of things wearing two
+   * affixes each at four times HP.
+   *
+   * It was briefly 1.1 *per pulse*, which is the same sentence read wrong: 1,643
+   * hardened enemies for one gate at Threat 20, which is not a wall, it is the
+   * entity cap. Tune the total, then divide.
+   */
+  siegeInterval: 4,
+  siegeDensity: 0.42,
+  /** The first pulse's share of a full one. The bar filling is the escalation. */
+  siegeOpening: 0.45,
+  /** Two, where a Cache rolls one. Drawn without replacement from a pool of 3. */
+  siegeAffixes: 2,
+  /** Wide, and wider than a Cache's: they come from all around the doorway. */
+  siegeRingMin: 460,
+  siegeRingMax: 1000,
   cacheRingMin: 380,
   cacheRingMax: 900,
   /**
@@ -345,8 +400,10 @@ export const TUNABLE = {
    * pressed the button, the card is already in their hand, and the elite version
    * of a wave has to be *significantly* stronger or the price was fake.
    */
-  hardenedHp: 4,
-  hardenedDamage: 1.6,
+  // §12.5 — hardenedHp and hardenedDamage used to live here. They are `toughen`
+  // ops in waveevents.json now, next to the wave that chooses them, because a
+  // single global "how much harder is hardened" only ever fits one wave and the
+  // game has four.
 
   /**
    * §21b.6 — how far behind the player an enemy may fall before it is moved to

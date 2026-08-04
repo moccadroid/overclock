@@ -1,0 +1,132 @@
+[
+  {
+    "id": "beacon_call",
+    "parcels": [
+      {
+        "at": 0,
+        "share": 0.83,
+        "spread": 90
+      }
+    ],
+    "via": [
+      {
+        "op": "escalate",
+        "mode": "roll"
+      },
+      {
+        "op": "enrich"
+      }
+    ],
+    "cue": "summons",
+    "description": "The Beacon pulls the next wave in early. One parcel, from the usual edge origins, at the substitution level the run has already earned. It is not harder than the flow, it is the flow arriving now."
+  },
+  {
+    "id": "cache_menagerie",
+    "parcels": [
+      {
+        "at": 0,
+        "share": 0.8,
+        "ring": [
+          380,
+          900
+        ],
+        "spread": 60
+      }
+    ],
+    "via": [
+      {
+        "op": "escalate",
+        "mode": "best",
+        "lead": 2
+      },
+      {
+        "op": "affix",
+        "count": 1
+      },
+      {
+        "op": "toughen",
+        "hp": 4,
+        "damage": 1.6
+      }
+    ],
+    "cue": "hardened",
+    "description": "A purchase. One ring around the box you opened, two Threat points past the wave you were already fighting, one affix each. Opt-in difficulty, so the toughen is honest."
+  },
+  {
+    "id": "gate_siege",
+    "parcels": [
+      {
+        "at": 2,
+        "share": 0.2,
+        "ring": [
+          460,
+          1000
+        ],
+        "spread": 70
+      },
+      {
+        "at": 6,
+        "share": 0.24,
+        "ring": [
+          460,
+          1000
+        ],
+        "spread": 70
+      },
+      {
+        "at": 10,
+        "share": 0.28,
+        "ring": [
+          420,
+          950
+        ],
+        "spread": 70
+      },
+      {
+        "at": 13,
+        "share": 0.14,
+        "ring": [
+          700,
+          1200
+        ],
+        "spread": 70
+      },
+      {
+        "at": 17,
+        "share": 0.42,
+        "ring": [
+          360,
+          820
+        ],
+        "spread": 70
+      },
+      {
+        "at": 20.5,
+        "share": 0.62,
+        "ring": [
+          300,
+          760
+        ],
+        "spread": 70
+      }
+    ],
+    "via": [
+      {
+        "op": "escalate",
+        "mode": "best",
+        "ceiling": true
+      },
+      {
+        "op": "affix",
+        "count": 2
+      },
+      {
+        "op": "toughen",
+        "hp": 4,
+        "damage": 1.6
+      }
+    ],
+    "cue": "siege",
+    "description": "The map refusing you. Six parcels across a twenty-two second hold, totalling ~1.9x the live target, at the destination room's ceiling regardless of Threat. `at` is seconds of BAR, not of wall clock \u2014 the schedule rewinds when the hold drains, so brushing the circle on the way past costs nothing and letting go gives ground back. Note the dip at thirteen seconds and the tightening rings: the lull is where the player believes they have it, and the last two parcels land close."
+  }
+]

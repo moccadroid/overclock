@@ -6,7 +6,7 @@
  * use their own RNG and their own clock — a replay reproduces the run, not the
  * exact scatter of one enemy's debris.
  */
-import { Graphics } from 'pixi.js';
+import type { Graphics } from 'pixi.js';
 import { VISUAL } from '../visual';
 
 interface Segment {

@@ -24,7 +24,11 @@ import {
   type EventType,
   type GameEvent,
   type BiomeDef,
+  type LevelDef,
   type Hue,
+  type WaveEventDef,
+  type WaveParcel,
+  type WaveTransform,
   type RuinRect,
   type WaveTemplateDef,
 } from './types';
@@ -33,6 +37,8 @@ import {
   ENEMY_BY_ID,
   TRIGGER_BY_ID,
   VARIANTS_BY_FAMILY,
+  WAVE_BY_ID,
+  WAVE_EVENT_BY_ID,
   WAVES,
   arena as getArena,
   axiom as getAxiom,
@@ -78,6 +84,15 @@ export interface Enemy extends SpatialItem {
   facing: number;
   /** §12.4 — came out of a Cache: tougher, and it hits harder. */
   hardened?: boolean;
+  /**
+   * §12.5 — the contact-damage multiplier this enemy arrived with.
+   *
+   * Was a `hardened ? TUNABLE.hardenedDamage : 1` at the point of impact, which
+   * meant the number lived a long way from the wave that chose it and only one
+   * wave could ever choose it. It is a `toughen` op's `damage` now, so it is in
+   * waveevents.json next to the HP it travels with.
+   */
+  damageScale?: number;
   /** Interceptor: fractional progress toward the next meal (area hits). */
   mealProgress?: number;
   /** Interceptor: how many projectiles it has eaten. */
@@ -100,6 +115,15 @@ export interface Enemy extends SpatialItem {
 
 /** §10.3 — Wardens and Meltdown-tier enemies roll one or two of these. */
 export type EliteAffix = 'volatile' | 'phasing' | 'anchored';
+
+/** §12.5 — what a transform chain produces: one enemy, fully specified. */
+interface SpawnRecipe {
+  enemy: string;
+  affixes: number;
+  hpScale: number;
+  damageScale: number;
+  enriched: boolean;
+}
 
 export interface Projectile extends SpatialItem {
   id: number;
@@ -285,6 +309,14 @@ export interface Terminal extends SpatialItem {
   gateId?: string;
   /** Whether the hardened wave has already been called. */
   woken?: boolean;
+  /**
+   * §21b.7 — how many siege parcels this gate has delivered.
+   *
+   * Rewinds with `progress`, because the schedule is the bar rather than a clock
+   * of its own. There is deliberately no timer beside it: a second clock would
+   * let the siege and the thing it is supposed to be describing disagree.
+   */
+  siegePulse?: number;
 }
 
 /**
@@ -362,6 +394,10 @@ const POI_EFFECTS: Record<TerminalKind, (w: World, t: Terminal) => void> = {
     w.stats.beaconsChannelled++;
     w.threat += TUNABLE.beaconThreatBump;
     w.spawnWaveNow(true);
+    // §12.3 — you called this wave in. Until now that was silent, so the one
+    // thing on the map you channel *in order to be attacked* announced itself
+    // with nothing at all.
+    w.cueNow('summons', 'voltaic');
     w.mark('beacon', 'beacon');
   },
   cache: (w, t) => w.openCacheNow(t.x, t.y),
@@ -438,7 +474,20 @@ export interface DamageSource {
  * is what lets audio drop voices, lag, or be muted without touching the run.
  */
 export interface AudioCue {
-  kind: 'fire' | 'kill' | 'pickup' | 'hurt' | 'overheat' | 'convert' | 'level';
+  kind:
+    | 'fire'
+    | 'kill'
+    | 'pickup'
+    | 'hurt'
+    | 'overheat'
+    | 'convert'
+    | 'level'
+    | 'gate'
+    | 'breach'
+    | 'summons'
+    | 'hardened'
+    | 'siege'
+    | 'meltdown';
   hue: Hue;
   /** Cascade depth — pitch climbs with it, so a deep cascade audibly rises. */
   depth: number;
@@ -493,7 +542,10 @@ interface PendingSpawn {
   hue: Hue;
   enriched: boolean;
   /** §12.4 — from a Cache: arrives wearing an elite affix. */
-  hardened: boolean;
+  /** §10.3 — how many elite affixes to roll. Zero for an ordinary arrival. */
+  affixes: number;
+  hpScale: number;
+  damageScale: number;
   alive: boolean;
 }
 
@@ -829,6 +881,8 @@ export class World {
 
   private eventQueue: GameEvent[] = [];
   private scheduled: ScheduledFire[] = [];
+  /** Enemy ids already claimed by this execution's Split copies. Reused. */
+  private readonly splitTaken: number[] = [];
   private pendingSpawns: PendingSpawn[] = [];
   private grid: SpatialGrid<Enemy>;
   private flow: FlowField;
@@ -841,6 +895,46 @@ export class World {
    */
   ruins: RuinRect[] = [];
   readonly openBiomes = new Set<string>();
+  /**
+   * Levels the player has already stood in. Seeded with the starting room in
+   * `constructor`, so the run does not announce the room it begins in.
+   */
+  private readonly breached = new Set<string>();
+  /**
+   * §21b — the levels you may see. The first is unlocked at the start; a gate
+   * adds the one it opens.
+   *
+   * The camera clamps to the union of these, which is what makes a gate a
+   * *reveal*: until it is held, the next room is not merely walled off, it is
+   * off camera. `openBiomes` doubles as this set — a gate's `opens` names a
+   * level now — so one unlock mechanism serves both.
+   */
+  get unlockedLevels(): readonly LevelDef[] {
+    const levels = this.arena.levels ?? [];
+    if (levels.length === 0) return [];
+    return levels.filter((l, i) => i === 0 || this.openBiomes.has(l.id));
+  }
+
+  /**
+   * The level the player is standing in, or the first if none contains them.
+   *
+   * Named `currentLevel` because `level` is already the Engine's XP level, and
+   * two different "levels" on one object is how you write a bug you cannot see.
+   */
+  get currentLevel(): LevelDef | null {
+    const levels = this.arena.levels ?? [];
+    for (const l of levels) {
+      if (
+        this.player.x >= l.x &&
+        this.player.x <= l.x + l.w &&
+        this.player.y >= l.y &&
+        this.player.y <= l.y + l.h
+      ) {
+        return l;
+      }
+    }
+    return levels[0] ?? null;
+  }
   private readonly flowSample = { x: 0, y: 0 };
   private nextId = 1;
   private eventsThisTick = 0;
@@ -941,6 +1035,7 @@ export class World {
     if (this.magnetCooldown > 0) this.magnetCooldown = Math.max(0, this.magnetCooldown - dt);
     this.updateFx(dt);
     this.updateTerminals(input, dt);
+    this.updateBreach();
     this.updateMeltdown(dt);
     this.updateDirector(dt);
     if (this.surgeTime > 0) this.surgeTime = Math.max(0, this.surgeTime - dt);
@@ -1235,6 +1330,17 @@ export class World {
 
     const hue = def.hue;
 
+    // §5.5 Split — copies take the *next* target, not the same one.
+    //
+    // Every instance used to aim at grid.nearest() from the same origin at the
+    // same speed, so three copies flew as one pixel and Split was a damage
+    // multiplier with no picture. Handing each copy the next-nearest enemy makes
+    // it what the card implies: a card that covers a crowd. Cleared per
+    // execution, and reset when the targets run out so a Split into a single
+    // enemy still puts all of it into that enemy.
+    const spread = def.primitive === 'projectile' && instances > 1 ? this.splitTaken : null;
+    if (spread) spread.length = 0;
+
     // Actions happen where the triggering event happened, unless they say
     // otherwise — see ActionDef.origin. This is what lets a cascade travel.
     const atPlayer = def.origin === 'player';
@@ -1262,7 +1368,7 @@ export class World {
 
       switch (def.primitive) {
         case 'projectile':
-          this.spawnProjectile(def.id, damage, depth, index, ox, oy, compiled.ctx, corrupted, hue);
+          this.spawnProjectile(def.id, damage, depth, index, ox, oy, compiled.ctx, corrupted, hue, spread);
           break;
         case 'burst':
           this.doBurst(
@@ -1330,10 +1436,20 @@ export class World {
     ctx: FireContext,
     corrupted: boolean,
     hue: Hue,
+    spread: number[] | null = null,
   ): void {
     if (this.projectiles.length >= SAFETY.maxEntities) return;
     const def = ACTION_BY_ID.get(actionId)!;
-    const target = this.grid.nearest(x, y);
+    let target = spread
+      ? this.grid.nearest(x, y, Infinity, (e) => spread.includes(e.id))
+      : this.grid.nearest(x, y);
+    // Out of fresh targets: start the list again rather than firing into empty
+    // space. Three copies into one enemy is still three copies into one enemy.
+    if (!target && spread && spread.length > 0) {
+      spread.length = 0;
+      target = this.grid.nearest(x, y);
+    }
+    if (target && spread) spread.push(target.id);
     let dx: number;
     let dy: number;
     if (target) {
@@ -1862,10 +1978,10 @@ export class World {
         // The neighbourhood wakes the moment you commit, not when you finish.
         if (t.gateId && !t.woken) {
           t.woken = true;
-          this.openCache(t.x, t.y);
           this.pendingDrafts = Math.max(0, this.pendingDrafts - 1);
           this.mark('gate', `${t.kind} contested`);
         }
+        if (t.gateId) this.updateSiege(t);
         t.progress += dt / t.channelTime;
         if (t.progress >= 1) {
           t.alive = false;
@@ -1878,6 +1994,81 @@ export class World {
         const drain = t.holdRadius ? 0.25 : 0.6;
         t.progress = Math.max(0, t.progress - (dt / t.channelTime) * drain);
       }
+    }
+  }
+
+  /**
+   * §21b.7 — the gate is the fight. Holding it is the boss wave.
+   *
+   * For a while this called `openCache` on commit, which meant the hardest
+   * moment in the map was, literally, a Cache — same code, same weight, and it
+   * even spent one of your queued Drafts to do it. Twenty-two seconds of holding
+   * ground deserves better than a menagerie you can also buy from a box.
+   *
+   * So: pulses, not one wave, and each one bigger than the last. The escalation
+   * is the mechanic — the bar filling is also the threat rising, and the last
+   * five seconds are meant to be the worst five seconds of the run so far. Three
+   * things separate it from a Cache:
+   *
+   *   **It comes from the other side.** The roster is the *destination* room's,
+   *   not the one you are standing in. What resists you is what is behind the
+   *   door, which is why the fight gets harder the deeper the map goes without a
+   *   single number being tuned per gate.
+   *
+   *   **Threat does not gate it.** A Cache reaches a few points past the current
+   *   wave; a siege reaches the room's ceiling immediately. You are not being
+   *   sold a tier, you are being refused entry.
+   *
+   *   **Everything wears two affixes**, where a Cache's menagerie wears one.
+   */
+  private updateSiege(t: Terminal): void {
+    const gate = (this.arena.gates ?? []).find((g) => g.id === t.gateId);
+    if (!gate) return;
+    const event = WAVE_EVENT_BY_ID.get('gate_siege');
+    if (!event) return;
+
+    // The siege *is* the bar.
+    //
+    // The first version ran the parcels off a wall clock that started the moment
+    // the player was inside the circle. A gate needs no keypress — standing
+    // there is the input — so walking across the ring on the way past started
+    // the boss wave, and a test caught the bot doing exactly that: four parcels
+    // of hardened enemies for a gate it never held, and a hundred things on the
+    // map that nothing had asked for.
+    //
+    // Reading `progress` instead fixes both halves. Brushing the circle earns a
+    // couple of percent and no parcel, and because progress *drains* when you
+    // leave, so does the siege: walk away and the schedule rewinds with the bar,
+    // which is the honest reading of "you stopped taking this ground". Resuming
+    // re-earns the parcels you rewound past.
+    const held = t.progress * t.channelTime;
+    const due = event.parcels.filter((p) => p.at <= held).length;
+    const delivered = t.siegePulse ?? 0;
+    if (due <= delivered) {
+      if (due < delivered) t.siegePulse = due;
+      return;
+    }
+    const next = delivered;
+    t.siegePulse = delivered + 1;
+
+    // The room behind the door decides what comes through it. This is the whole
+    // reason `via` is the caller's to resolve: the event says "the ceiling of
+    // whatever roster you were handed", and the gate is the only thing that
+    // knows the roster in question is not the one the player is standing in.
+    const into = (this.arena.levels ?? []).find((l) => l.id === gate.opens);
+    this.callWave({
+      event,
+      x: t.x,
+      y: t.y,
+      via: this.rosterVia(into ?? this.currentLevel),
+      only: next,
+    });
+
+    // One announcement, on the first parcel. After that the wave is the warning.
+    if (next === 0) {
+      this.pushFx('rupture', 'void', t.x, t.y, 520, [], 0.9);
+      if (event.cue) this.cue(event.cue, 'void', 0, 1);
+      this.mark('gate', `${gate.name} contested`);
     }
   }
 
@@ -1919,17 +2110,54 @@ export class World {
       this.pushTerminal(poi.kind, x, y, poi.channelTime, poi.requiresStillness);
     }
 
+    // A Magnet in the doorway. You have been holding this circle for twenty-two
+    // seconds while the room emptied around you — the shards from all of it are
+    // scattered behind you, and the next room is in front. This is the one
+    // moment in a run where "leave with everything you earned" is a thing the
+    // game can simply hand you, so it does. Bypasses the drop cadence entirely:
+    // it is a reward for the gate, not a roll on a kill.
+    // In the doorway, not on the terminal. The circle you hold and the wall that
+    // opens are different places — dropping the reward on the circle puts it
+    // behind you the moment you walk through.
+    const b = gate.barrier;
+    this.dropPickup('magnet', b.x + b.w / 2, b.y + b.h / 2, 'voltaic', 1);
+
     this.pushFx('rupture', 'voltaic', gate.x, gate.y, 900, [], 1.2);
-    this.cue('level', 'voltaic', 0, 1);
+    this.cue('gate', 'voltaic', 0, 1);
     this.mark('gate', `${gate.name} open`);
     this.stats.gatesOpened++;
   }
 
-  /** §21b.6 — is this point inside a biome that has not been opened? */
+  /**
+   * Remove ruins matching a predicate, and tell the field.
+   *
+   * Exists for tests that need genuinely open ground: a test about pathing
+   * should assert pathing, not whichever corner of the shipped arena happened to
+   * be empty when it was written.
+   */
+  clearRuins(match: (r: RuinRect) => boolean): void {
+    this.ruins = this.ruins.filter((r) => !match(r));
+    this.flow.rebuild(this.ruins);
+    this.flow.update(this.player.x, this.player.y, true);
+  }
+
+  /**
+   * §21b.6 — is this point in ground the player has not opened?
+   *
+   * Levels as well as biomes. A locked level is not only walled off and off
+   * camera, nothing arrives in it either — otherwise the room you are about to
+   * be shown has already been fought in, and the reveal shows you a mess.
+   */
   isSealed(x: number, y: number): boolean {
     for (const b of this.arena.biomes ?? []) {
       if (this.openBiomes.has(b.id)) continue;
       if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return true;
+    }
+    const levels = this.arena.levels ?? [];
+    for (let i = 1; i < levels.length; i++) {
+      const l = levels[i]!;
+      if (this.openBiomes.has(l.id)) continue;
+      if (x >= l.x && x <= l.x + l.w && y >= l.y && y <= l.y + l.h) return true;
     }
     return false;
   }
@@ -1971,6 +2199,10 @@ export class World {
       const spot = poi.atLandmark
         ? { x: this.arena.extractX, y: this.arena.extractY }
         : this.findOpenSpot(poi.ring[0], poi.ring[1]);
+      // §12.4 — Extract stands at a fixed landmark, and that landmark is in the
+      // last level. It must not appear before the room it stands in is open, or
+      // the run's goal is a terminal behind a wall.
+      if (poi.atLandmark && this.isSealed(spot.x, spot.y)) continue;
       this.pushTerminal(poi.kind, spot.x, spot.y, poi.channelTime, poi.requiresStillness);
     }
   }
@@ -2023,6 +2255,11 @@ export class World {
     this.openGate(t);
   }
 
+  /** Called by POI_EFFECTS, which only sees the public surface. */
+  cueNow(kind: AudioCue['kind'], hue: Hue): void {
+    this.cue(kind, hue, 0, 1);
+  }
+
   /** Called by POI_EFFECTS. See spawnWave. */
   spawnWaveNow(enriched: boolean): void {
     this.spawnWave(enriched);
@@ -2035,38 +2272,21 @@ export class World {
     const composition = this.composition;
     if (!composition) return;
 
-    const count = Math.round(this.targetAlive * TUNABLE.cacheWaveFraction);
-    for (let i = 0; i < count; i++) {
-      const entry = this.rng.pickWeighted(
-        composition.entries,
-        composition.entries.map((e) => e.count),
-      );
-      // Around the Cache, in a wide ring, rather than from the usual edge
-      // origins. It should read as the *place* waking up — you are standing in
-      // the middle of what you just opened, which is the whole drama of it.
-      const a = (i / count) * Math.PI * 2 + this.rng.next() * 0.4;
-      const r = this.rng.range(TUNABLE.cacheRingMin, TUNABLE.cacheRingMax);
-      this.queueSpawn(
-        this.harden(entry.enemy),
-        clamp(cx + pcos(a) * r, 40, this.arena.width - 40),
-        clamp(cy + psin(a) * r, 40, this.arena.height - 40),
-        60,
-        this.rng.next() * 0.8,
-        true,
-        true,
-      );
+    const event = WAVE_EVENT_BY_ID.get('cache_menagerie');
+    if (event) {
+      this.callWave({
+        event,
+        x: cx,
+        y: cy,
+        via: this.rosterVia(this.currentLevel),
+      });
     }
     this.pushFx('rupture', 'void', this.player.x, this.player.y, 320, [], 0.6);
     this.cue('level', 'void', 0, 1);
+    // ...and the fight you bought with it. The chime above is the card; this is
+    // the composition coming back hardened, and it was inaudible before.
+    this.cue('hardened', 'void', 0, 1);
     this.mark('cache', 'cache opened');
-  }
-
-  /** The hardest variant a family has, for the Cache. */
-  private harden(enemy: string): string {
-    const options = VARIANTS_BY_FAMILY.get(familyOf(enemy));
-    if (!options || options.length === 0) return enemy;
-    // Rarest first in the registry, and the rarest is the nastiest.
-    return options[0]!.id;
   }
 
   /**
@@ -2186,6 +2406,31 @@ export class World {
     );
   }
 
+  /**
+   * §21b — the moment a room's garrison becomes real.
+   *
+   * A level's roster is read off `currentLevel`, which is positional: the tick
+   * the player crosses the threshold, that room's families and its tier become
+   * legal and the director starts building waves out of things the run has never
+   * seen. Nothing announced it, because nothing *happened* — there is no spawn
+   * to hang it on, only a rule quietly changing underneath the director.
+   *
+   * So this is the announcement. Once per room, on first entry, and never for
+   * the room the run starts in: walking through your own front door is not an
+   * event.
+   */
+  private updateBreach(): void {
+    const level = this.currentLevel;
+    if (!level || this.breached.has(level.id)) return;
+    const first = this.breached.size === 0;
+    this.breached.add(level.id);
+    // Seeded on the first tick rather than in the constructor: `currentLevel`
+    // reads the player's position, and the player does not exist yet that early.
+    if (first) return;
+    this.cue('breach', 'void', 0, 1);
+    this.mark('gate', `${level.name ?? level.id} entered`);
+  }
+
   // --------------------------------------------------------------- meltdown
 
   /** §13.2 — at 20:00 the build phase ends. This is not a fail state, it is act three. */
@@ -2195,6 +2440,10 @@ export class World {
       if (this.time < meltdownAt) return;
       this.phase = 'meltdown';
       this.mark('meltdown', 'MELTDOWN');
+      // The one moment in a run that changes what the run *is*. It gets its own
+      // sound, unquantised, for the same reason the gate does: it is an event,
+      // not a hit, and snapping it to a sixteenth would only make it late.
+      this.cue('meltdown', 'void', 0, 1);
       return;
     }
 
@@ -2505,21 +2754,66 @@ export class World {
     // player feeding bloom forever, and a merged ring is not what a detonation
     // looks like anyway. The budget and the batched draw were doing the work;
     // the merge was only doing damage.
+    // §20.1 — and *before* the budget: do not spawn what carries nothing.
+    //
+    // The budget alone produced a second bug, reported as "the explosions do not
+    // explode any more, they just appear and disappear". The draw never changed;
+    // the arrival rate did. A detonation lives about a fifth of a second, so 300
+    // slots hold roughly 1,400 arrivals a second — and a Nova cascade lands
+    // several times that. Past the line, every push evicts one that is still
+    // more than half alive, and a ring that is killed at 55% has grown from
+    // 0.80r to 0.93r of its 1.08r finish. It never visibly expands. Worse, a
+    // burst waits up to 45ms for the sixteenth before it is drawn at all, so the
+    // shortest-lived ones were being evicted having never been drawn once.
+    //
+    // Evicting harder cannot fix that — the fix is to stop the flood upstream.
+    // A detonation landing on top of a detonation of the same hue that is still
+    // young adds no information: it is the same ring in the same place. Dropping
+    // the newcomer keeps the arrival rate under the budget, so the effects that
+    // do exist live their whole life and animate.
+    //
+    // Note what this deliberately does *not* do. It never touches the survivor.
+    // A previous attempt merged the two and gave the survivor a fresh life and
+    // the larger radius, which made a stream of hits on one spot into a ring
+    // that never died, sat on the player and fed bloom forever. The survivor is
+    // read-only here. Nothing can become immortal.
+    if (kind === 'burst') {
+      const near = radius * TUNABLE.fxCrowdRadius;
+      const nearSq = near * near;
+      for (const f of this.fx) {
+        if (!f.alive || f.kind !== 'burst' || f.hue !== hue) continue;
+        if (f.life < f.maxLife * TUNABLE.fxCrowdLife) continue;
+        if (f.radius < radius * 0.8) continue;
+        const dx = f.x - x;
+        const dy = f.y - y;
+        if (dx * dx + dy * dy <= nearSq) return;
+      }
+    }
+
+    // Full means full: reclaim a dead slot if there is one, otherwise refuse.
+    //
+    // This used to evict the live effect closest to finishing, on the reasoning
+    // that "the newest detonation is the one the player is looking at". That is
+    // true when the budget is a rare edge and false when it is being hit a
+    // thousand times a second — and past the line, every arrival cut short an
+    // effect that was still 70% alive (measured, and now a test). The policy
+    // turned every detonation into a flash to make room for the next flash.
+    //
+    // Refusing instead means whatever is accepted animates all the way through.
+    // Nothing is starved for long: 300 slots at a fifth of a second each free up
+    // well over a thousand times a second, so a refusal lasts a few frames at
+    // the very worst. A representative sample of detonations that visibly
+    // explode is a better picture than all of them appearing and vanishing.
     if (this.fx.length >= TUNABLE.maxFx) {
-      let worst = -1;
-      let worstLife = Infinity;
+      let dead = -1;
       for (let i = 0; i < this.fx.length; i++) {
-        const f = this.fx[i]!;
-        if (!f.alive) {
-          worst = i;
+        if (!this.fx[i]!.alive) {
+          dead = i;
           break;
         }
-        if (f.life < worstLife) {
-          worstLife = f.life;
-          worst = i;
-        }
       }
-      if (worst >= 0) this.fx.splice(worst, 1);
+      if (dead < 0) return;
+      this.fx.splice(dead, 1);
     }
     this.fx.push({
       id: this.nextId++,
@@ -2622,7 +2916,7 @@ export class World {
     // HUD ever showed it — and it punished exactly the focused single-hue builds
     // the class stats now exist to reward. A tax nobody can see is not a
     // decision, it is a worse number.
-    let resisted = damage;
+    const resisted = damage;
 
     // What actually landed, for the per-row DPS readout: an overkill counts only
     // for what the target had left.
@@ -3101,7 +3395,7 @@ export class World {
       return;
     }
     if (def.contactDamage > 0) {
-      this.hurtPlayer(def.contactDamage * (e.hardened ? TUNABLE.hardenedDamage : 1), {
+      this.hurtPlayer(def.contactDamage * (e.damageScale ?? 1), {
         id: def.id,
         label: def.name,
         enemyId: def.id,
@@ -3627,19 +3921,32 @@ export class World {
       if (this.wardenTimer <= 0) {
         this.wardenTimer = TUNABLE.wardenInterval;
         const origin = this.pickSpawnOrigin();
-        this.queueSpawn('warden', origin.x, origin.y, 40, 0, false);
+        this.queueSpawn('warden', origin.x, origin.y, 40, 0, this.ambientVia());
       }
     }
 
     this.sustainPressure(dt);
   }
 
+  /**
+   * A rehearsal room: almost no enemies, so a thing can be *looked at*.
+   *
+   * Gates, level transitions and structure are all things you have to reach
+   * before you can judge them, and reaching them through a live horde means
+   * every attempt is a different fight. This is not a difficulty setting — it is
+   * off unless a URL flag asks for it, it is never on in a scored run, and it
+   * scales the director rather than disabling it so the game still behaves like
+   * itself while you stand there and watch.
+   */
+  sandbox = false;
+
   /** Live density the director is actively trying to hold. */
   get targetAlive(): number {
-    return Math.min(
+    const target = Math.min(
       TUNABLE.maxAliveHard,
       TUNABLE.targetAliveBase + this.threat * TUNABLE.targetAlivePerThreat,
     );
+    return this.sandbox ? Math.max(1, Math.round(target * 0.06)) : target;
   }
 
   /**
@@ -3724,7 +4031,7 @@ export class World {
       template.entries.map((e) => e.count),
     );
     const origin = this.pickSpawnOrigin();
-    this.queueSpawn(entry.enemy, origin.x, origin.y, entry.spread, delay, enriched);
+    this.queueSpawn(entry.enemy, origin.x, origin.y, entry.spread, delay, this.ambientVia(enriched));
   }
 
   /**
@@ -3769,17 +4076,25 @@ export class World {
         // §12.4 — the Cache's price. One affix each, rolled from the same pool
         // the Warden uses, so a menagerie is genuinely the wave you already know
         // wearing everything that makes it worse.
-        if (s.hardened) {
+        // §10.3 — affixes, drawn without replacement. The same affix twice is
+        // one affix and a wasted roll, and the pool is only three deep. A Cache
+        // rolls one, a gate siege rolls two.
+        if (s.affixes > 0) {
           const pool: EliteAffix[] = ['volatile', 'phasing', 'anchored'];
-          e.affixes.push(pool[this.rng.int(pool.length)]!);
-          // Opt-in difficulty is the one place a straight multiplier is honest:
-          // the player pressed the button and already holds the card. Reported
-          // as "everything died instantly" the first time, because a hardened
-          // Mote was still a one-hit Mote.
-          e.maxHp *= TUNABLE.hardenedHp;
-          e.hp = e.maxHp;
+          for (let n = 0; n < Math.min(s.affixes, pool.length); n++) {
+            e.affixes.push(pool.splice(this.rng.int(pool.length), 1)[0]!);
+          }
           e.hardened = true;
         }
+        // §10.4's exception, and the only one. See the `toughen` op: opt-in
+        // difficulty is the one place a straight multiplier is honest, because
+        // the player pressed the button. Reported as "everything died instantly"
+        // the first time, because a hardened Mote was still a one-hit Mote.
+        if (s.hpScale !== 1) {
+          e.maxHp *= s.hpScale;
+          e.hp = e.maxHp;
+        }
+        if (s.damageScale !== 1) e.damageScale = s.damageScale;
       }
     }
     if (due) {
@@ -3803,12 +4118,87 @@ export class World {
     const composition = this.composition;
     if (!composition) return;
 
-    const burst = Math.round(this.targetAlive * TUNABLE.compositionArrivalFraction * 1.5);
-    for (let i = 0; i < burst; i++) {
-      this.spawnFromComposition(composition, enriched, this.rng.next() * TUNABLE.waveArrivalSpread);
-    }
+    void composition;
+    void enriched;
+    this.callWave({
+      event: WAVE_EVENT_BY_ID.get('beacon_call')!,
+      x: this.player.x,
+      y: this.player.y,
+      via: this.rosterVia(this.currentLevel),
+    });
     const origin = this.pickSpawnOrigin();
     this.emit({ type: 'wave', depth: 0, x: origin.x, y: origin.y });
+  }
+
+  /**
+   * §12.5 — run one enemy through a wave's transform chain.
+   *
+   * This is `rosterAllows -> substitute -> harden` made visible and reorderable.
+   * Those were three private methods called in a fixed order inside the spawner,
+   * each reaching into `this` for the room and the Threat, which is why every
+   * called wave had to be its own loop with its own copies of the same logic.
+   *
+   * Order matters and is the caller's to choose. Roster first is almost always
+   * right — remap into the room's vocabulary, *then* climb the ladder within it,
+   * or you spend the climb on a family that gets swapped out afterwards.
+   */
+  private applyVia(enemy: string, via: readonly WaveTransform[]): SpawnRecipe {
+    this.escalateTier = Infinity;
+    const out: SpawnRecipe = {
+      enemy,
+      affixes: 0,
+      hpScale: 1,
+      damageScale: 1,
+      enriched: false,
+    };
+    for (const step of via) {
+      switch (step.op) {
+        case 'roster':
+          this.escalateTier = step.tier;
+          out.enemy = this.viaRoster(out.enemy, step.tier, step.families, step.events);
+          break;
+        case 'escalate':
+          out.enemy = this.viaEscalate(out.enemy, step);
+          break;
+        case 'affix':
+          out.affixes += step.count;
+          break;
+        case 'toughen':
+          out.hpScale *= step.hp;
+          out.damageScale *= step.damage ?? 1;
+          break;
+        case 'enrich':
+          out.enriched = true;
+          break;
+      }
+    }
+    return out;
+  }
+
+  /**
+   * §21b — remap anything this room has never met.
+   *
+   * A wave template asks for a Charger; if the room's families do not include
+   * chargers, it gets the base creature of a family that *is* here instead. The
+   * template stays legal everywhere and the room decides what it means, which is
+   * why a forty-Mote swarm can remain in the pool forever: a crisis on the first
+   * level, a breather on the last, and the pacing costs nothing.
+   *
+   * Events — Suppressors, Lancers — are exempt. They are the room's punctuation
+   * and carry their own live caps.
+   */
+  private viaRoster(
+    enemy: string,
+    tier: number,
+    families: readonly string[],
+    events?: readonly string[],
+  ): string {
+    void tier;
+    if (families.length === 0) return enemy;
+    const family = familyOf(enemy);
+    if (families.includes(family)) return enemy;
+    if (events?.includes(enemy)) return enemy;
+    return families[this.rng.int(families.length)]!;
   }
 
   /**
@@ -3821,21 +4211,170 @@ export class World {
    * player can see the difference and answer it.
    *
    * Data-driven from the variant's own `substitutes` block, so a new variant
-   * enters the game by existing. Rolled once per spawn, so a wave is a mix
-   * rather than a switch.
+   * enters the game by existing.
+   *
+   * `roll` gives each eligible variant its authored share, ramped in over the
+   * band above `fromThreat`, so the first Shielded Mote arrives alone rather
+   * than as a whole wave of them — a texture. `best` takes the hardest legal one
+   * outright, which is what a called wave wants, because a called wave is a
+   * statement and a statement should not be a dice roll.
+   *
+   * The tier ceiling applies in both. It is the roster's, not this method's, and
+   * a room can never field something it has never heard of (§21b) — that rule is
+   * what makes the level structure mean anything.
    */
-  private substitute(enemy: string): string {
+  private viaEscalate(
+    enemy: string,
+    step: { mode: 'roll' | 'best'; lead?: number; ceiling?: boolean },
+  ): string {
     const options = VARIANTS_BY_FAMILY.get(familyOf(enemy));
-    if (!options) return enemy;
+    if (!options || options.length === 0) return enemy;
+    const tier = this.escalateTier;
+    const reach = step.ceiling ? Infinity : this.threat + (step.lead ?? 0);
+
+    if (step.mode === 'roll') {
+      for (const variant of options) {
+        const rule = variant.substitutes!;
+        if ((rule.tier ?? 1) > tier) continue;
+        if (reach < rule.fromThreat) continue;
+        const ramp = Math.min(1, (reach - rule.fromThreat) / 4);
+        if (this.rng.chance(rule.share * ramp)) return variant.id;
+      }
+      return enemy;
+    }
+
+    let best = enemy;
+    let bestAt = -1;
     for (const variant of options) {
       const rule = variant.substitutes!;
-      if (this.threat < rule.fromThreat) continue;
-      // Ramped in over the band above `fromThreat`, so the first Shielded Mote
-      // arrives alone rather than as a whole wave of them.
-      const ramp = Math.min(1, (this.threat - rule.fromThreat) / 4);
-      if (this.rng.chance(rule.share * ramp)) return variant.id;
+      if ((rule.tier ?? 1) > tier) continue;
+      if (rule.fromThreat > reach) continue;
+      if (rule.fromThreat <= bestAt) continue;
+      bestAt = rule.fromThreat;
+      best = variant.id;
     }
-    return enemy;
+    return best;
+  }
+
+  /**
+   * The tier ceiling in force for the chain currently running.
+   *
+   * Set by `applyVia` when it sees a `roster` step and reset after, so escalate
+   * is bounded by whichever room the *caller* named. A gate siege standing in
+   * The Heap fields The Sink's roster, and that only works if the tier travels
+   * with the families rather than being read off the player's position.
+   */
+  private escalateTier = Infinity;
+
+  /**
+   * §12.5 — deliver a called wave.
+   *
+   * The one function that used to be four loops. Beacon, Cache and gate siege
+   * were each a bespoke `for` over `composition.entries` with their own copies
+   * of the ring maths, their own affix handling and their own tunables; the only
+   * things that actually differed between them are now the three fields of a
+   * `WaveEventDef`.
+   *
+   * `via` is what the *caller* resolved — in practice the roster, because that
+   * is the one input an event cannot know for itself: a gate siege fields the
+   * room behind the door, and everything else fields the room you are in. It is
+   * applied before the event's own chain, so an event can climb the ladder
+   * inside the vocabulary the caller handed it.
+   *
+   * `scale` exists for the gate, whose parcels are a score the player can cut
+   * short by walking away. Everything else leaves it at 1.
+   */
+  private callWave(call: {
+    event: WaveEventDef;
+    x: number;
+    y: number;
+    via?: readonly WaveTransform[];
+    scale?: number;
+    /** Deliver only the parcel at this index. The gate ticks its own clock. */
+    only?: number;
+  }): void {
+    const { event } = call;
+    // No named pool means "whatever is already running" — a called wave is
+    // usually the room you are in, arriving differently.
+    if (!event.pool && !this.composition) this.rotateComposition();
+    const template = event.pool ? WAVE_BY_ID.get(event.pool) : this.composition;
+    if (!template || template.entries.length === 0) return;
+
+    const via = [...(call.via ?? []), ...event.via];
+    const scale = call.scale ?? 1;
+    const weights = template.entries.map((e) => e.count);
+
+    for (let p = 0; p < event.parcels.length; p++) {
+      if (call.only !== undefined && call.only !== p) continue;
+      const parcel = event.parcels[p]!;
+      this.deliverParcel(template, weights, parcel, via, call.x, call.y, scale, p === 0);
+    }
+  }
+
+  /** One parcel of a called wave: size it, place it, queue it. */
+  private deliverParcel(
+    template: WaveTemplateDef,
+    weights: readonly number[],
+    parcel: WaveParcel,
+    via: readonly WaveTransform[],
+    cx: number,
+    cy: number,
+    scale: number,
+    first: boolean,
+  ): number {
+    const count = Math.max(1, Math.round(this.targetAlive * parcel.share * scale));
+    const spread = parcel.spread ?? 60;
+    for (let i = 0; i < count; i++) {
+      const entry = this.rng.pickWeighted(template.entries, weights);
+      let ox: number;
+      let oy: number;
+      if (parcel.ring) {
+        // A ring around the call site: the *place* waking up, which is what a
+        // Cache and a gate both want — you are standing in the middle of it.
+        const a = (i / count) * Math.PI * 2 + this.rng.next() * 0.4;
+        const r = this.rng.range(parcel.ring[0], parcel.ring[1]);
+        ox = clamp(cx + pcos(a) * r, 40, this.arena.width - 40);
+        oy = clamp(cy + psin(a) * r, 40, this.arena.height - 40);
+      } else {
+        // No ring: the director's own off-screen origins. A Beacon calls the
+        // horde in from where the horde comes from; it does not conjure one.
+        const origin = this.pickSpawnOrigin();
+        ox = origin.x;
+        oy = origin.y;
+      }
+      this.queueSpawn(entry.enemy, ox, oy, spread, parcel.at, via);
+    }
+    void first;
+    return count;
+  }
+
+  /**
+   * §12.5 — the ambient chain: this room, at the Threat the run has earned.
+   *
+   * The director's default, and the shape every other wave is a variation on.
+   * Worth reading next to `waveevents.json`: the ambient flow *is* a wave event
+   * whose parcel schedule happens to be "continuously", and writing it in the
+   * same vocabulary is what makes the special ones tunable against it.
+   */
+  private ambientVia(enriched = false): WaveTransform[] {
+    const via: WaveTransform[] = [...this.rosterVia(this.currentLevel)];
+    via.push({ op: 'escalate', mode: 'roll' });
+    if (enriched) via.push({ op: 'enrich' });
+    return via;
+  }
+
+  /** §12.5 — resolve a room into the transform that speaks for it. */
+  private rosterVia(level: LevelDef | null | undefined): WaveTransform[] {
+    const roster = level?.roster;
+    if (!roster) return [];
+    return [
+      {
+        op: 'roster',
+        tier: roster.tier,
+        families: roster.families,
+        events: roster.events?.map((e) => e.id),
+      },
+    ];
   }
 
   /** Place one spawn around an origin and queue it to arrive after `delay`. */
@@ -3845,9 +4384,12 @@ export class World {
     oy: number,
     spread: number,
     delay: number,
-    enriched: boolean,
-    /** §12.4 — a Cache's menagerie: every one of them wears an elite affix. */
-    hardened = false,
+    /**
+     * §12.5 — what this enemy becomes. One chain replaced three booleans and
+     * three hardcoded method calls; the director passes `ambientVia()` and a
+     * called wave passes whatever its event and its caller resolved.
+     */
+    via: readonly WaveTransform[],
   ): void {
     if (this.pendingSpawns.length >= SAFETY.maxEntities) return;
 
@@ -3859,7 +4401,8 @@ export class World {
     // director makes the density up with something that can be shot at.
     if (this.suppressorCount() >= TUNABLE.suppressorsAlive && this.projectsZone(enemy)) return;
 
-    enemy = this.substitute(enemy);
+    const recipe = this.applyVia(enemy, via);
+    enemy = recipe.enemy;
     const rx = ox + this.rng.range(-spread, spread);
     const ry = oy + this.rng.range(-spread, spread);
     // Spread can drag a cluster member back into view; push it out again before
@@ -3874,8 +4417,10 @@ export class World {
       x: clamp(safe.x, 20, this.arena.width - 20),
       y: clamp(safe.y, 20, this.arena.height - 20),
       hue: this.rng.pick(HUES),
-      enriched,
-      hardened,
+      enriched: recipe.enriched,
+      affixes: recipe.affixes,
+      hpScale: recipe.hpScale,
+      damageScale: recipe.damageScale,
       alive: true,
     });
   }

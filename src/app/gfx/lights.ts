@@ -43,7 +43,7 @@
  * screen with 900 lights on it drops pickups and keeps the Nova.
  */
 import {
-  Application,
+  type Application,
   Container,
   RenderTexture,
   Sprite,

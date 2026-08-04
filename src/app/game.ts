@@ -21,7 +21,7 @@ import { Recorder, type Recording } from '../sim/record';
 import { clearPartial, keepRun, stashPartial, STASH_EVERY } from '../meta/runstore';
 import { SIM_DT } from '../sim/tunables';
 import { VISUAL } from './visual';
-import { Library } from '../meta/profile';
+import type { Library } from '../meta/profile';
 import { Stinger } from './stinger';
 import type { Audio } from '../audio/audio';
 import { derivePart } from '../audio/parts';
@@ -93,6 +93,9 @@ export class Game {
     private readonly audio: Audio,
   ) {
     this.world = new World(config);
+    // ?sandbox — a rehearsal room. See World.sandbox: it exists so structure
+    // that has to be walked to can be judged without fighting the way there.
+    this.world.sandbox = new URLSearchParams(location.search).has('sandbox');
     this.recorder = new Recorder(config);
   }
 
@@ -190,7 +193,12 @@ export class Game {
         this.input.clear();
         return;
       }
-      const open = cmd === 'close' ? (this.editor.close(), false) : this.editor.toggle(this.world, 'pipeline');
+      let open = false;
+      if (cmd === 'close') {
+        this.editor.close();
+      } else {
+        open = this.editor.toggle(this.world, 'pipeline');
+      }
       this.audio.chrome('click');
       this.mode = open ? 'editor' : 'running';
       this.confirmQuit = false;
@@ -490,6 +498,12 @@ export class Game {
           heat: w.budget.heat / 100,
           stalled: w.budget.stalled,
           meltdown: w.phase === 'meltdown' ? Math.min(1, w.meltdownTime / 300) : 0,
+          // §21b.7 — the gate bar, if one is being held. The music tracks it, so
+          // the rising pressure the player can see has something to listen to.
+          siege: w.terminals.reduce(
+            (most, t) => (t.alive && t.gateId && t.progress > 0 ? Math.max(most, t.progress) : most),
+            0,
+          ),
         },
         cues,
       );

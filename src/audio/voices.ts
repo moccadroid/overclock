@@ -1020,3 +1020,733 @@ function tick(v: VoiceCtx, at: number, gain: number, hz: number, dur: number): v
   src.start(at);
   src.stop(at + dur + 0.01);
 }
+
+/**
+ * §21b.5 — a gate opening. Six seconds of machinery, not a hit.
+ *
+ * Three layers, because a gate is three things at once and none of them is a
+ * transient: a mass that has to be got moving, surfaces dragging on each other,
+ * and teeth taking load. The brief was "not jarring, but distinct" — so nothing
+ * here has an attack. The low swell arrives under you before you can name it,
+ * the scrape rises through the middle of the mix where nothing else lives, and
+ * the teeth are the only thing with edges.
+ *
+ * The middle of the envelope dips deliberately. GATE_SEQUENCE has the wall
+ * strain almost without moving a second and a half in, and the sound has to
+ * agree with that or the beat reads as a stutter rather than as effort.
+ */
+export function gate(v: VoiceCtx, at: number, seconds: number, gain: number): void {
+  const { ctx } = v;
+  const go = at + seconds * 0.44;              // where the wall actually moves
+
+  const swell = (node: GainNode, peak: number) => {
+    node.gain.setValueAtTime(0.0001, at);
+    node.gain.exponentialRampToValueAtTime(peak * 0.85, at + 1.1);
+    node.gain.exponentialRampToValueAtTime(peak * 0.3, go - 0.15);
+    node.gain.exponentialRampToValueAtTime(peak, at + seconds * 0.76);
+    node.gain.exponentialRampToValueAtTime(0.0001, at + seconds);
+  };
+
+  // 1 — the mass. A sub that shifts pitch as it gets under way.
+  const low = ctx.createOscillator();
+  low.type = 'sine';
+  low.frequency.setValueAtTime(23, at);
+  low.frequency.linearRampToValueAtTime(36, at + seconds * 0.62);
+  low.frequency.linearRampToValueAtTime(18, at + seconds);
+  const lowGain = ctx.createGain();
+  swell(lowGain, gain * 0.95);
+  low.connect(lowGain).connect(v.out);
+  low.start(at);
+  low.stop(at + seconds + 0.1);
+
+  // 2 — the choir. Five detuned saws a fifth apart under a slow lowpass, which
+  // is the whole of "majestic": a chord that is *held* while everything else
+  // grinds. Tuned low and dark so it reads as scale rather than as melody.
+  const bed = ctx.createBiquadFilter();
+  bed.type = 'lowpass';
+  bed.Q.value = 1.2;
+  bed.frequency.setValueAtTime(180, at);
+  bed.frequency.linearRampToValueAtTime(1300, at + seconds * 0.78);
+  bed.frequency.linearRampToValueAtTime(420, at + seconds);
+  const bedGain = ctx.createGain();
+  swell(bedGain, gain * 0.4);
+  bed.connect(bedGain).connect(v.out);
+  for (const [mult, detune] of [
+    [1, -7],
+    [1, 6],
+    [1.5, -4],
+    [2, 9],
+    [3, -11],
+  ] as const) {
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.value = 41 * mult;
+    o.detune.value = detune;
+    o.connect(bed);
+    o.start(at);
+    o.stop(at + seconds + 0.1);
+  }
+
+  // 3 — the scrape. Noise through a bandpass that sweeps up as it moves and
+  // falls away as it finishes. Q high enough to sing rather than hiss.
+  const frames = Math.ceil(ctx.sampleRate * seconds);
+  const buf = ctx.createBuffer(1, frames, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < frames; i++) data[i] = Math.random() * 2 - 1;
+  const noise = ctx.createBufferSource();
+  noise.buffer = buf;
+  const band = ctx.createBiquadFilter();
+  band.type = 'bandpass';
+  band.Q.value = 5.5;
+  band.frequency.setValueAtTime(240, at);
+  band.frequency.linearRampToValueAtTime(520, at + seconds * 0.42);
+  band.frequency.linearRampToValueAtTime(1750, at + seconds * 0.74);
+  band.frequency.linearRampToValueAtTime(400, at + seconds);
+  const scrape = ctx.createGain();
+  swell(scrape, gain * 0.62);
+  noise.connect(band).connect(scrape).connect(v.out);
+  noise.start(at);
+  noise.stop(at + seconds);
+
+  // 4 — the horn. One long descending tone under everything. This is the scary
+  // one: it never resolves, it only sinks, and it is the last thing still
+  // sounding when the wall has finished.
+  const horn = ctx.createOscillator();
+  horn.type = 'triangle';
+  horn.frequency.setValueAtTime(196, at + 0.2);
+  horn.frequency.exponentialRampToValueAtTime(58, at + seconds * 0.9);
+  const hornGain = ctx.createGain();
+  hornGain.gain.setValueAtTime(0.0001, at + 0.2);
+  hornGain.gain.exponentialRampToValueAtTime(gain * 0.34, at + 1.4);
+  hornGain.gain.exponentialRampToValueAtTime(gain * 0.5, at + seconds * 0.8);
+  hornGain.gain.exponentialRampToValueAtTime(0.0001, at + seconds + 0.5);
+  horn.connect(hornGain).connect(v.out);
+  horn.start(at + 0.2);
+  horn.stop(at + seconds + 0.6);
+
+  // 5 — the moment it gives. One impact on the beat the wall actually moves,
+  // because everything before this has been threat and this is the payoff.
+  const hit = ctx.createOscillator();
+  hit.type = 'sine';
+  hit.frequency.setValueAtTime(120, go);
+  hit.frequency.exponentialRampToValueAtTime(31, go + 0.55);
+  const hitGain = ctx.createGain();
+  hitGain.gain.setValueAtTime(gain * 1.15, go);
+  hitGain.gain.exponentialRampToValueAtTime(0.0001, go + 0.9);
+  hit.connect(hitGain).connect(v.out);
+  hit.start(go);
+  hit.stop(go + 0.95);
+
+  // 6 — the teeth. A click train whose spacing tightens as the wall accelerates
+  // and opens out again as it runs clear. Scheduled rather than looped so the
+  // rhythm can follow the sequence instead of ticking through it. Each tooth
+  // carries a metallic partial above it, which is what makes it iron.
+  let t = at + 0.3;
+  while (t < at + seconds * 0.95) {
+    const k = (t - at) / seconds;
+    const bell = 0.1 + 0.18 * Math.sin(Math.min(1, k * 1.35) * Math.PI);
+    const tooth = ctx.createOscillator();
+    tooth.type = 'square';
+    tooth.frequency.value = 140 + k * 260;
+    const shape = ctx.createBiquadFilter();
+    shape.type = 'lowpass';
+    shape.frequency.value = 2600;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0002, gain * bell), t + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.08);
+    tooth.connect(shape).connect(g).connect(v.out);
+    tooth.start(t);
+    tooth.stop(t + 0.095);
+
+    const ring = ctx.createOscillator();
+    ring.type = 'triangle';
+    ring.frequency.value = 1450 + k * 900;
+    const rg = ctx.createGain();
+    rg.gain.setValueAtTime(0.0001, t);
+    rg.gain.exponentialRampToValueAtTime(Math.max(0.0002, gain * bell * 0.3), t + 0.002);
+    rg.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+    ring.connect(rg).connect(v.out);
+    ring.start(t);
+    ring.stop(t + 0.24);
+
+    // Fast in the middle, slow at both ends — the cadence of something heavy.
+    t += 0.28 - 0.19 * Math.sin(Math.min(1, k * 1.2) * Math.PI);
+  }
+}
+
+/**
+ * §13.2 — Meltdown. The moment the run stops being a build and starts being a
+ * siege, announced.
+ *
+ * The gate voice next door is *machinery* — something enormous doing a job, and
+ * deliberately not jarring. This is the opposite brief and shares none of its
+ * parts: nothing here is doing a job, something has been let in.
+ *
+ * Four ideas, all of them chosen because they are unpleasant on purpose:
+ *
+ *   **A minor second.** Two detuned saw stacks a semitone apart, which is the
+ *   interval the ear reads as wrong before it can name why. Held, not struck.
+ *
+ *   **A tritone horn**, the two notes alternating so it never settles.
+ *
+ *   **The floor leaving.** A sub that starts where a kick lives and walks down
+ *   below hearing, so the mix loses its bottom under the player.
+ *
+ *   **One impact, late.** Everything above swells for two and a half seconds
+ *   with no transient at all, and then something lands. Announcing it at the
+ *   start would make it an alarm; announcing it at the end makes it an arrival.
+ *
+ * Deliberately no saturation stage anywhere in here — the graph does not have
+ * one and must not grow one.
+ */
+export function meltdown(v: VoiceCtx, at: number, seconds: number, gain: number): void {
+  const { ctx } = v;
+  const hit = at + seconds * 0.42;
+
+  // 1 — the semitone cluster. Six saws, two pitch centres a semitone apart,
+  // under a filter that opens as it swells and shuts as it decays.
+  const clusterFilter = ctx.createBiquadFilter();
+  clusterFilter.type = 'lowpass';
+  clusterFilter.Q.value = 3;
+  clusterFilter.frequency.setValueAtTime(150, at);
+  clusterFilter.frequency.exponentialRampToValueAtTime(1400, hit);
+  clusterFilter.frequency.exponentialRampToValueAtTime(220, at + seconds);
+  const clusterGain = ctx.createGain();
+  clusterGain.gain.setValueAtTime(0.0001, at);
+  clusterGain.gain.exponentialRampToValueAtTime(gain * 0.3, hit);
+  // Falls back to a floor rather than to nothing, and only lets go at the very
+  // end. A straight exponential to zero was inaudible a second past the impact,
+  // which left the stinger as a bang — and the dread is in the part afterwards,
+  // where the cluster is still there and you have started playing again.
+  clusterGain.gain.exponentialRampToValueAtTime(gain * 0.075, at + seconds * 0.62);
+  clusterGain.gain.setValueAtTime(gain * 0.075, at + seconds * 0.88);
+  clusterGain.gain.exponentialRampToValueAtTime(0.0001, at + seconds);
+  clusterFilter.connect(clusterGain).connect(v.out);
+
+  for (let i = 0; i < 6; i++) {
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    // Three voices at 49 Hz, three a semitone above, each detuned a few cents
+    // so the pair beats against itself as well as against the other.
+    const base = i < 3 ? 49 : 51.9;
+    o.frequency.value = base;
+    o.detune.value = (i % 3) * 9 - 9;
+    // The whole cluster sags a little over its life. A held pitch is a chord;
+    // a pitch that will not sit still is a thing.
+    o.frequency.setValueAtTime(base, at);
+    o.frequency.linearRampToValueAtTime(base * 0.965, at + seconds);
+    o.connect(clusterFilter);
+    o.start(at);
+    o.stop(at + seconds + 0.1);
+  }
+
+  // 2 — the horn. A tritone, alternating, never resolving.
+  for (let i = 0; i < 2; i++) {
+    const o = ctx.createOscillator();
+    o.type = 'triangle';
+    const hz = i === 0 ? 98 : 138.6; // an augmented fourth apart
+    o.frequency.value = hz;
+    const g = ctx.createGain();
+    // Offset halves so one is arriving while the other leaves.
+    const t0 = at + i * seconds * 0.3;
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(gain * 0.16, t0 + seconds * 0.28);
+    g.gain.exponentialRampToValueAtTime(0.0001, Math.min(at + seconds, t0 + seconds * 0.62));
+    o.connect(g).connect(v.out);
+    o.start(at);
+    o.stop(at + seconds + 0.1);
+  }
+
+  // 3 — the floor leaving. Starts where a kick lives and walks out from under.
+  const low = ctx.createOscillator();
+  low.type = 'sine';
+  low.frequency.setValueAtTime(58, at);
+  low.frequency.exponentialRampToValueAtTime(21, at + seconds * 0.9);
+  const lowGain = ctx.createGain();
+  lowGain.gain.setValueAtTime(0.0001, at);
+  lowGain.gain.exponentialRampToValueAtTime(gain, at + seconds * 0.5);
+  lowGain.gain.exponentialRampToValueAtTime(0.0001, at + seconds);
+  low.connect(lowGain).connect(v.out);
+  low.start(at);
+  low.stop(at + seconds + 0.1);
+
+  // 4 — a noise bed climbing through a bandpass, so the room fills up before
+  // anything has happened in it.
+  const dur = seconds + 0.2;
+  const noise = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * dur), ctx.sampleRate);
+  const data = noise.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  const src = ctx.createBufferSource();
+  src.buffer = noise;
+  const band = ctx.createBiquadFilter();
+  band.type = 'bandpass';
+  band.Q.value = 1.4;
+  band.frequency.setValueAtTime(220, at);
+  band.frequency.exponentialRampToValueAtTime(2600, hit);
+  band.frequency.exponentialRampToValueAtTime(140, at + seconds);
+  const noiseGain = ctx.createGain();
+  noiseGain.gain.setValueAtTime(0.0001, at);
+  noiseGain.gain.exponentialRampToValueAtTime(gain * 0.17, hit - 0.05);
+  noiseGain.gain.exponentialRampToValueAtTime(0.0001, at + seconds * 0.8);
+  src.connect(band).connect(noiseGain).connect(v.out);
+  src.start(at);
+  src.stop(at + dur);
+
+  // 5 — the arrival. The only transient in the whole thing.
+  const thud = ctx.createOscillator();
+  thud.type = 'sine';
+  thud.frequency.setValueAtTime(120, hit);
+  thud.frequency.exponentialRampToValueAtTime(31, hit + 0.5);
+  const thudGain = ctx.createGain();
+  thudGain.gain.setValueAtTime(gain * 1.15, hit);
+  thudGain.gain.exponentialRampToValueAtTime(0.0001, hit + 1.1);
+  thud.connect(thudGain).connect(v.out);
+  thud.start(hit);
+  thud.stop(hit + 1.2);
+
+  // and its metal, three inharmonic partials so it rings rather than pitches.
+  for (let i = 0; i < 3; i++) {
+    const o = ctx.createOscillator();
+    o.type = 'square';
+    o.frequency.value = [317, 631, 1153][i]!;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(gain * 0.06, hit);
+    g.gain.exponentialRampToValueAtTime(0.0001, hit + 1.6 - i * 0.35);
+    o.connect(g).connect(v.out);
+    o.start(hit);
+    o.stop(hit + 1.7);
+  }
+}
+
+/**
+ * §21b — a breach. The room past the gate noticing you.
+ *
+ * Shares a vocabulary with `meltdown` — the same semitone cluster, the same
+ * refusal to resolve — and inverts its shape, because the two events are
+ * opposite in time. Meltdown is a state you have entered and will not leave, so
+ * it swells for two and a half seconds and then arrives. A breach has already
+ * happened by the time you hear it: you walked through the door. So the impact
+ * is first, on the very first sample, and everything after it is the room
+ * answering.
+ *
+ * And the cluster rises here where Meltdown's sags. A pitch walking up is
+ * something coming toward you; a pitch walking down is something settling in.
+ */
+export function breach(v: VoiceCtx, at: number, seconds: number, gain: number): void {
+  const { ctx } = v;
+
+  // 1 — the door. One hit, immediately, low and wide.
+  const thud = ctx.createOscillator();
+  thud.type = 'sine';
+  thud.frequency.setValueAtTime(96, at);
+  thud.frequency.exponentialRampToValueAtTime(27, at + 0.55);
+  const thudGain = ctx.createGain();
+  thudGain.gain.setValueAtTime(gain * 1.05, at);
+  thudGain.gain.exponentialRampToValueAtTime(0.0001, at + 1.0);
+  thud.connect(thudGain).connect(v.out);
+  thud.start(at);
+  thud.stop(at + 1.1);
+
+  // 2 — the room, waking. A rising semitone cluster under an opening filter:
+  // whatever is in here is now coming, and it is not in a hurry.
+  const clusterFilter = ctx.createBiquadFilter();
+  clusterFilter.type = 'lowpass';
+  clusterFilter.Q.value = 2.4;
+  clusterFilter.frequency.setValueAtTime(180, at);
+  clusterFilter.frequency.exponentialRampToValueAtTime(1900, at + seconds * 0.8);
+  clusterFilter.frequency.exponentialRampToValueAtTime(300, at + seconds);
+  const clusterGain = ctx.createGain();
+  clusterGain.gain.setValueAtTime(0.0001, at);
+  clusterGain.gain.exponentialRampToValueAtTime(gain * 0.26, at + seconds * 0.7);
+  clusterGain.gain.exponentialRampToValueAtTime(0.0001, at + seconds);
+  clusterFilter.connect(clusterGain).connect(v.out);
+
+  for (let i = 0; i < 4; i++) {
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    const base = i < 2 ? 62 : 65.7;
+    o.detune.value = (i % 2) * 11 - 5;
+    o.frequency.setValueAtTime(base * 0.94, at);
+    o.frequency.linearRampToValueAtTime(base, at + seconds * 0.85);
+    o.connect(clusterFilter);
+    o.start(at);
+    o.stop(at + seconds + 0.1);
+  }
+
+  // 3 — three struck partials, inharmonic, so the hit rings off the walls of a
+  // room whose size you cannot see yet.
+  for (let i = 0; i < 3; i++) {
+    const o = ctx.createOscillator();
+    o.type = 'square';
+    o.frequency.value = [289, 547, 991][i]!;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(gain * 0.05, at);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + 1.5 - i * 0.4);
+    o.connect(g).connect(v.out);
+    o.start(at);
+    o.stop(at + 1.6);
+  }
+
+  // 4 — a reversed-sounding noise rise into the tail. Not a transient of its
+  // own: it fills the space the impact leaves as the impact decays.
+  const dur = seconds + 0.2;
+  const noise = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * dur), ctx.sampleRate);
+  const data = noise.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  const src = ctx.createBufferSource();
+  src.buffer = noise;
+  const band = ctx.createBiquadFilter();
+  band.type = 'bandpass';
+  band.Q.value = 1.1;
+  band.frequency.setValueAtTime(300, at);
+  band.frequency.exponentialRampToValueAtTime(3200, at + seconds * 0.82);
+  band.frequency.exponentialRampToValueAtTime(400, at + seconds);
+  const noiseGain = ctx.createGain();
+  noiseGain.gain.setValueAtTime(0.0001, at);
+  noiseGain.gain.exponentialRampToValueAtTime(gain * 0.15, at + seconds * 0.78);
+  noiseGain.gain.exponentialRampToValueAtTime(0.0001, at + seconds);
+  src.connect(band).connect(noiseGain).connect(v.out);
+  src.start(at);
+  src.stop(at + dur);
+}
+
+/**
+ * §12.3, §12.4 — a wave you asked for. The Beacon calls one in early; the Cache
+ * trades a card for the same composition with everything in it hardened.
+ *
+ * Both were wrong before this existed. The Beacon made no sound at all, and the
+ * Cache — the sharpest opt-in fight in the game — played the level-up chime and
+ * nothing else, so the loudest thing about walking into a hardened wave was the
+ * reward. (The chime stays: a Cache really is a free Draft. This goes over it.)
+ *
+ * The shape is `breach` run backwards, and deliberately so, because the events
+ * are opposite. A breach has already happened when you hear it, so the impact is
+ * first. A summons has *not* happened yet: you pressed the button and the thing
+ * is on its way. So it rises, and the arrival is at seven tenths, and what you
+ * do with the time before it is the point of the sound.
+ *
+ * `hardened` is the Cache's extra: a tritone horn over the top and struck metal
+ * on the arrival. Same voice, one tier heavier, so the two events are audibly
+ * related and not interchangeable.
+ */
+export function summons(
+  v: VoiceCtx,
+  at: number,
+  seconds: number,
+  gain: number,
+  hardened = false,
+): void {
+  const { ctx } = v;
+  const land = at + seconds * 0.7;
+
+  // 1 — the call. A semitone cluster climbing into the arrival, filter opening
+  // with it, so the room gets brighter and worse at the same time.
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.Q.value = 2.8;
+  filter.frequency.setValueAtTime(160, at);
+  filter.frequency.exponentialRampToValueAtTime(hardened ? 2200 : 1300, land);
+  filter.frequency.exponentialRampToValueAtTime(260, at + seconds);
+  const clusterGain = ctx.createGain();
+  clusterGain.gain.setValueAtTime(0.0001, at);
+  clusterGain.gain.exponentialRampToValueAtTime(gain * (hardened ? 0.3 : 0.2), land);
+  clusterGain.gain.exponentialRampToValueAtTime(0.0001, at + seconds);
+  filter.connect(clusterGain).connect(v.out);
+
+  const voices = hardened ? 6 : 4;
+  for (let i = 0; i < voices; i++) {
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    const half = voices / 2;
+    const base = i < half ? 58 : 61.5;
+    o.detune.value = (i % half) * 8 - 8;
+    // Climbing a whole tone across its life: something on its way, not settling.
+    o.frequency.setValueAtTime(base * 0.89, at);
+    o.frequency.linearRampToValueAtTime(base, land);
+    o.frequency.linearRampToValueAtTime(base * 1.02, at + seconds);
+    o.connect(filter);
+    o.start(at);
+    o.stop(at + seconds + 0.1);
+  }
+
+  // 2 — the sub, rising with it rather than walking out from under.
+  const low = ctx.createOscillator();
+  low.type = 'sine';
+  low.frequency.setValueAtTime(26, at);
+  low.frequency.exponentialRampToValueAtTime(hardened ? 44 : 36, land);
+  const lowGain = ctx.createGain();
+  lowGain.gain.setValueAtTime(0.0001, at);
+  lowGain.gain.exponentialRampToValueAtTime(gain * 0.8, land);
+  lowGain.gain.exponentialRampToValueAtTime(0.0001, at + seconds);
+  low.connect(lowGain).connect(v.out);
+  low.start(at);
+  low.stop(at + seconds + 0.1);
+
+  // 3 — the arrival.
+  const thud = ctx.createOscillator();
+  thud.type = 'sine';
+  thud.frequency.setValueAtTime(hardened ? 110 : 88, land);
+  thud.frequency.exponentialRampToValueAtTime(30, land + 0.45);
+  const thudGain = ctx.createGain();
+  thudGain.gain.setValueAtTime(gain * (hardened ? 1.0 : 0.7), land);
+  thudGain.gain.exponentialRampToValueAtTime(0.0001, land + 0.9);
+  thud.connect(thudGain).connect(v.out);
+  thud.start(land);
+  thud.stop(land + 1.0);
+
+  if (!hardened) return;
+
+  // 4 — the Cache's tier. A tritone under the climb, and struck metal on the
+  // landing: this wave is wearing affixes and the sound says so before it does.
+  for (let i = 0; i < 2; i++) {
+    const o = ctx.createOscillator();
+    o.type = 'triangle';
+    o.frequency.value = i === 0 ? 92 : 130.1;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(gain * 0.13, land);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + seconds);
+    o.connect(g).connect(v.out);
+    o.start(at);
+    o.stop(at + seconds + 0.1);
+  }
+  for (let i = 0; i < 3; i++) {
+    const o = ctx.createOscillator();
+    o.type = 'square';
+    o.frequency.value = [271, 583, 1039][i]!;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(gain * 0.05, land);
+    g.gain.exponentialRampToValueAtTime(0.0001, land + 1.4 - i * 0.35);
+    o.connect(g).connect(v.out);
+    o.start(land);
+    o.stop(land + 1.5);
+  }
+}
+
+/* ---------------------------------------------------------------- §21b.7
+ * The siege score.
+ *
+ * Not a variation on the run's arrangement — a different piece of music that
+ * takes the room over while a gate is held, and hands it back when the gate
+ * opens. Everything here is deliberately outside the vocabulary the rest of the
+ * soundtrack uses: no key, no chord movement, no groove that resolves. A drone,
+ * a beat, and something screaming above both.
+ *
+ * **On "distortion".** The audio graph does not have a saturation stage and must
+ * never grow one. The grit in here is synthesis, not clipping: ring modulation
+ * (multiplying two signals, which produces sum-and-difference sidebands) and FM
+ * at inharmonic ratios (a modulator at 1.41x the carrier — a tritone, so the
+ * partials never line up into a pitch). Both are harsher than a waveshaper and
+ * neither raises RMS the way one does.
+ */
+
+/**
+ * The floor. A detuned stack an octave below anything else in the game, ring
+ * modulated so it grinds rather than hums, under a filter that opens with the
+ * pressure. Meant to be felt before it is heard.
+ */
+export function siegeDrone(
+  v: VoiceCtx,
+  at: number,
+  dur: number,
+  hz: number,
+  gain: number,
+  intensity: number,
+): void {
+  const { ctx } = v;
+
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass';
+  // Resonant, but not as resonant as it wants to be.
+  //
+  // At Q 14 the filter is an amplifier: the drone alone peaked past 3.0 and the
+  // whole score with it, which on a bus feeding a limiter means everything else
+  // gets ducked *by the bass* four times a bar. Halving Q costs almost nothing
+  // in low-end weight — measured, the sub-200Hz energy barely moved — and buys
+  // back the headroom that lets the drone actually be loud.
+  filter.Q.value = 3 + intensity * 4;
+  filter.frequency.setValueAtTime(90, at);
+  filter.frequency.exponentialRampToValueAtTime(180 + intensity * 900, at + dur * 0.55);
+  filter.frequency.exponentialRampToValueAtTime(110, at + dur);
+
+  const out = ctx.createGain();
+  out.gain.setValueAtTime(0.0001, at);
+  out.gain.exponentialRampToValueAtTime(gain, at + dur * 0.14);
+  out.gain.setValueAtTime(gain, at + dur * 0.8);
+  out.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+  filter.connect(out).connect(v.out);
+
+  // Ring modulation. `ring.gain` sits at zero and the modulator swings it, so
+  // the output is literally signal x modulator: no fundamental of its own, only
+  // sidebands. At 37Hz against a 41Hz drone that is a beating, metallic floor.
+  const ring = ctx.createGain();
+  ring.gain.value = 0;
+  const modulator = ctx.createOscillator();
+  modulator.type = 'sine';
+  modulator.frequency.setValueAtTime(37, at);
+  modulator.frequency.linearRampToValueAtTime(37 + intensity * 26, at + dur);
+  const modDepth = ctx.createGain();
+  modDepth.gain.value = 1;
+  modulator.connect(modDepth).connect(ring.gain);
+  modulator.start(at);
+  modulator.stop(at + dur + 0.1);
+  ring.connect(filter);
+
+  // Dry alongside it, so there is still a note under the grinding.
+  const dry = ctx.createGain();
+  dry.gain.value = 0.55 - intensity * 0.25;
+  dry.connect(filter);
+
+  for (let i = 0; i < 4; i++) {
+    const o = ctx.createOscillator();
+    o.type = i === 3 ? 'square' : 'sawtooth';
+    o.frequency.value = hz * (i === 3 ? 0.5 : 1);
+    o.detune.value = [-9, 4, 11, 0][i]!;
+    o.connect(ring);
+    o.connect(dry);
+    o.start(at);
+    o.stop(at + dur + 0.1);
+  }
+}
+
+/**
+ * The thing above it. A high FM voice that slides and never lands.
+ *
+ * The modulator runs at a tritone above the carrier, so the sidebands are
+ * inharmonic and the ear cannot resolve a pitch out of it — that is what makes a
+ * high note read as a scream rather than as a lead. Slow glissando plus vibrato,
+ * because a steady one is a test tone.
+ */
+export function siegeScream(
+  v: VoiceCtx,
+  at: number,
+  dur: number,
+  hz: number,
+  gain: number,
+  intensity: number,
+  /** Which way it slides. Alternating this is most of what stops it nagging. */
+  rise = true,
+): void {
+  const { ctx } = v;
+
+  const carrier = ctx.createOscillator();
+  carrier.type = 'sawtooth';
+  // One shape repeated is a car alarm however unpleasant the timbre — the ear
+  // files it as furniture after about three passes. So the glide runs both
+  // ways, and the caller walks a line of pitches and lengths across it.
+  if (rise) {
+    carrier.frequency.setValueAtTime(hz * 0.82, at);
+    carrier.frequency.exponentialRampToValueAtTime(hz * 1.35, at + dur * 0.7);
+    carrier.frequency.exponentialRampToValueAtTime(hz * 1.06, at + dur);
+  } else {
+    carrier.frequency.setValueAtTime(hz * 1.28, at);
+    carrier.frequency.exponentialRampToValueAtTime(hz * 0.88, at + dur * 0.62);
+    carrier.frequency.exponentialRampToValueAtTime(hz * 0.72, at + dur);
+  }
+
+  // FM at 1.41x — an augmented fourth. Nothing lines up, so nothing resolves.
+  const modulator = ctx.createOscillator();
+  modulator.type = 'sine';
+  modulator.frequency.value = hz * 1.41;
+  const modDepth = ctx.createGain();
+  modDepth.gain.setValueAtTime(hz * 0.2, at);
+  modDepth.gain.linearRampToValueAtTime(hz * (0.6 + intensity * 1.4), at + dur * 0.75);
+  modulator.connect(modDepth).connect(carrier.frequency);
+  modulator.start(at);
+  modulator.stop(at + dur + 0.1);
+
+  // Vibrato, slow and wide enough to be unsteady rather than expressive.
+  const vibrato = ctx.createOscillator();
+  vibrato.type = 'sine';
+  vibrato.frequency.value = 5.5;
+  const vibDepth = ctx.createGain();
+  vibDepth.gain.value = hz * 0.02;
+  vibrato.connect(vibDepth).connect(carrier.frequency);
+  vibrato.start(at);
+  vibrato.stop(at + dur + 0.1);
+
+  const band = ctx.createBiquadFilter();
+  band.type = 'bandpass';
+  band.Q.value = 3.2;
+  band.frequency.setValueAtTime(hz, at);
+  band.frequency.exponentialRampToValueAtTime(hz * (rise ? 1.8 : 0.62), at + dur * 0.7);
+
+  const out = ctx.createGain();
+  out.gain.setValueAtTime(0.0001, at);
+  out.gain.exponentialRampToValueAtTime(gain, at + dur * 0.45);
+  out.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+  carrier.connect(band).connect(out).connect(v.out);
+  carrier.start(at);
+  carrier.stop(at + dur + 0.1);
+}
+
+/**
+ * The beat. Heavier and blunter than the run's kick, because this one is not
+ * keeping a groove, it is keeping time in a place you do not want to be.
+ */
+export function siegeHit(v: VoiceCtx, at: number, gain: number, hard: boolean): void {
+  const { ctx } = v;
+
+  // A kick reads as *hard* through its pitch envelope far more than its level:
+  // the drop is the punch, and the level only decides how much of the mix it
+  // takes with it. So this starts higher, falls faster, lands lower and holds.
+  const body = ctx.createOscillator();
+  body.type = 'sine';
+  body.frequency.setValueAtTime(hard ? 210 : 150, at);
+  body.frequency.exponentialRampToValueAtTime(hard ? 27 : 36, at + (hard ? 0.075 : 0.1));
+  const bodyGain = ctx.createGain();
+  bodyGain.gain.setValueAtTime(gain, at);
+  bodyGain.gain.exponentialRampToValueAtTime(0.0001, at + (hard ? 0.68 : 0.4));
+  body.connect(bodyGain).connect(v.out);
+  body.start(at);
+  body.stop(at + 0.8);
+
+  // A second sine under the landing, so there is something below the
+  // fundamental for the body to sit on. This is the part you feel rather than
+  // hear, and it is why the hit has weight instead of just level.
+  const under = ctx.createOscillator();
+  under.type = 'sine';
+  under.frequency.setValueAtTime(hard ? 54 : 62, at);
+  under.frequency.exponentialRampToValueAtTime(hard ? 20 : 28, at + 0.3);
+  const underGain = ctx.createGain();
+  underGain.gain.setValueAtTime(gain * 0.7, at);
+  underGain.gain.exponentialRampToValueAtTime(0.0001, at + (hard ? 0.55 : 0.32));
+  under.connect(underGain).connect(v.out);
+  under.start(at);
+  under.stop(at + 0.7);
+
+  // The crack: sixty milliseconds of filtered noise. The transient is what makes
+  // a hit read as struck rather than as a tone that started.
+  const clickDur = 0.06;
+  const noise = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * clickDur), ctx.sampleRate);
+  const data = noise.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  const src = ctx.createBufferSource();
+  src.buffer = noise;
+  const hp = ctx.createBiquadFilter();
+  hp.type = 'highpass';
+  hp.frequency.value = hard ? 1400 : 2200;
+  const clickGain = ctx.createGain();
+  clickGain.gain.setValueAtTime(gain * (hard ? 0.5 : 0.28), at);
+  clickGain.gain.exponentialRampToValueAtTime(0.0001, at + clickDur);
+  src.connect(hp).connect(clickGain).connect(v.out);
+  src.start(at);
+  src.stop(at + clickDur);
+
+  if (!hard) return;
+
+  // Struck metal on the downbeats only. Three inharmonic partials, short.
+  for (let i = 0; i < 3; i++) {
+    const o = ctx.createOscillator();
+    o.type = 'square';
+    o.frequency.value = [193, 431, 757][i]!;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(gain * 0.08, at);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + 0.26 - i * 0.05);
+    o.connect(g).connect(v.out);
+    o.start(at);
+    o.stop(at + 0.3);
+  }
+}
