@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { NO_INPUT, World, type InputState } from './world';
 import { hashWorld } from './hash';
+import * as TRAITS from './traits';
+import type { WaveTransform } from './types';
 import { LOADBEARING, SAFETY, SIM_DT, TUNABLE } from './tunables';
 import { CycleBudget } from './cycles';
 import { Rng } from './rng';
@@ -1700,8 +1702,30 @@ describe('called waves are data (GDD §12.5)', () => {
       const e = WAVE_EVENTS.find((w) => w.id === id)!;
       return e.via.reduce((n, v) => (v.op === 'affix' ? n + v.count : n), 0);
     };
+    // Two affixes against a Cache's one. Briefly it was one, and the siege came
+    // back reported as "very weak, they died easily" — with the ambient floor
+    // dropped there was not enough left for one affix to carry.
     expect(affixes('gate_siege')).toBeGreaterThan(affixes('cache_menagerie'));
     expect(affixes('beacon_call')).toBe(0);
+
+    const reach = (id: string): WaveTransform | undefined =>
+      WAVE_EVENTS.find((w) => w.id === id)!.via.find((v) => v.op === 'escalate');
+    // A siege reaches the room's ceiling; a Cache reaches a couple of points
+    // past the current wave. That, the parcel count and the total are the
+    // ordering now.
+    expect((reach('gate_siege') as { ceiling?: boolean }).ceiling).toBe(true);
+    expect((reach('cache_menagerie') as { ceiling?: boolean }).ceiling).toBeUndefined();
+    const parcels = (id: string): number => WAVE_EVENTS.find((w) => w.id === id)!.parcels.length;
+    expect(parcels('gate_siege')).toBeGreaterThan(parcels('cache_menagerie'));
+
+    // Only the Cache refuses the room's punctuation. A Suppressor in a siege is
+    // the room defending itself and belongs there; a Suppressor in a box you
+    // opened for a card is a forty-second lockout you bought by accident.
+    const hasNoEvents = (id: string): boolean =>
+      WAVE_EVENTS.find((w) => w.id === id)!.via.some((v) => v.op === 'noEvents');
+    expect(hasNoEvents('cache_menagerie')).toBe(true);
+    expect(hasNoEvents('gate_siege')).toBe(false);
+    expect(hasNoEvents('beacon_call')).toBe(false);
   });
 
   it('a parcel schedule arrives spread out, not all at once', () => {
@@ -1725,3 +1749,265 @@ function NODE_GATE(id: string): number {
 function NODE_TIER(id: string): number {
   return ENEMY_BY_ID.get(id)?.substitutes?.tier ?? 0;
 }
+
+describe('behaviour is pinned while it is being refactored', () => {
+  /**
+   * Golden hashes, so the traits refactor is provably balance-neutral.
+   *
+   * `hashWorld` folds in every enemy's position and state, so if a ported
+   * behaviour changes the order of an RNG draw, the order of two float
+   * operations, or which enemies run before which, these move. That is a much
+   * stronger claim than reading the diff, and it is the reason the refactor
+   * comes before the rebalancing rather than after: retuning on top of an
+   * unverified port would make both unprovable.
+   *
+   * If a stage *intends* to change behaviour, these get updated in the same
+   * commit, deliberately, with the reason in the message. An accidental change
+   * is a failing test; a deliberate one is a two-line diff you have to justify.
+   *
+   * Delete along with REFACTOR.md once the last stage lands and the ordinary
+   * determinism tests above are guard enough again.
+   */
+  //
+  // MOVED 2026-08-05, deliberately, by the spawn-placement fix. `pushOutsideView`
+  // used `Math.max` where it needed `Math.min`: a spawn roughly level with the
+  // player divided a half-view by a 1e-3 guard and was flung a quarter of a
+  // billion units, then clamped to the arena corner. Every wave in the game
+  // placed some of itself wrongly, so every seed moves. The three below were
+  // recorded after the fix and re-verified across repeat runs.
+  const PINNED = {
+    piloted: 'b5c8ffaa',
+    scripted: 'cd69a800',
+    menagerie: '718dfa4d',
+  };
+
+  it('a piloted run is unchanged', () => {
+    const w = new World({ seed: 'pin-piloted', axiomId: 'feedback' });
+    runPiloted(w, 120);
+    expect(hashWorld(w)).toBe(PINNED.piloted);
+  });
+
+  it('a scripted run is unchanged', () => {
+    const w = new World({ seed: 'pin-scripted', axiomId: 'circuit' });
+    runFor(w, 120);
+    expect(hashWorld(w)).toBe(PINNED.scripted);
+  });
+
+  it('one of every behaviour, driven for a minute, is unchanged', () => {
+    // The roster on level one remaps most families away, so a normal run never
+    // exercises intercept, lance or charge. These are queued straight past the
+    // director with an empty transform chain, which is the only way to get all
+    // five behaviours running in one world.
+    const w = new World({ seed: 'pin-menagerie', axiomId: 'ignition' });
+    w.enemies.length = 0;
+    const queue = (
+      w as unknown as {
+        queueSpawn(e: string, x: number, y: number, s: number, d: number, via: unknown[]): void;
+      }
+    ).queueSpawn.bind(w);
+
+    const kinds = ['mote', 'drifter', 'charger', 'interceptor', 'suppressor', 'lancer'];
+    kinds.forEach((kind, i) => {
+      const angle = (i / kinds.length) * Math.PI * 2;
+      for (let n = 0; n < 4; n++) {
+        queue(
+          kind,
+          w.player.x + pcos(angle) * (700 + n * 40),
+          w.player.y + psin(angle) * (700 + n * 40),
+          30,
+          n * 0.1,
+          [],
+        );
+      }
+    });
+
+    runFor(w, 60);
+    expect(w.enemies.some((e) => e.alive)).toBe(true);
+    expect(hashWorld(w)).toBe(PINNED.menagerie);
+  });
+});
+
+describe('nothing arrives where the player cannot go (GDD §21b.6)', () => {
+  it('never places a spawn outside the arena or in sealed ground', () => {
+    // Reported from a screenshot: shards past the gate, in the room the player
+    // had not opened. Two faults stacked. `pushOutsideView` used `Math.max`
+    // where it needed `Math.min`, so a spawn roughly level with the player
+    // divided a half-view by a 1e-3 guard and flew a quarter of a billion units
+    // out; and `isSealed` was tested on that raw point — nothing that far out is
+    // inside any level — before the clamp dropped it in an arena corner, which
+    // happens to be inside The Sink.
+    const w = new World({ seed: 'placement', axiomId: 'ignition' });
+    const push = (
+      w as unknown as { pushOutsideView(x: number, y: number): { x: number; y: number } }
+    ).pushOutsideView.bind(w);
+
+    // The exact shape that broke: same y as the player, so dy is zero.
+    for (const dx of [50, 600, 1200, -600]) {
+      const out = push(w.player.x + dx, w.player.y);
+      expect(Math.abs(out.x - w.player.x), `dx ${dx} flew away`).toBeLessThan(5000);
+      expect(Number.isFinite(out.x) && Number.isFinite(out.y)).toBe(true);
+    }
+
+    // ...and end to end: run long enough for the director to place hundreds.
+    for (let i = 0; i < 60 * 90; i++) w.advance(botInput(w));
+    expect(w.enemies.length).toBeGreaterThan(10);
+    for (const e of w.enemies) {
+      expect(e.x >= 0 && e.x <= w.arena.width, `enemy at x=${e.x}`).toBe(true);
+      expect(e.y >= 0 && e.y <= w.arena.height, `enemy at y=${e.y}`).toBe(true);
+      // Nothing may be standing in a room that has not been opened.
+      expect(w.isSealed(e.x, e.y), `enemy at ${Math.round(e.x)},${Math.round(e.y)}`).toBe(false);
+    }
+  });
+});
+
+describe("affixes and a variant's own ideas are one mechanism (GDD §10.3)", () => {
+  it('a Ghost phases from its own def, with no affix involved', () => {
+    // The pinned hashes cannot see this: level one is tier 0, so a normal run
+    // never substitutes a Ghost, and the menagerie does not queue one. Porting
+    // phasing to a trait silently broke it and every test still passed.
+    const w = new World({ seed: 'ghost', axiomId: 'ignition' });
+    w.enemies.length = 0;
+    const queue = (
+      w as unknown as {
+        queueSpawn(e: string, x: number, y: number, s: number, d: number, via: unknown[]): void;
+      }
+    ).queueSpawn.bind(w);
+    queue('mote_ghost', w.player.x + 600, w.player.y, 10, 0, []);
+    for (let i = 0; i < 240; i++) w.advance(NO_INPUT);
+
+    const ghost = w.enemies.find((e) => e.defId === 'mote_ghost');
+    expect(ghost, 'the ghost should have spawned').toBeDefined();
+    expect(ghost!.traits.some((t) => t.t === 'phase')).toBe(true);
+
+    let sawPhased = false;
+    let sawSolid = false;
+    for (let i = 0; i < 400 && ghost!.alive; i++) {
+      w.advance(NO_INPUT);
+      if (ghost!.phased) sawPhased = true;
+      else sawSolid = true;
+    }
+    expect(sawPhased, 'a Ghost must go untargetable').toBe(true);
+    expect(sawSolid, '...and come back').toBe(true);
+  });
+
+  it('anchored overrides a def zone; phasing defers to a def phase', () => {
+    const { AFFIX_TRAITS, deriveTraits, mergeAffixes, traitOf } = TRAITS;
+
+    // Anchored replaces whatever zone the def had — it is prepended, so it wins.
+    const anchored = mergeAffixes(deriveTraits({ behavior: 'seek' }), ['anchored']);
+    expect(traitOf(anchored, 'zone')).toEqual(AFFIX_TRAITS.anchored!.traits[0]);
+
+    // Phasing defers to the def's own timing — appended, so the def's wins.
+    const ghostPlusAffix = mergeAffixes(
+      deriveTraits({ behavior: 'seek', phaseInterval: 1.6, phaseDuration: 0.4 }),
+      ['phasing'],
+    );
+    expect(traitOf(ghostPlusAffix, 'phase')!.interval).toBe(1.6);
+
+    // With no def phase, the affix's timing is what is left.
+    const plainPlusAffix = mergeAffixes(deriveTraits({ behavior: 'seek' }), ['phasing']);
+    expect(traitOf(plainPlusAffix, 'phase')!.interval).toBe(TUNABLE.affixPhaseInterval);
+  });
+
+  it('§21b.7 — a siege stops when the gate opens', () => {
+    // Reported as "AFTER the gate opened, a TON kept spawning". `parcel.at` is
+    // the schedule *and* was being passed on as the spawn delay, so the wait
+    // happened twice: the last and largest parcel was handed over at bar-second
+    // 20.5 and then sat in the queue for another 20.5 seconds, arriving about
+    // nineteen seconds after the fight was over. Measured across the five
+    // seconds following the opening: 56 arrivals before the fix, 17 after —
+    // and 17 is the ordinary flow, which is meant to continue.
+    const w = new World({ seed: 'aftergate', axiomId: 'ignition' });
+    w.threat = 8;
+    w.enemies.length = 0;
+    const t = w.terminals.find((x) => x.kind === 'gate')!;
+    let openedAt = -1;
+    let burst = 0;
+    const proto = Object.getPrototypeOf(w) as { spawnEnemy: (...a: never[]) => unknown };
+    const orig = proto.spawnEnemy;
+    proto.spawnEnemy = function (this: unknown, ...a: never[]) {
+      if (openedAt >= 0 && w.time - openedAt < 5) burst++;
+      return orig.apply(this, a);
+    };
+    for (let i = 0; i < 60 * 45; i++) {
+      if (openedAt < 0) {
+        w.player.x = t.x;
+        w.player.y = t.y;
+      }
+      w.player.integrity = w.player.maxIntegrity;
+      w.advance(NO_INPUT);
+      if (openedAt < 0 && w.openBiomes.size > 0) openedAt = w.time;
+    }
+    proto.spawnEnemy = orig;
+    expect(openedAt, 'the gate should have opened').toBeGreaterThan(0);
+    expect(burst, 'the siege must not keep arriving after it is over').toBeLessThan(35);
+  });
+
+  it('§11.2 — the suppression ceiling counts fields, not Suppressors', () => {
+    // Reported as "TONS of inhibitors" at a Cache and after a gate opened, and
+    // the count of actual Suppressors in both cases was zero. They were
+    // `anchored` elites: the affix grants a suppression field, the ceiling only
+    // ever counted definitions carrying `zoneRadius`, so the affix bypassed it
+    // completely. Measured before the fix: 37 fields around a Cache, 108 during
+    // a gate hold, against a cap of two.
+    const fields = (w: World): number =>
+      w.enemies.filter(
+        (e) =>
+          e.alive &&
+          (e.traits.some((t) => t.t === 'zone') || e.defId === 'suppressor'),
+      ).length;
+
+    const w = new World({ seed: 'fields', axiomId: 'ignition' });
+    w.threat = 8;
+    w.enemies.length = 0;
+    (w as unknown as { openCacheNow(x: number, y: number): void }).openCacheNow(
+      w.player.x,
+      w.player.y,
+    );
+    let peak = 0;
+    for (let i = 0; i < 60 * 20; i++) {
+      w.player.integrity = w.player.maxIntegrity;
+      w.advance(NO_INPUT);
+      peak = Math.max(peak, fields(w));
+    }
+    expect(peak).toBeGreaterThan(0);
+    expect(peak, 'a hardened wave must not blanket the arena in Engine-off auras').toBeLessThanOrEqual(
+      TUNABLE.suppressorsAlive,
+    );
+  });
+
+  it('a room caps its own punctuation (GDD §21b)', () => {
+    // `events[].maxAlive` was documented as a per-room cap and read by nothing
+    // for as long as levels have existed. The Heap says two. Ask for twelve.
+    const w = new World({ seed: 'eventcap', axiomId: 'ignition' });
+    w.enemies.length = 0;
+    const level = (w.arena.levels ?? [])[0]!;
+    const cap = level.roster.events!.find((e) => e.id === 'suppressor')!.maxAlive;
+    const queue = (
+      w as unknown as {
+        queueSpawn(e: string, x: number, y: number, s: number, d: number, via: unknown[]): void;
+      }
+    ).queueSpawn.bind(w);
+    for (let i = 0; i < 12; i++) {
+      queue('suppressor', w.player.x + 800, w.player.y + 800, 40, i * 0.05, []);
+      w.advance(NO_INPUT);
+    }
+    for (let i = 0; i < 120; i++) w.advance(NO_INPUT);
+    const live = w.enemies.filter((e) => e.alive && e.defId === 'suppressor').length;
+    expect(live).toBeGreaterThan(0);
+    expect(live).toBeLessThanOrEqual(cap);
+  });
+
+  it('every affix the roller can pick has an implementation', () => {
+    // Replaces two hand-synced literal arrays. If an affix is added to the table
+    // without traits, or a trait is named that no runner implements, this fails
+    // rather than the affix quietly doing nothing.
+    for (const id of TRAITS.AFFIX_IDS) {
+      const entry = TRAITS.AFFIX_TRAITS[id]!;
+      expect(entry.traits.length, `affix "${id}" grants nothing`).toBeGreaterThan(0);
+      for (const spec of entry.traits) {
+        expect(TRAITS.TRAIT_RUNNERS[spec.t], `affix "${id}" needs trait "${spec.t}"`).toBeDefined();
+      }
+    }
+  });
+});

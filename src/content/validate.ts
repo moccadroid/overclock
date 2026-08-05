@@ -27,6 +27,27 @@ export interface FieldSpec {
 
 export type Schema = Record<string, FieldSpec>;
 
+/**
+ * A rule that only applies to *some* records in a collection.
+ *
+ * The validator could already say "this field must be a number between 0 and 1".
+ * It could not say "if `behavior` is `charge`, `windup` is required" — so an
+ * enemy declaring a behaviour and omitting the field that behaviour needs
+ * validated cleanly, loaded cleanly, and then misbehaved at runtime with no
+ * error anywhere. That is the exact shape of bug this file exists to prevent,
+ * and it had a hole in it.
+ *
+ * Deliberately not a general expression language: `when` a field equals a value,
+ * `require` these others. Anything more expressive belongs in a test, where it
+ * can say why.
+ */
+export interface ConditionalRule {
+  when: { field: string; equals: string | number | boolean };
+  require: readonly string[];
+  /** Shown when it fails, so the message says the design rule and not the code. */
+  because: string;
+}
+
 export class ContentError extends Error {
   constructor(
     readonly file: string,
@@ -122,6 +143,7 @@ export function validateCollection<T>(
   records: readonly unknown[],
   schema: Schema,
   registries: RegistrySet,
+  rules: readonly ConditionalRule[] = [],
 ): readonly T[] {
   const errors: ContentError[] = [];
   const seenIds = new Set<string>();
@@ -138,6 +160,21 @@ export function validateCollection<T>(
       seenIds.add(id);
     }
     checkObject(file, id, obj, schema, registries, errors);
+    for (const rule of rules) {
+      if (obj[rule.when.field] !== rule.when.equals) continue;
+      for (const needed of rule.require) {
+        if (obj[needed] === undefined) {
+          errors.push(
+            new ContentError(
+              file,
+              id,
+              `"${rule.when.field}" is "${String(rule.when.equals)}" so "${needed}" is ` +
+                `required — ${rule.because}`,
+            ),
+          );
+        }
+      }
+    }
   });
 
   if (errors.length > 0) {

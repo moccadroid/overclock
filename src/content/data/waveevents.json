@@ -18,7 +18,7 @@
       }
     ],
     "cue": "summons",
-    "description": "The Beacon pulls the next wave in early. One parcel, from the usual edge origins, at the substitution level the run has already earned. It is not harder than the flow, it is the flow arriving now."
+    "description": "The Beacon pulls the next wave in early. One parcel, from the usual edge origins, at the substitution level the run has already earned. It is not harder than the flow, it is the flow arriving now \u2014 including whatever punctuation the room allows."
   },
   {
     "id": "cache_menagerie",
@@ -35,6 +35,9 @@
     ],
     "via": [
       {
+        "op": "noEvents"
+      },
+      {
         "op": "escalate",
         "mode": "best",
         "lead": 2
@@ -50,14 +53,14 @@
       }
     ],
     "cue": "hardened",
-    "description": "A purchase. One ring around the box you opened, two Threat points past the wave you were already fighting, one affix each. Opt-in difficulty, so the toughen is honest."
+    "description": "A purchase. One ring around the box you opened, two Threat points past the wave you were already fighting, one affix each. Opt-in difficulty, so the toughen is honest. No events: a hardened Suppressor is a 640hp Engine-off zone, which is not a crowd and was the whole of the level-one difficulty spike."
   },
   {
     "id": "gate_siege",
     "parcels": [
       {
         "at": 2,
-        "share": 0.2,
+        "share": 0.3,
         "ring": [
           460,
           1000
@@ -66,7 +69,7 @@
       },
       {
         "at": 6,
-        "share": 0.24,
+        "share": 0.36,
         "ring": [
           460,
           1000
@@ -75,7 +78,7 @@
       },
       {
         "at": 10,
-        "share": 0.28,
+        "share": 0.42,
         "ring": [
           420,
           950
@@ -84,7 +87,7 @@
       },
       {
         "at": 13,
-        "share": 0.14,
+        "share": 0.21,
         "ring": [
           700,
           1200
@@ -93,7 +96,7 @@
       },
       {
         "at": 17,
-        "share": 0.42,
+        "share": 0.63,
         "ring": [
           360,
           820
@@ -102,7 +105,7 @@
       },
       {
         "at": 20.5,
-        "share": 0.62,
+        "share": 0.93,
         "ring": [
           300,
           760
@@ -127,6 +130,6 @@
       }
     ],
     "cue": "siege",
-    "description": "The map refusing you. Six parcels across a twenty-two second hold, totalling ~1.9x the live target, at the destination room's ceiling regardless of Threat. `at` is seconds of BAR, not of wall clock \u2014 the schedule rewinds when the hold drains, so brushing the circle on the way past costs nothing and letting go gives ground back. Note the dip at thirteen seconds and the tightening rings: the lull is where the player believes they have it, and the last two parcels land close."
+    "description": "The map refusing you. Six parcels across a twenty-two second hold, at the destination room's ceiling regardless of Threat, two affixes each. `at` is seconds of BAR, not wall clock, so the schedule rewinds when the hold drains \u2014 and it is applied once, by the gate; callWave does not delay again. Events are allowed here: a Suppressor in a siege is the room defending itself, which is the point. It is only a Cache that must not field them. Sized against TUNABLE.siegeAmbientFraction, which drops the director's floor to a third while a gate is held \u2014 these shares and that number are one balance decision in two files."
   }
 ]

@@ -404,7 +404,7 @@ const waveEventSchema: Schema = {
         op: {
           type: 'string',
           required: true,
-          oneOf: ['roster', 'escalate', 'affix', 'toughen', 'enrich'],
+          oneOf: ['roster', 'escalate', 'affix', 'toughen', 'enrich', 'noEvents'],
         },
         mode: { type: 'string', oneOf: ['roll', 'best'] },
         lead: { type: 'number' },
@@ -497,11 +497,38 @@ export const MODIFIERS = validateCollection<ModifierDef>(
   modifierSchema,
   registries,
 );
+/**
+ * §10.2 — a behaviour that names itself must bring what it needs.
+ *
+ * These were unenforceable until the validator learned conditional rules. A
+ * Lancer with no `standoff` fell back to a magic number at the use site; a
+ * Charger with no `windup` was not a Charger at all, because the old dispatch
+ * identified one by the *presence of that field*.
+ */
+const ENEMY_RULES = [
+  {
+    when: { field: 'behavior', equals: 'charge' },
+    require: ['windup'],
+    because: 'a charge with no telegraph is an unfair hit (§17.1)',
+  },
+  {
+    when: { field: 'behavior', equals: 'suppress' },
+    require: ['zoneRadius'],
+    because: 'a Suppressor with no zone suppresses nothing (§10.2)',
+  },
+  {
+    when: { field: 'behavior', equals: 'lance' },
+    require: ['standoff', 'beamDamage', 'windup'],
+    because: 'a Lancer needs a distance to keep, a beam, and a telegraph (§10.2)',
+  },
+] as const;
+
 export const ENEMIES = validateCollection<EnemyDef>(
   'enemies.json',
   enemiesRaw,
   enemySchema,
   registries,
+  ENEMY_RULES,
 );
 export const WAVES = validateCollection<WaveTemplateDef>(
   'waves.json',

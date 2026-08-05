@@ -275,7 +275,7 @@ export interface BiomeDef {
    * different room. Adding one is a JSON edit plus a branch in the post shader,
    * which is the whole reason it is a name rather than a pile of numbers.
    */
-  field?: 'frost' | 'ember' | 'static';
+  field?: BiomeField;
   /** The one rule. Multiplies base Heat venting while the player is inside. */
   ventMultiplier?: number;
   /** Multiplies XP from shards collected inside. */
@@ -283,6 +283,35 @@ export interface BiomeDef {
   /** POIs this biome guarantees, placed inside it when it opens. */
   poi?: readonly string[];
   description: string;
+}
+
+/**
+ * §21b.4 — a screen-space field, as a kind plus its numbers.
+ *
+ * The kind still resolves to a branch in the post shader and always will: a
+ * Voronoi fracture, rising motes and signal static are three genuinely different
+ * programs, and a data language expressive enough to describe all three would be
+ * a worse language than GLSL. Pretending otherwise is how you get an uber-shader
+ * nobody can read.
+ *
+ * What *was* wrong is that every number inside those programs was a literal — the
+ * frost cell size, the ember mote density, the tint each one pushes — so the only
+ * biome that could ever look like frost was the one called frost. Now the shape
+ * is code and the palette is data, which is the same split the hazards took: a
+ * second ice room at half the cell size and a green tint is a JSON edit.
+ */
+export interface BiomeField {
+  kind: 'frost' | 'ember' | 'static';
+  /** 0..1 overall strength, before the biome's own fade-in. */
+  amount?: number;
+  /** Feature size in screen pixels — frost cells, ember spacing, static bands. */
+  scale?: number;
+  /** How hard the field's own marks are drawn over the picture. */
+  intensity?: number;
+  /** How much of the screen it reaches, 0 edges-only to 1 everywhere. */
+  reach?: number;
+  /** The colour it pushes, as 0..1 RGB. */
+  tint?: readonly [number, number, number];
 }
 
 /**
@@ -603,6 +632,19 @@ export type WaveTransform =
    * system has started lying about where its difficulty comes from.
    */
   | { op: 'toughen'; hp: number; damage?: number }
+  /**
+   * §12.4, §21b.7 — drop the room's punctuation out of this wave.
+   *
+   * Suppressors and Lancers are events: rare, individually capped, and built to
+   * be answered by killing one thing or leaving. A called wave hardens whatever
+   * it draws, and a hardened Suppressor is a 640hp Engine-off zone — the same
+   * five-second inconvenience turned into a forty-second lockout, and on level
+   * one it arrived at minute three. Called waves ask for a crowd; the room's
+   * punctuation is not a crowd.
+   *
+   * Applied after `roster`, so it remaps into the families that step named.
+   */
+  | { op: 'noEvents' }
   /** §12.3 — the Beacon's enriched arrivals: more fuel, more of everything. */
   | { op: 'enrich' };
 

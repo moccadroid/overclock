@@ -80,6 +80,17 @@ uniform float uState;
  */
 uniform int uField;
 uniform float uFieldAmount;
+/**
+ * §21b.4 — the field's own numbers: (scale, intensity, reach, unused).
+ *
+ * The kind still picks a branch below, because a Voronoi fracture, rising motes
+ * and signal static are three different programs and no amount of uniforms turns
+ * one into another. What these buy is every *variant* of those three for free: a
+ * second ice room at half the cell size and a green tint is a JSON edit rather
+ * than a fourth branch.
+ */
+uniform vec4 uFieldParams;
+uniform vec3 uFieldTint;
 
 /**
  * §11.2 — Suppressor fields, as a signal fault rather than a drawn ring.
@@ -378,7 +389,7 @@ void main(void) {
       // legible (§16.2): the frame ices over, the arena in front of you does
       // not.
       if (growth > 0.02) {
-        vec2 fu = spx / 52.0;
+        vec2 fu = spx / uFieldParams.x;
         vec2 fi = floor(fu);
         vec2 ff = fract(fu);
         float d1 = 8.0;
@@ -395,7 +406,7 @@ void main(void) {
         }
         // The seam between two cells, and a faint body inside each facet.
         float fracture = 1.0 - smoothstep(0.0, 0.10, d2 - d1);
-        colour.rgb += vec3(0.42, 0.60, 0.86) * fracture * growth * 0.85;
+        colour.rgb += uFieldTint * fracture * growth * uFieldParams.y;
         colour.rgb += vec3(0.10, 0.16, 0.26) * growth * (1.0 - d1) * 0.5;
         // A slow glint on the vertices, so it reads as live cold rather than
         // as a blue filter.
@@ -405,9 +416,9 @@ void main(void) {
     } else if (uField == 2) {
       // Ember. Warm bias, and motes rising out of the floor.
       colour.rgb *= vec3(1.0 + k * 0.16, 1.0, 1.0 - k * 0.12);
-      vec2 mote = spx / 34.0 + vec2(0.0, uTime * 0.9);
+      vec2 mote = spx / uFieldParams.x + vec2(0.0, uTime * 0.9);
       float spark = step(0.995, hash(floor(mote)));
-      colour.rgb += vec3(1.0, 0.5, 0.1) * spark * k * 0.7;
+      colour.rgb += uFieldTint * spark * k * uFieldParams.y;
       colour.rgb += vec3(0.35, 0.12, 0.0) * edge * k * 0.5;
     } else if (uField == 3) {
       // Static. The signal is bad everywhere, mildly, all the time.
@@ -495,6 +506,8 @@ export class PostPass {
           uState: { value: 0, type: 'f32' },
           uField: { value: 0, type: 'i32' },
           uFieldAmount: { value: 0, type: 'f32' },
+          uFieldParams: { value: new Float32Array([52, 0.85, 1, 0]), type: 'vec4<f32>' },
+          uFieldTint: { value: new Float32Array([0.42, 0.6, 0.86]), type: 'vec3<f32>' },
           uScreen: { value: new Float32Array([1, 1]), type: 'vec2<f32>' },
           uGlitchCount: { value: 0, type: 'i32' },
           uGlitch: { value: new Float32Array(MAX_GLITCH * 4), type: 'vec4<f32>', size: MAX_GLITCH },
@@ -543,10 +556,22 @@ export class PostPass {
   }
 
   /** §21b.4 — which biome field is running, and how far in the player is. */
-  setField(kind: number, amount: number): void {
-    const u = this.filter.resources.postUniforms.uniforms as Record<string, number>;
+  setField(
+    kind: number,
+    amount: number,
+    look: { scale: number; intensity: number; reach: number; tint: readonly [number, number, number] },
+  ): void {
+    const u = this.filter.resources.postUniforms.uniforms as Record<string, unknown>;
     u.uField = kind;
     u.uFieldAmount = amount;
+    const params = u.uFieldParams as Float32Array;
+    params[0] = look.scale;
+    params[1] = look.intensity;
+    params[2] = look.reach;
+    const tint = u.uFieldTint as Float32Array;
+    tint[0] = look.tint[0];
+    tint[1] = look.tint[1];
+    tint[2] = look.tint[2];
   }
 
   /** True when every effect is off — the pass can then be skipped entirely. */

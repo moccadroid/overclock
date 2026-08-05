@@ -371,27 +371,57 @@ export const TUNABLE = {
    */
   cacheThreatLead: 2,
   /**
-   * §21b.7 — the gate siege. Holding a gate is the boss wave.
+   * §21b.5 — how fast a hold drains when you step off it, as a fraction of how
+   * fast it fills.
    *
-   * `siegeDensity` is a multiple of the director's live target *per pulse*, and
-   * the number that matters is the sum across the hold, not this. Six pulses
-   * under the ramp below come to roughly 1.9x the live target — a wall, arriving
-   * in instalments, on top of the normal flow and made of things wearing two
-   * affixes each at four times HP.
-   *
-   * It was briefly 1.1 *per pulse*, which is the same sentence read wrong: 1,643
-   * hardened enemies for one gate at Threat 20, which is not a wall, it is the
-   * entity cap. Tune the total, then divide.
+   * A gate drains four times slower than an ordinary POI because losing twenty
+   * seconds of holding to one dodge would make the mechanic a punishment for
+   * playing well. This is also the dial behind "you can't run away for long" —
+   * lowering it makes retreating from a siege cheaper without touching the
+   * siege.
    */
-  siegeInterval: 4,
-  siegeDensity: 0.42,
-  /** The first pulse's share of a full one. The bar filling is the escalation. */
-  siegeOpening: 0.45,
-  /** Two, where a Cache rolls one. Drawn without replacement from a pool of 3. */
-  siegeAffixes: 2,
-  /** Wide, and wider than a Cache's: they come from all around the doorway. */
-  siegeRingMin: 460,
-  siegeRingMax: 1000,
+  gateDrainRate: 0.25,
+  poiDrainRate: 0.6,
+  /**
+   * §9.1 — how still "standing still" is, in units per second.
+   *
+   * Recompile is the one POI that must be channelled stationary. Nonzero
+   * because a controller's dead zone and a keyboard's release frame both leave a
+   * few units of drift, and failing a twelve-second channel on that is a bug the
+   * player experiences as the game lying.
+   */
+  stillnessSpeed: 12,
+  /** §5.4 Orbital — contact padding, so a graze counts as a hit. */
+  orbitContactPad: 12,
+  /**
+   * §21b.7 — the gate siege's shape lives in waveevents.json, not here.
+   *
+   * `siegeDensity`, `siegeOpening`, `siegeInterval`, `siegeAffixes` and the ring
+   * bounds used to be read from this file. They were superseded when called
+   * waves became data and then sat here for a week reading like live dials while
+   * nothing looked at them — the same trap `RosterDef.events[].maxAlive` was.
+   * A knob that does nothing is worse than no knob: it answers the question
+   * "where do I tune this" with a lie.
+   *
+   * The one that is still real is this, because it scales the *director*, which
+   * is not part of any wave event.
+   *
+   * §21b.7 — how much of the ambient floor the director still holds while a gate
+   * is being held.
+   *
+   * `sustainPressure` *maintains* density rather than budgeting it, so during a
+   * hold every siege enemy killed inside the pressure radius opened a deficit
+   * the director closed within a second at sixty-seven a second. Killing bought
+   * nothing and retreating bought nothing: the fight was not hard, it was
+   * unresolvable. At a third, killing visibly thins the room and walking out
+   * resets it, while the arena still does not fall silent between parcels.
+   *
+   * It scales the floor only. Siege parcels are sized off the unscaled target,
+   * or this one number would quietly shrink the siege too — but it and the
+   * parcel shares in waveevents.json are still one balance decision in two
+   * files, and moving either alone will not do what you expect.
+   */
+  siegeAmbientFraction: 0.35,
   cacheRingMin: 380,
   cacheRingMax: 900,
   /**

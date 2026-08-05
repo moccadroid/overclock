@@ -6,6 +6,40 @@
  * slightly teach two different shapes, and the second one is the one you were
  * looking at when you had time to read it.
  */
+/**
+ * §10.1 — the shape table.
+ *
+ * Was three nested ternaries deep. Adding a shape meant editing all three and
+ * hoping, and a shape the type admitted but the ternaries did not fell through
+ * to a 16-gon — a silent circle where a silhouette should be, which is the one
+ * failure this grammar cannot afford (§16.4: you learn enemies by outline).
+ *
+ * A row per shape now, and `content.test.ts` asserts every shape in the type has
+ * one. `sides: 0` means the shape draws itself.
+ */
+interface ShapeDef {
+  sides: number;
+  /** Fixed rotation, or `aim` to point where the thing is facing. */
+  rot?: number | 'aim';
+  /** Alternate vertices pulled in by this factor, which is what makes a kite. */
+  pinch?: number;
+  /** Drawn open, so it must never be filled. */
+  open?: boolean;
+}
+
+const SHAPE_TABLE: Record<string, ShapeDef> = {
+  dot: { sides: 6 },
+  circle: { sides: 16 },
+  ring: { sides: 16 },
+  triangle: { sides: 3, rot: 'aim' },
+  square: { sides: 4, rot: Math.PI / 4 },
+  diamond: { sides: 4, pinch: 0.62 },
+  pentagon: { sides: 5, rot: -Math.PI / 2 },
+  hexagon: { sides: 6 },
+  crescent: { sides: 0, open: true },
+  line: { sides: 0, open: true },
+};
+
 export function shapeOutline(
   shape: string,
   cx: number,
@@ -13,10 +47,9 @@ export function shapeOutline(
   r: number,
   rotation: number,
 ): [number, number][] {
-  const points: [number, number][] = [];
-
   if (shape === 'crescent') {
     // Open arc: reads as "takes a bite out of something".
+    const points: [number, number][] = [];
     for (let i = 0; i <= 12; i++) {
       const a = rotation + 0.9 + (i / 12) * (Math.PI * 1.5);
       points.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]);
@@ -33,39 +66,23 @@ export function shapeOutline(
     ];
   }
 
-  const sides =
-    shape === 'triangle'
-      ? 3
-      : shape === 'diamond' || shape === 'square'
-        ? 4
-        : shape === 'pentagon'
-          ? 5
-          : shape === 'hexagon'
-            ? 6
-            : shape === 'dot'
-              ? 6
-              : 16;
-  const rot =
-    shape === 'square'
-      ? Math.PI / 4
-      : shape === 'diamond'
-        ? 0
-        : shape === 'triangle'
-          ? rotation
-          : shape === 'pentagon'
-            ? -Math.PI / 2
-            : 0;
-  for (let i = 0; i < sides; i++) {
-    const a = rot + (i / sides) * Math.PI * 2;
-    const radius = shape === 'diamond' && i % 2 === 1 ? r * 0.62 : r;
+  const def = SHAPE_TABLE[shape] ?? SHAPE_TABLE.circle!;
+  const rot = def.rot === 'aim' ? rotation : (def.rot ?? 0);
+  const points: [number, number][] = [];
+  for (let i = 0; i < def.sides; i++) {
+    const a = rot + (i / def.sides) * Math.PI * 2;
+    const radius = def.pinch !== undefined && i % 2 === 1 ? r * def.pinch : r;
     points.push([cx + Math.cos(a) * radius, cy + Math.sin(a) * radius]);
   }
   return points;
 }
 
+/** Every shape the grammar knows. The coverage test compares this to the type. */
+export const SHAPE_NAMES = Object.keys(SHAPE_TABLE);
+
 /** True for shapes drawn open rather than closed — they must not be filled. */
 export function shapeIsOpen(shape: string): boolean {
-  return shape === 'crescent' || shape === 'line';
+  return SHAPE_TABLE[shape]?.open === true;
 }
 
 /**

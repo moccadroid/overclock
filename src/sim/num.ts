@@ -314,3 +314,11 @@ export function dist(ax: number, ay: number, bx: number, by: number): number {
   const dy = by - ay;
   return Math.sqrt(dx * dx + dy * dy);
 }
+
+/**
+ * Exact, branch-only, and therefore inside the determinism boundary. Lived as a
+ * private helper at the bottom of world.ts until traits needed it too.
+ */
+export function clamp(v: number, lo: number, hi: number): number {
+  return v < lo ? lo : v > hi ? hi : v;
+}

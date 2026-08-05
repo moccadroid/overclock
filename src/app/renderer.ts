@@ -16,7 +16,7 @@
 import { Application, Container, Graphics, Sprite, Text, Texture } from 'pixi.js';
 import { TUNABLE } from '../sim/tunables';
 import type { EnemyMark, Hue } from '../sim/types';
-import type { TerminalKind, World } from '../sim/world';
+import type { Containment, TerminalKind, World } from '../sim/world';
 import { enemy as getEnemy } from '../content/index';
 import { Camera } from './camera';
 import { BAND, PALETTE, SHELL, VIEW, VISUAL, sampleGate } from './visual';
@@ -72,6 +72,78 @@ const BEAT_SNAP = 0.045;
 const VIEW_HEIGHT = 900;
 const VIEW_WIDTH_MIN = 1200;
 const VIEW_WIDTH_MAX = 1900;
+
+/**
+ * §11.4 — how each Containment hazard draws.
+ *
+ * The sim half of this became a registry in `hazards.ts`; this is the other half
+ * the old `if (c.kind === …)` chain was split across. Adding a hazard is now one
+ * entry there and one here, and a coverage test asserts the two vocabularies
+ * agree — a hazard the sim can spawn and the renderer cannot draw is invisible
+ * damage, which is the worst failure this system has.
+ */
+interface HazardDrawCtx {
+  g: Graphics;
+  c: Containment;
+  arena: { width: number; height: number };
+  arming: boolean;
+  alpha: number;
+  width: number;
+  color: number;
+}
+
+export const HAZARD_DRAW: Record<string, (d: HazardDrawCtx) => void> = {
+  sweeper: ({ g, c, arena, alpha, width, color }) => {
+    const horizontal = c.dirX !== 0;
+    const half = TUNABLE.sweeperGapWidth / 2;
+    if (horizontal) {
+      g.moveTo(c.x, 0).lineTo(c.x, c.gapAt - half);
+      g.moveTo(c.x, c.gapAt + half).lineTo(c.x, arena.height);
+    } else {
+      g.moveTo(0, c.y).lineTo(c.gapAt - half, c.y);
+      g.moveTo(c.gapAt + half, c.y).lineTo(arena.width, c.y);
+    }
+    g.stroke({ width, color, alpha });
+    // Mark the gap: the answer is always visible.
+    if (horizontal) {
+      g.moveTo(c.x - 14, c.gapAt - half).lineTo(c.x + 14, c.gapAt - half);
+      g.moveTo(c.x - 14, c.gapAt + half).lineTo(c.x + 14, c.gapAt + half);
+    } else {
+      g.moveTo(c.gapAt - half, c.y - 14).lineTo(c.gapAt - half, c.y + 14);
+      g.moveTo(c.gapAt + half, c.y - 14).lineTo(c.gapAt + half, c.y + 14);
+    }
+    g.stroke({ width: 1.5, color: PALETTE.beacon, alpha: BAND.inFlight });
+  },
+
+  cell: ({ g, c, alpha, width, color }) => {
+    const segments = 48;
+    for (let i = 0; i < segments; i++) {
+      const a0 = (i / segments) * Math.PI * 2;
+      const a1 = ((i + 1) / segments) * Math.PI * 2;
+      const mid = (a0 + a1) / 2;
+      if (c.gapAngles.some((gap) => Math.abs(angleDiff(mid, gap)) < 0.34)) continue;
+      arcSegment(g, c.x, c.y, c.radius, a0, a1);
+    }
+    g.stroke({ width, color, alpha });
+  },
+
+  nullfront: ({ g, c, arena, arming, alpha, width, color }) => {
+    const depth = c.advance;
+    if (depth <= 1) return;
+    if (c.dirX > 0) g.rect(0, 0, depth, arena.height);
+    else if (c.dirX < 0) g.rect(arena.width - depth, 0, depth, arena.height);
+    else if (c.dirY > 0) g.rect(0, 0, arena.width, depth);
+    else g.rect(0, arena.height - depth, arena.width, depth);
+    g.fill({ color: PALETTE.signal, alpha: 0.1 * (arming ? 0.3 : 1) });
+
+    // Leading edge, drawn hard so the boundary is unmistakable.
+    if (c.dirX > 0) g.moveTo(depth, 0).lineTo(depth, arena.height);
+    else if (c.dirX < 0) g.moveTo(arena.width - depth, 0).lineTo(arena.width - depth, arena.height);
+    else if (c.dirY > 0) g.moveTo(0, depth).lineTo(arena.width, depth);
+    else g.moveTo(0, arena.height - depth).lineTo(arena.width, arena.height - depth);
+    g.stroke({ width, color, alpha });
+  },
+};
 
 export class Renderer {
   readonly app = new Application();
@@ -556,17 +628,28 @@ export class Renderer {
     // is about half a screen, so walking into the Freezer is a thing you watch
     // arrive; stepping one pixel over the line barely registers, which is what
     // stops a boundary you are pacing along from strobing.
-    if (biome?.field) this.fieldKind = FIELD_KIND[biome.field] ?? 0;
+    if (biome?.field) this.fieldKind = FIELD_KIND[biome.field.kind] ?? 0;
     const inset = biome
       ? Math.min(
           Math.min(world.player.x - biome.x, biome.x + biome.w - world.player.x),
           Math.min(world.player.y - biome.y, biome.y + biome.h - world.player.y),
         )
       : 0;
-    const wanted = biome?.field ? Math.min(1, Math.max(0, inset) / 400) : 0;
+    const wanted = biome?.field
+      ? Math.min(1, Math.max(0, inset) / 400) * (biome.field.amount ?? 1)
+      : 0;
     this.fieldAmount += (wanted - this.fieldAmount) * Math.min(1, frameDt * 2.5);
     if (this.fieldAmount < 0.002) this.fieldKind = 0;
-    this.post.setField(this.fieldKind, this.fieldAmount);
+    // The kind picks the program; these pick what it looks like. Defaults are
+    // the numbers that used to be baked into the shader, so a biome that says
+    // nothing gets exactly what it got before.
+    const f = biome?.field;
+    this.post.setField(this.fieldKind, this.fieldAmount, {
+      scale: f?.scale ?? FIELD_DEFAULTS[this.fieldKind]!.scale,
+      intensity: f?.intensity ?? FIELD_DEFAULTS[this.fieldKind]!.intensity,
+      reach: f?.reach ?? FIELD_DEFAULTS[this.fieldKind]!.reach,
+      tint: f?.tint ?? FIELD_DEFAULTS[this.fieldKind]!.tint,
+    });
     const background = mix(this.tint, 0x243044, Math.min(0.85, melt * 0.55));
     this.app.renderer.background.color = background;
     this.backdrop.tint = background;
@@ -1396,53 +1479,7 @@ export class Renderer {
       const width = arming ? 1.5 : 4;
       const color = arming ? PALETTE.beacon : PALETTE.signal;
 
-      if (c.kind === 'sweeper') {
-        const horizontal = c.dirX !== 0;
-        const half = TUNABLE.sweeperGapWidth / 2;
-        if (horizontal) {
-          g.moveTo(c.x, 0).lineTo(c.x, c.gapAt - half);
-          g.moveTo(c.x, c.gapAt + half).lineTo(c.x, arena.height);
-        } else {
-          g.moveTo(0, c.y).lineTo(c.gapAt - half, c.y);
-          g.moveTo(c.gapAt + half, c.y).lineTo(arena.width, c.y);
-        }
-        g.stroke({ width, color, alpha });
-        // Mark the gap: the answer is always visible.
-        if (horizontal) {
-          g.moveTo(c.x - 14, c.gapAt - half).lineTo(c.x + 14, c.gapAt - half);
-          g.moveTo(c.x - 14, c.gapAt + half).lineTo(c.x + 14, c.gapAt + half);
-        } else {
-          g.moveTo(c.gapAt - half, c.y - 14).lineTo(c.gapAt - half, c.y + 14);
-          g.moveTo(c.gapAt + half, c.y - 14).lineTo(c.gapAt + half, c.y + 14);
-        }
-        g.stroke({ width: 1.5, color: PALETTE.beacon, alpha: BAND.inFlight });
-      } else if (c.kind === 'cell') {
-        const segments = 48;
-        for (let i = 0; i < segments; i++) {
-          const a0 = (i / segments) * Math.PI * 2;
-          const a1 = ((i + 1) / segments) * Math.PI * 2;
-          const mid = (a0 + a1) / 2;
-          if (c.gapAngles.some((gap) => Math.abs(angleDiff(mid, gap)) < 0.34)) continue;
-          arcSegment(g, c.x, c.y, c.radius, a0, a1);
-        }
-        g.stroke({ width, color, alpha });
-      } else {
-        const depth = c.advance;
-        if (depth > 1) {
-          if (c.dirX > 0) g.rect(0, 0, depth, arena.height);
-          else if (c.dirX < 0) g.rect(arena.width - depth, 0, depth, arena.height);
-          else if (c.dirY > 0) g.rect(0, 0, arena.width, depth);
-          else g.rect(0, arena.height - depth, arena.width, depth);
-          g.fill({ color: PALETTE.signal, alpha: 0.1 * (arming ? 0.3 : 1) });
-
-          // Leading edge, drawn hard so the boundary is unmistakable.
-          if (c.dirX > 0) g.moveTo(depth, 0).lineTo(depth, arena.height);
-          else if (c.dirX < 0) g.moveTo(arena.width - depth, 0).lineTo(arena.width - depth, arena.height);
-          else if (c.dirY > 0) g.moveTo(0, depth).lineTo(arena.width, depth);
-          else g.moveTo(0, arena.height - depth).lineTo(arena.width, arena.height - depth);
-          g.stroke({ width, color, alpha });
-        }
-      }
+      HAZARD_DRAW[c.kind]?.({ g, c, arena, arming, alpha, width, color });
     }
   }
 
@@ -2468,6 +2505,20 @@ function reachFor(w: number, h: number): number {
 
 /** §21b.4 — biome field names, as the post shader's selector. */
 const FIELD_KIND: Record<string, number> = { frost: 1, ember: 2, static: 3 };
+
+/**
+ * §21b.4 — what each field looked like when its numbers were literals.
+ *
+ * A biome that specifies nothing gets exactly what it got before this was
+ * configurable, which is what makes the change safe to make at all. Index 0 is
+ * "no field" and is never read, but exists so the lookup needs no guard.
+ */
+const FIELD_DEFAULTS: Record<number, { scale: number; intensity: number; reach: number; tint: readonly [number, number, number] }> = {
+  0: { scale: 52, intensity: 0, reach: 1, tint: [1, 1, 1] },
+  1: { scale: 52, intensity: 0.85, reach: 1, tint: [0.42, 0.6, 0.86] },
+  2: { scale: 34, intensity: 0.7, reach: 1, tint: [1, 0.5, 0.1] },
+  3: { scale: 3, intensity: 1, reach: 1, tint: [1, 1, 1] },
+};
 
 /** Terminals are told apart by colour as well as by frame (§16.4). */
 const TERMINAL_COLOR: Record<TerminalKind, number> = {

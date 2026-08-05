@@ -7,14 +7,25 @@
  *   - iteration order over entities is stable (order-preserving compaction).
  * A given (seed, axiom, input sequence) reproduces bit-for-bit. See world.test.ts.
  */
+import { HAZARDS, HAZARD_KINDS, type HazardCtx } from './hazards';
 import { Rng } from './rng';
+import {
+  AFFIX_IDS,
+  TRAIT_RUNNERS,
+  mergeAffixes,
+  num,
+  traitOf,
+  traitsOf,
+  type TraitCtx,
+  type TraitSpec,
+} from './traits';
 import { SpatialGrid, type SpatialItem } from './spatial';
 import { FlowField } from './flowfield';
 import { CycleBudget } from './cycles';
 import { DiscoveryTracker } from './discoveries';
 import { Engine, type FireContext, type Program } from './engine';
 import { LOADBEARING, SAFETY, SIM_DT, TUNABLE } from './tunables';
-import { atan2 as patan2, cos as pcos, hypot, pow as ppow, sin as psin } from './num';
+import { atan2 as patan2, clamp, cos as pcos, hypot, pow as ppow, sin as psin } from './num';
 import {
   HUES,
   type ActionDef,
@@ -78,6 +89,22 @@ export interface Enemy extends SpatialItem {
   enriched: boolean;
   /** §10.3 — elite affixes rolled at spawn. */
   affixes: EliteAffix[];
+  /**
+   * §10.2, §10.3 — this individual's traits: its def's, plus its affixes'.
+   *
+   * Per enemy rather than per def, because affixes are rolled at spawn and two
+   * Motes of the same kind can now genuinely differ. This is what made an affix
+   * and a variant's own idea stop being two mechanisms.
+   */
+  traits: readonly TraitSpec[];
+  /**
+   * §10.2 — whether this tick's traits armed the shared steering block.
+   *
+   * Recomputed every tick from the trait list rather than stored on the def, so
+   * a trait can turn steering off for a beat — which is what a future "rooted"
+   * or "stunned" trait is, with no new branch anywhere.
+   */
+  steers: boolean;
   /** Phasing affix: currently untargetable. */
   phased: boolean;
   /** Facing, for the Bulwark's shield arc and the Lancer's beam. */
@@ -938,8 +965,19 @@ export class World {
   private readonly flowSample = { x: 0, y: 0 };
   private nextId = 1;
   private eventsThisTick = 0;
-  /** §23.1 — Lancers currently mid-telegraph. Recounted each tick. */
-  private chargingLancers = 0;
+
+  /**
+   * §10.2 — the trait contract, instantiated once.
+   *
+   * Rebuilt per enemy would allocate once per enemy per frame, which at a
+   * thousand enemies is a garbage-collection pause dressed as an abstraction.
+   * The four mutable fields are overwritten in the loop; everything else is a
+   * bound method and never changes.
+   */
+  private readonly traitCtx: TraitCtx;
+  /** §11.4 — the hazard contract, instantiated once. See traitCtx.
+   */
+  private readonly hazardCtx: HazardCtx;
 
   constructor(config: RunConfig) {
     this.config = config;
@@ -980,6 +1018,45 @@ export class World {
       outputBoost: 0,
       outputBoostTime: 0,
       alive: true,
+    };
+    this.traitCtx = {
+      dt: 0,
+      time: 0,
+      enemy: null as unknown as Enemy,
+      def: null as unknown as EnemyDef,
+      spec: null as unknown as TraitSpec,
+      player: this.player,
+      arena: this.arena,
+      projectiles: this.projectiles,
+      collide: (body, radius) => this.resolveRuins(body, radius),
+      sampleFlow: (x, y, out) => this.flow.sample(x, y, out),
+      flowCellSize: this.flow.cellSize,
+      neighbours: (x, y, radius, fn) => this.grid.queryRadius(x, y, radius, fn),
+      fx: (kind, hue, x, y, radius, life) => this.pushFx(kind, hue, x, y, radius, [], life),
+      cue: (kind, hue, depth, weight) => this.cue(kind, hue, depth, weight),
+      feed: (e, share) => this.feedInterceptor(e, share),
+      touch: (e, def) => this.touchPlayer(e, def),
+      hurt: (amount, cause) => this.hurtPlayer(amount, cause),
+      beam: (e, ux, uy) =>
+        this.pushFx(
+          'chain',
+          e.hue,
+          e.x,
+          e.y,
+          0,
+          [e.x, e.y, e.x + ux * TUNABLE.lancerBeamRange, e.y + uy * TUNABLE.lancerBeamRange],
+          0.18,
+        ),
+      lancers: { charging: 0 },
+    };
+
+    this.hazardCtx = {
+      player: this.player,
+      arena: this.arena,
+      chance: (q) => this.rng.chance(q),
+      range: (lo, hi) => this.rng.range(lo, hi),
+      next: () => this.rng.next(),
+      hurt: (amount, cause) => this.hurtPlayer(amount, cause),
     };
 
     this.xpToNext = TUNABLE.xpFirstLevel;
@@ -1913,7 +1990,7 @@ export class World {
       for (const [id, until] of o.cooldowns) {
         if (until <= this.time) o.cooldowns.delete(id);
       }
-      this.grid.queryRadius(o.x, o.y, o.radius + 12, (enemy) => {
+      this.grid.queryRadius(o.x, o.y, o.radius + TUNABLE.orbitContactPad, (enemy) => {
         if (o.cooldowns.has(enemy.id)) return;
         o.cooldowns.set(enemy.id, this.time + TUNABLE.orbitalHitCooldown);
         this.damageEnemy(enemy, o.damage, o.depth, o.programIndex, o.hue, o.leech);
@@ -1962,7 +2039,7 @@ export class World {
   private updateTerminals(input: InputState, dt: number): void {
     this.spawnTerminals(dt);
 
-    const moving = hypot(this.player.vx, this.player.vy) > 12;
+    const moving = hypot(this.player.vx, this.player.vy) > TUNABLE.stillnessSpeed;
     for (const t of this.terminals) {
       if (!t.alive) continue;
       t.age += dt;
@@ -1991,7 +2068,7 @@ export class World {
         // Generous interrupt-resume: it drains rather than snapping to zero.
         // A gate drains more slowly still — losing twenty seconds of holding to
         // one dodge would make the mechanic a punishment for playing well.
-        const drain = t.holdRadius ? 0.25 : 0.6;
+        const drain = t.holdRadius ? TUNABLE.gateDrainRate : TUNABLE.poiDrainRate;
         t.progress = Math.max(0, t.progress - (dt / t.channelTime) * drain);
       }
     }
@@ -2153,13 +2230,27 @@ export class World {
       if (this.openBiomes.has(b.id)) continue;
       if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return true;
     }
+
     const levels = this.arena.levels ?? [];
-    for (let i = 1; i < levels.length; i++) {
-      const l = levels[i]!;
-      if (this.openBiomes.has(l.id)) continue;
-      if (x >= l.x && x <= l.x + l.w && y >= l.y && y <= l.y + l.h) return true;
+    if (levels.length === 0) return false;
+
+    // Open ground is *inside an unlocked level*, not merely "outside a locked
+    // one". The difference is the corridor.
+    //
+    // The Heap ends at x=3800 and The Sink starts at x=4400, so the six hundred
+    // units between them — the gate's own doorway and the approach behind it —
+    // belonged to no level at all, and the old test found no locked level
+    // containing them and said "spawn away". Enemies appeared past the gate, in
+    // ground the player had not opened and could not reach, and dropped shards
+    // there. Reported from a screenshot: "enemies DO spawn in the next level".
+    //
+    // Stated the right way round, a gap between rooms is sealed for the same
+    // reason a locked room is: the player cannot stand there yet.
+    for (const l of levels) {
+      if (l !== levels[0] && !this.openBiomes.has(l.id)) continue;
+      if (x >= l.x && x <= l.x + l.w && y >= l.y && y <= l.y + l.h) return false;
     }
-    return false;
+    return true;
   }
 
   /** §21b.4 — the biome the player is standing in, if any. */
@@ -2487,135 +2578,35 @@ export class World {
       // Everything is telegraphed before it can hurt you (§17.1, §21).
       const armed = c.age >= c.telegraph;
 
-      if (c.kind === 'sweeper') {
-        c.x += c.dirX * TUNABLE.sweeperSpeed * dt;
-        c.y += c.dirY * TUNABLE.sweeperSpeed * dt;
-        if (armed) this.testSweeper(c);
-      } else if (c.kind === 'cell') {
-        const t = Math.min(1, Math.max(0, (c.age - c.telegraph) / TUNABLE.cellDuration));
-        c.radius = TUNABLE.cellStartRadius + (TUNABLE.cellEndRadius - TUNABLE.cellStartRadius) * t;
-        if (armed) this.testCell(c);
-      } else {
-        const t = Math.min(1, Math.max(0, (c.age - c.telegraph) / TUNABLE.nullFrontDuration));
-        c.advance = TUNABLE.nullFrontDepth * psin(t * Math.PI);
-        if (armed) this.testNullFront(c);
-      }
+      const hazard = HAZARDS[c.kind];
+      if (!hazard) continue;
+      hazard.update(c, this.hazardCtx, dt);
+      if (armed) hazard.test(c, this.hazardCtx);
     }
   }
 
   private spawnContainment(): void {
-    const kinds: ContainmentKind[] = ['sweeper', 'cell', 'nullfront'];
-    const kind = this.rng.pick(kinds);
-    const base = {
+    // §0 — `rng.pick` walks the registry's key order, so adding a hazard shifts
+    // the stream deliberately rather than by accident. The order is the file's.
+    const kind = this.rng.pick(HAZARD_KINDS);
+    const hazard = HAZARDS[kind];
+    if (!hazard) return;
+    this.containment.push({
       id: this.nextId++,
-      kind,
+      kind: kind as ContainmentKind,
       age: 0,
+      x: 0,
+      y: 0,
       dirX: 0,
       dirY: 0,
       gapAt: 0,
       radius: 0,
-      gapAngles: [] as number[],
+      gapAngles: [],
       advance: 0,
       telegraph: 1.1,
       alive: true,
-    };
-
-    if (kind === 'sweeper') {
-      // A wall crossing the whole arena with one gap. Positional test that
-      // ignores DPS entirely — you cannot shoot your way out of geometry.
-      const horizontal = this.rng.chance(0.5);
-      const fromStart = this.rng.chance(0.5);
-      const travel = horizontal ? this.arena.width : this.arena.height;
-      this.containment.push({
-        ...base,
-        x: horizontal ? (fromStart ? -60 : this.arena.width + 60) : this.arena.width / 2,
-        y: horizontal ? this.arena.height / 2 : fromStart ? -60 : this.arena.height + 60,
-        dirX: horizontal ? (fromStart ? 1 : -1) : 0,
-        dirY: horizontal ? 0 : fromStart ? 1 : -1,
-        gapAt: this.rng.range(
-          TUNABLE.sweeperGapWidth,
-          (horizontal ? this.arena.height : this.arena.width) - TUNABLE.sweeperGapWidth,
-        ),
-        life: travel / TUNABLE.sweeperSpeed + 2.5,
-        maxLife: travel / TUNABLE.sweeperSpeed + 2.5,
-      });
-      return;
-    }
-
-    if (kind === 'cell') {
-      const gaps: number[] = [];
-      for (let i = 0; i < TUNABLE.cellGaps; i++) {
-        gaps.push(this.rng.next() * Math.PI * 2);
-      }
-      this.containment.push({
-        ...base,
-        x: this.player.x,
-        y: this.player.y,
-        radius: TUNABLE.cellStartRadius,
-        gapAngles: gaps,
-        telegraph: 1.4,
-        life: TUNABLE.cellDuration + 2.4,
-        maxLife: TUNABLE.cellDuration + 2.4,
-      });
-      return;
-    }
-
-    const horizontal = this.rng.chance(0.5);
-    const fromStart = this.rng.chance(0.5);
-    this.containment.push({
-      ...base,
-      x: horizontal ? (fromStart ? 0 : this.arena.width) : this.arena.width / 2,
-      y: horizontal ? this.arena.height / 2 : fromStart ? 0 : this.arena.height,
-      dirX: horizontal ? (fromStart ? 1 : -1) : 0,
-      dirY: horizontal ? 0 : fromStart ? 1 : -1,
-      life: TUNABLE.nullFrontDuration + 2.6,
-      maxLife: TUNABLE.nullFrontDuration + 2.6,
+      ...hazard.spawn(this.hazardCtx),
     });
-  }
-
-  private testSweeper(c: Containment): void {
-    const p = this.player;
-    const along = c.dirX !== 0 ? p.y : p.x;
-    const across = c.dirX !== 0 ? p.x - c.x : p.y - c.y;
-    const inGap = Math.abs(along - c.gapAt) < TUNABLE.sweeperGapWidth / 2;
-    if (!inGap && Math.abs(across) < 22 + TUNABLE.playerRadius) {
-      this.hurtPlayer(TUNABLE.sweeperDamage, { id: 'sweeper', label: 'Sweeper', mode: 'containment' });
-    }
-  }
-
-  private testCell(c: Containment): void {
-    const p = this.player;
-    const dx = p.x - c.x;
-    const dy = p.y - c.y;
-    const d = hypot(dx, dy);
-    if (Math.abs(d - c.radius) > 20 + TUNABLE.playerRadius) return;
-    // Standing in one of the cage's gaps is how you get out.
-    const angle = patan2(dy, dx);
-    for (const gap of c.gapAngles) {
-      if (Math.abs(angleDelta(angle, gap)) < 0.34) return;
-    }
-    this.hurtPlayer(this.player.maxIntegrity * TUNABLE.cellDamagePercent, {
-      id: 'cell',
-      label: 'Containment Cell',
-      mode: 'containment',
-    });
-  }
-
-  /** §11.4 — shrinks the playable arena, forcing motion. */
-  private testNullFront(c: Containment): void {
-    const p = this.player;
-    let inside = false;
-    if (c.dirX > 0) inside = p.x < c.advance;
-    else if (c.dirX < 0) inside = p.x > this.arena.width - c.advance;
-    else if (c.dirY > 0) inside = p.y < c.advance;
-    else inside = p.y > this.arena.height - c.advance;
-    if (inside) {
-      this.hurtPlayer(TUNABLE.nullFrontDamage, {
-        id: 'nullfront',
-        label: 'Null Front',
-        mode: 'containment',
-      });
-    }
   }
 
   mark(kind: TraceMarkerKind, label: string): void {
@@ -2829,6 +2820,45 @@ export class World {
     });
   }
 
+  /**
+   * §10.2, §10.3 — settle what this individual does.
+   *
+   * Called at spawn and again whenever its affixes change, which is the only
+   * time the answer can move. Pure: no RNG, no ordering hazard, so it can be
+   * called twice on the same enemy without consequence.
+   */
+  private resolveTraits(e: Enemy): void {
+    const def = getEnemy(e.defId);
+    e.traits = mergeAffixes(traitsOf(e.defId, def), e.affixes);
+  }
+
+  /**
+   * §11.2, §10.3 — the affixes that may be rolled right now.
+   *
+   * Every affix is always eligible except the one that grants a suppression
+   * field, which is withheld once the arena is already at its ceiling. A wave of
+   * hardened enemies rolling from a pool of three would otherwise give roughly
+   * two thirds of itself an Engine-off aura, which is not an elite modifier, it
+   * is a second Suppressor with no cap and no telegraph.
+   *
+   * Withheld rather than rerolled: rerolling would spend a draw and shift the
+   * stream by how full the arena happens to be, which is a determinism hazard
+   * for something that is only meant to be a ceiling.
+   */
+  private affixPool(): EliteAffix[] {
+    const pool = [...AFFIX_IDS] as EliteAffix[];
+    if (this.suppressorCount() < TUNABLE.suppressorsAlive) return pool;
+    return pool.filter((a) => a !== 'anchored');
+  }
+
+  /** How many of one kind are alive or already on their way. */
+  private countAlive(defId: string): number {
+    let n = 0;
+    for (const e of this.enemies) if (e.alive && e.defId === defId) n++;
+    for (const s of this.pendingSpawns) if (s.alive && s.enemy === defId) n++;
+    return n;
+  }
+
   /** Does this enemy definition carry a suppression field of its own? */
   private projectsZone(defId: string): boolean {
     return (getEnemy(defId).zoneRadius ?? 0) > 0;
@@ -2841,10 +2871,24 @@ export class World {
    * couple of seconds, so leaving them out lets a single burst queue six at once
    * and walk straight past the cap.
    */
+  /**
+   * §11.2 — live suppression, counted in **fields**.
+   *
+   * The rule has always said fields rather than enemies, and this counted neither:
+   * it asked whether the *definition* carries a `zoneRadius`, so the only thing
+   * it ever capped was actual Suppressors. An `anchored` elite projects a field
+   * of its own, was never counted, and so was never limited.
+   *
+   * Read off a recorded run: forty-two simultaneous fields from anchored elites,
+   * against a cap of two, with zero Suppressors alive. The player's Engine was
+   * off across most of the arena and the thing responsible was not on the list
+   * of things that can do that. Reported as "a TON of inhibitors kept spawning"
+   * — they were not inhibitors, and that is exactly why nothing capped them.
+   */
   private suppressorCount(): number {
     let n = 0;
     for (const e of this.enemies) {
-      if (e.alive && this.projectsZone(e.defId)) n++;
+      if (e.alive && (this.projectsZone(e.defId) || traitOf(e.traits, 'zone'))) n++;
     }
     for (const s of this.pendingSpawns) {
       if (s.alive && this.projectsZone(s.enemy)) n++;
@@ -2868,9 +2912,10 @@ export class World {
     for (const e of this.enemies) {
       if (!e.alive) continue;
       const def = getEnemy(e.defId);
-      const radius = e.affixes.includes('anchored')
-        ? TUNABLE.affixAnchoredZone
-        : (def.zoneRadius ?? 0);
+      // An affix-granted zone is prepended and so wins; a def's own is found
+      // when there is no affix. One lookup, both cases.
+      const zone = traitOf(e.traits, 'zone');
+      const radius = zone ? num(zone, 'radius', 0) : (def.zoneRadius ?? 0);
       if (radius <= 0) continue;
       const dx = this.player.x - e.x;
       const dy = this.player.y - e.y;
@@ -3023,13 +3068,15 @@ export class World {
       }
     }
 
-    if (enemy.affixes.includes('volatile')) {
-      this.pushFx('burst', enemy.hue, enemy.x, enemy.y, TUNABLE.affixVolatileRadius, [], 0.3);
+    const affixBlast = traitOf(enemy.traits, 'deathBlast');
+    if (affixBlast) {
+      const blastRadius = num(affixBlast, 'radius', TUNABLE.affixVolatileRadius);
+      this.pushFx('burst', enemy.hue, enemy.x, enemy.y, blastRadius, [], 0.3);
       this.emit({ type: 'glutton', depth, x: enemy.x, y: enemy.y, hue: enemy.hue });
       const dx = this.player.x - enemy.x;
       const dy = this.player.y - enemy.y;
-      const reach = TUNABLE.affixVolatileRadius + TUNABLE.playerRadius;
-      if (dx * dx + dy * dy < reach * reach) this.hurtPlayer(TUNABLE.affixVolatileDamage, {
+      const reach = blastRadius + TUNABLE.playerRadius;
+      if (dx * dx + dy * dy < reach * reach) this.hurtPlayer(num(affixBlast, 'damage', TUNABLE.affixVolatileDamage), {
           id: def.id,
           label: def.name,
           enemyId: def.id,
@@ -3226,8 +3273,8 @@ export class World {
     const p = this.player;
     // Recounted every tick rather than tracked incrementally: a Lancer can die
     // mid-charge, and a leaked counter would silently mute the whole species.
-    this.chargingLancers = 0;
-    for (const e of this.enemies) if (e.alive && e.beamActive > 0) this.chargingLancers++;
+    this.traitCtx.lancers.charging = 0;
+    for (const e of this.enemies) if (e.alive && e.beamActive > 0) this.traitCtx.lancers.charging++;
 
     for (const e of this.enemies) {
       if (!e.alive) continue;
@@ -3248,55 +3295,39 @@ export class World {
       // §10.3 Phasing — untargetable for a beat, on a steady cycle. Carried
       // either by the elite affix or by the def itself (§10.4 Ghost variants),
       // because a variant should not have to be an elite to have an idea.
-      const phaseEvery = def.phaseInterval ?? (e.affixes.includes('phasing') ? TUNABLE.affixPhaseInterval : 0);
-      if (phaseEvery > 0) {
-        const hold = def.phaseDuration ?? TUNABLE.affixPhaseDuration;
-        e.phased = e.spawnAge % (phaseEvery + hold) > phaseEvery;
+      // The def's own phase is listed before any affix's, so a Ghost that also
+      // rolled Phasing keeps the Ghost's timing — which is what it did before.
+      const phase = traitOf(e.traits, 'phase');
+      if (phase) {
+        const phaseEvery = num(phase, 'interval', 0);
+        const hold = num(phase, 'hold', TUNABLE.affixPhaseDuration);
+        if (phaseEvery > 0) e.phased = e.spawnAge % (phaseEvery + hold) > phaseEvery;
       }
 
-      // §10.2 — the behaviours that are not "walk at the player".
-      if (def.behavior === 'intercept') {
-        this.updateInterceptor(e, def, dt);
-        continue;
-      }
-      if (def.behavior === 'suppress') {
-        this.updateSuppressor(e, def, dt);
-        continue;
-      }
-      if (def.behavior === 'lance') {
-        this.updateLancer(e, def, dt);
-        continue;
-      }
-
-      if (def.windup !== undefined) {
-        // Charger: seek -> telegraphed windup -> dash (§10.2, §17.1).
-        e.timer -= dt;
-        if (e.state === 'seek') {
-          const d = hypot(p.x - e.x, p.y - e.y);
-          if (d < 320 && e.timer <= 0) {
-            e.state = 'windup';
-            e.timer = def.windup;
-            const len = d || 1;
-            e.aimX = (p.x - e.x) / len;
-            e.aimY = (p.y - e.y) / len;
-          }
-        } else if (e.state === 'windup') {
-          e.vx = 0;
-          e.vy = 0;
-          // Re-aim at the moment of commitment so the drawn telegraph is honest.
-          if (e.timer <= 0) {
-            e.state = 'dash';
-            e.timer = def.dashDuration ?? 0.4;
-            e.vx = e.aimX * (def.dashSpeed ?? 500);
-            e.vy = e.aimY * (def.dashSpeed ?? 500);
-          }
-        } else if (e.state === 'dash' && e.timer <= 0) {
-          e.state = 'seek';
-          e.timer = 1.2;
+      // §10.2 — run this enemy's traits, in order.
+      //
+      // The first that reports `handled` owns the tick and stops both the rest
+      // of the list and the shared tail below. That is exactly what the three
+      // `continue`s here used to do, and the Charger's fall-through to the seek
+      // block is now the plain fact that `dash` returns nothing and `seek` is
+      // the next entry in its list.
+      let handled = false;
+      e.steers = false;
+      const c = this.traitCtx;
+      c.dt = dt;
+      c.time = this.time;
+      c.enemy = e;
+      c.def = def;
+      for (const spec of e.traits) {
+        c.spec = spec;
+        if (TRAIT_RUNNERS[spec.t]?.(c) === true) {
+          handled = true;
+          break;
         }
       }
+      if (handled) continue;
 
-      if (e.state === 'seek') {
+      if (e.steers && e.state === 'seek') {
         const dx = p.x - e.x;
         const dy = p.y - e.y;
         const len = hypot(dx, dy) || 1;
@@ -3410,63 +3441,6 @@ export class World {
    * meal". The intended counter to pure projectile spam: the answer is beams,
    * fields and novas, i.e. build diversity through threat rather than nerfs.
    */
-  private updateInterceptor(e: Enemy, def: EnemyDef, dt: number): void {
-    let target: Projectile | null = null;
-    let bestD2 = 700 * 700;
-    for (const proj of this.projectiles) {
-      if (!proj.alive) continue;
-      const dx = proj.x - e.x;
-      const dy = proj.y - e.y;
-      const d2 = dx * dx + dy * dy;
-      if (d2 < bestD2) {
-        bestD2 = d2;
-        target = proj;
-      }
-    }
-
-    const goalX = target ? target.x : this.player.x;
-    const goalY = target ? target.y : this.player.y;
-    const dx = goalX - e.x;
-    const dy = goalY - e.y;
-    const len = hypot(dx, dy) || 1;
-    e.facing = patan2(dy, dx);
-    e.vx = (dx / len) * def.speed;
-    e.vy = (dy / len) * def.speed;
-    e.x += e.vx * dt;
-    e.y += e.vy * dt;
-    this.resolveRuins(e, e.radius);
-
-    // The arena is the arena. A compounding radius used to walk its own centre
-    // to the edge and hang most of its body outside the map, which reads as a
-    // rendering fault rather than as a threat.
-    e.x = clamp(e.x, e.radius, this.arena.width - e.radius);
-    e.y = clamp(e.y, e.radius, this.arena.height - e.radius);
-
-    // Eat anything it reaches — up to a point. See feedInterceptor for the rule.
-    //
-    // §23.1: the growth is the design ("+10% per meal", the answer to projectile
-    // spam), the *unboundedness* was an oversight. Compounding 10% has no shape:
-    // at thirty meals it is a seventeen-fold radius with seventeen-fold HP, which
-    // is not a threat, it is terrain — unkillable, wider than the screen, and
-    // doing more damage than everything else in the run combined (measured: 427
-    // of 551 damage taken in a six-minute run).
-    //
-    // So it caps, and the cap is a *state* rather than a wall. A Glutton that has
-    // eaten its fill stops eating, destabilises visibly, and detonates when it
-    // dies. Spraying projectiles still builds the thing that punishes spraying
-    // projectiles — it now builds a bomb with a fuse you can see instead of an
-    // invincible wall, and killing it is a decision about where you are standing.
-    const gorged = e.meals >= TUNABLE.interceptorMaxMeals;
-    const eat = e.radius + 10;
-    if (target && !gorged && bestD2 < eat * eat) {
-      target.alive = false;
-      this.feedInterceptor(e, 1);
-    }
-
-    const pd = hypot(this.player.x - e.x, this.player.y - e.y);
-    if (pd < e.radius + TUNABLE.playerRadius) this.touchPlayer(e, def);
-  }
-
   /**
    * Feed an Interceptor. `share` is how much of a meal it was: one for a
    * swallowed projectile, a fraction for being clipped by something with area.
@@ -3491,89 +3465,6 @@ export class World {
       // Full. Announced once, loudly.
       this.pushFx('rupture', e.hue, e.x, e.y, e.radius * 1.6, [], 0.5);
       this.cue('fire', e.hue, 0, 1);
-    }
-  }
-
-  /**
-   * §10.2 Suppressor — "never attacks; projects a zone where your Triggers don't
-   * fire". Fragile on purpose: the answer is to kill it or leave.
-   */
-  private updateSuppressor(e: Enemy, def: EnemyDef, dt: number): void {
-    // Drifts to a standoff just inside its own zone, so the zone covers the
-    // player without the Suppressor walking into contact range.
-    const dx = this.player.x - e.x;
-    const dy = this.player.y - e.y;
-    const d = hypot(dx, dy) || 1;
-    const want = (def.zoneRadius ?? 200) * 0.6;
-    const push = d > want ? 1 : -0.6;
-    e.vx = (dx / d) * def.speed * push;
-    e.vy = (dy / d) * def.speed * push;
-    e.x += e.vx * dt;
-    e.y += e.vy * dt;
-    this.resolveRuins(e, e.radius);
-  }
-
-  /**
-   * §10.2 Lancer — keeps distance and fires a telegraphed beam across the arena.
-   * §17.1: the beam draws as a guide line first, then flashes to full width.
-   */
-  private updateLancer(e: Enemy, def: EnemyDef, dt: number): void {
-    const dx = this.player.x - e.x;
-    const dy = this.player.y - e.y;
-    const d = hypot(dx, dy) || 1;
-    const standoff = def.standoff ?? 500;
-
-    if (e.beamActive > 0) {
-      e.beamActive -= dt;
-      e.vx = 0;
-      e.vy = 0;
-    } else {
-      const push = d > standoff * 1.15 ? 1 : d < standoff * 0.85 ? -1 : 0;
-      e.vx = (dx / d) * def.speed * push;
-      e.vy = (dy / d) * def.speed * push;
-      e.x += e.vx * dt;
-      e.y += e.vy * dt;
-      this.resolveRuins(e, e.radius);
-
-      // §23.1 — only so many may be charging at once. Lancers arriving in
-      // numbers turned a dodgeable telegraph into an unavoidable crossfire; the
-      // rest simply hold their shot rather than being removed from the fight.
-      if (e.beamTimer <= 0 && this.chargingLancers < TUNABLE.maxChargingLancers) {
-        e.beamTimer = (def.windup ?? 0.9) + 2.4;
-        e.beamActive = def.windup ?? 0.9;
-        e.facing = patan2(dy, dx);
-        this.chargingLancers++;
-      }
-    }
-
-    // Fires at the end of the telegraph, along the aim drawn at the start.
-    if (e.beamActive > 0 && e.beamActive - dt <= 0) {
-      const ux = pcos(e.facing);
-      const uy = psin(e.facing);
-      const px = this.player.x - e.x;
-      const py = this.player.y - e.y;
-      const along = px * ux + py * uy;
-      const across = Math.abs(px * -uy + py * ux);
-      // §17.1 — a finite beam. It used to run the length of the arena, so a
-      // Lancer off screen could kill you along a line you were never shown.
-      if (along > 0 && along < TUNABLE.lancerBeamRange && across < 16 + TUNABLE.playerRadius) {
-        this.hurtPlayer(def.beamDamage ?? 16, {
-          id: def.id,
-          label: def.name,
-          enemyId: def.id,
-          shape: def.shape,
-          mode: 'beam',
-        });
-      }
-      this.pushFx(
-        'chain',
-        e.hue,
-        e.x,
-        e.y,
-        0,
-        [e.x, e.y, e.x + ux * TUNABLE.lancerBeamRange, e.y + uy * TUNABLE.lancerBeamRange],
-        0.18,
-      );
     }
   }
 
@@ -3940,6 +3831,14 @@ export class World {
    */
   sandbox = false;
 
+  /** §21b.7 — is any gate currently being held? The siege reads as a phase. */
+  get gateHeld(): boolean {
+    for (const t of this.terminals) {
+      if (t.alive && t.gateId && t.progress > 0) return true;
+    }
+    return false;
+  }
+
   /** Live density the director is actively trying to hold. */
   get targetAlive(): number {
     const target = Math.min(
@@ -3960,19 +3859,29 @@ export class World {
     const composition = this.composition;
     if (!composition) return;
 
+    // §21b.7 — the floor drops while a gate is held.
+    //
+    // Density is *maintained*, which is right for the run and wrong for a siege:
+    // the parcels are the pressure, and a floor that refills behind every kill
+    // means killing changes nothing. Scaling the floor is what makes the fight
+    // resolvable and makes walking away a real option, without touching the
+    // siege's own size — the parcels are sized off the unscaled target.
+    const floor = this.gateHeld ? TUNABLE.siegeAmbientFraction : 1;
+
     // Count only what is near the player, not the whole arena.
     //
     // A global count meant a queue trailing behind you filled the entire budget,
     // so nothing spawned ahead and you could outrun the game. Pressure is a
     // local property: what matters is how many enemies are where you are.
     const present = this.nearbyEnemyCount() + this.pendingSpawns.length;
-    const deficit = this.targetAlive - present;
+    const deficit = this.targetAlive * floor - present;
     if (deficit <= 0) {
       this.refillDebt = 0;
       return;
     }
 
-    const maxRate = TUNABLE.refillRateBase + this.threat * TUNABLE.refillRatePerThreat;
+    const maxRate =
+      (TUNABLE.refillRateBase + this.threat * TUNABLE.refillRatePerThreat) * floor;
     const rate = Math.min(maxRate, deficit * TUNABLE.refillAggression);
     this.refillDebt += rate * dt;
 
@@ -4080,11 +3989,12 @@ export class World {
         // one affix and a wasted roll, and the pool is only three deep. A Cache
         // rolls one, a gate siege rolls two.
         if (s.affixes > 0) {
-          const pool: EliteAffix[] = ['volatile', 'phasing', 'anchored'];
+          const pool = this.affixPool();
           for (let n = 0; n < Math.min(s.affixes, pool.length); n++) {
             e.affixes.push(pool.splice(this.rng.int(pool.length), 1)[0]!);
           }
           e.hardened = true;
+          this.resolveTraits(e);
         }
         // §10.4's exception, and the only one. See the `toughen` op: opt-in
         // difficulty is the one place a straight multiplier is honest, because
@@ -4144,6 +4054,7 @@ export class World {
    */
   private applyVia(enemy: string, via: readonly WaveTransform[]): SpawnRecipe {
     this.escalateTier = Infinity;
+    this.chainFamilies = [];
     const out: SpawnRecipe = {
       enemy,
       affixes: 0,
@@ -4155,7 +4066,13 @@ export class World {
       switch (step.op) {
         case 'roster':
           this.escalateTier = step.tier;
+          this.chainFamilies = step.families;
           out.enemy = this.viaRoster(out.enemy, step.tier, step.families, step.events);
+          break;
+        case 'noEvents':
+          // Whatever the roster let through as punctuation is remapped into an
+          // ordinary family member. Passing no event list is the whole trick.
+          out.enemy = this.viaRoster(out.enemy, this.escalateTier, this.chainFamilies);
           break;
         case 'escalate':
           out.enemy = this.viaEscalate(out.enemy, step);
@@ -4265,6 +4182,8 @@ export class World {
    * with the families rather than being read off the player's position.
    */
   private escalateTier = Infinity;
+  /** The families the running chain's `roster` step named, for `noEvents`. */
+  private chainFamilies: readonly string[] = [];
 
   /**
    * §12.5 — deliver a called wave.
@@ -4307,7 +4226,17 @@ export class World {
     for (let p = 0; p < event.parcels.length; p++) {
       if (call.only !== undefined && call.only !== p) continue;
       const parcel = event.parcels[p]!;
-      this.deliverParcel(template, weights, parcel, via, call.x, call.y, scale, p === 0);
+      // §21b.7 — `at` is the schedule, and it must be applied exactly once.
+      //
+      // A caller passing `only` has already waited: the gate ticks its own bar
+      // and hands over one parcel when that bar reaches `at`. Passing `at` on as
+      // the spawn delay as well made the wait happen twice — the last parcel of
+      // a siege, the biggest one, was delivered at bar-second 20.5 and then sat
+      // in the queue for another 20.5 seconds, arriving about nineteen seconds
+      // *after* the gate had opened and the fight was over. Reported as "AFTER
+      // the gate opened, a TON kept spawning", and that is exactly what it was.
+      const delay = call.only === undefined ? parcel.at : 0;
+      this.deliverParcel(template, weights, parcel, via, call.x, call.y, scale, delay);
     }
   }
 
@@ -4320,7 +4249,8 @@ export class World {
     cx: number,
     cy: number,
     scale: number,
-    first: boolean,
+    /** Seconds from now. Zero when the caller is driving the schedule itself. */
+    delay: number,
   ): number {
     const count = Math.max(1, Math.round(this.targetAlive * parcel.share * scale));
     const spread = parcel.spread ?? 60;
@@ -4335,6 +4265,14 @@ export class World {
         const r = this.rng.range(parcel.ring[0], parcel.ring[1]);
         ox = clamp(cx + pcos(a) * r, 40, this.arena.width - 40);
         oy = clamp(cy + psin(a) * r, 40, this.arena.height - 40);
+        // §21b.6 — a gate sits on a boundary, so a ring around one straddles
+        // ground the player has not opened, and `queueSpawn` drops anything
+        // landing there. Measured at a gate siege: about a quarter of every
+        // parcel is discarded this way. That is left as it is — nothing may
+        // arrive out of a sealed room, and the alternative is a wave walking
+        // through the door it is defending — but it means a siege delivers
+        // roughly three quarters of what the wave lab reports, and the lab is
+        // the honest number for a ring in open ground.
       } else {
         // No ring: the director's own off-screen origins. A Beacon calls the
         // horde in from where the horde comes from; it does not conjure one.
@@ -4342,9 +4280,8 @@ export class World {
         ox = origin.x;
         oy = origin.y;
       }
-      this.queueSpawn(entry.enemy, ox, oy, spread, parcel.at, via);
+      this.queueSpawn(entry.enemy, ox, oy, spread, delay, via);
     }
-    void first;
     return count;
   }
 
@@ -4399,7 +4336,19 @@ export class World {
     // pressure, it is a region of the map where the game stops. The template
     // rolls are free to keep asking; past the cap the ask is dropped and the
     // director makes the density up with something that can be shot at.
+    // §21b — the room's own cap on its punctuation.
+    //
+    // `RosterDef.events[].maxAlive` has been documented as "each with its own
+    // live cap" since levels were added and read by absolutely nothing: the only
+    // ceiling that existed was one global number for Suppressors, arena-wide.
+    // The Heap declaring `maxAlive: 2` and The Sink declaring `3` were
+    // decoration. This is the first time a room can say how much of its own
+    // punctuation it wants, which is the dial the next arenas need.
+    //
+    // The global Suppressor cap stays as the backstop for arenas with no levels.
     if (this.suppressorCount() >= TUNABLE.suppressorsAlive && this.projectsZone(enemy)) return;
+    const eventCap = this.currentLevel?.roster.events?.find((ev) => ev.id === enemy);
+    if (eventCap && this.countAlive(enemy) >= eventCap.maxAlive) return;
 
     const recipe = this.applyVia(enemy, via);
     enemy = recipe.enemy;
@@ -4410,12 +4359,35 @@ export class World {
     const hidden = this.pushOutsideView(rx, ry);
     const safe = this.pushOutsideSafeRadius(hidden.x, hidden.y);
     // §21b.6 — nothing arrives in ground the player has not opened.
-    if (this.isSealed(safe.x, safe.y)) return;
+    //
+    // Clamped *before* the test, not after. Testing the raw point and clamping
+    // the stored one meant an out-of-arena point passed the check — nothing out
+    // there is inside a locked level — and then landed wherever the clamp put
+    // it, which is an arena corner and possibly a room the player cannot reach.
+    let sx = clamp(safe.x, 20, this.arena.width - 20);
+    let sy = clamp(safe.y, 20, this.arena.height - 20);
+    if (this.isSealed(sx, sy)) {
+      // One deterministic retry, reflected through the player.
+      //
+      // A gate sits on a boundary, so a ring drawn around one puts half its
+      // arrivals in the room behind the door — measured at a siege, a hundred
+      // and sixty of them dropped on the floor. Refusing them silently makes a
+      // wave weaker than its own data says, which is the worst kind of balance
+      // bug: the lab reports one number and the fight is another.
+      //
+      // The player's own position is open by definition, so the mirrored point
+      // almost always is too. No extra RNG draw, so the stream is untouched.
+      const mx = clamp(2 * this.player.x - sx, 20, this.arena.width - 20);
+      const my = clamp(2 * this.player.y - sy, 20, this.arena.height - 20);
+      if (this.isSealed(mx, my)) return;
+      sx = mx;
+      sy = my;
+    }
     this.pendingSpawns.push({
       time: this.time + delay,
       enemy,
-      x: clamp(safe.x, 20, this.arena.width - 20),
-      y: clamp(safe.y, 20, this.arena.height - 20),
+      x: sx,
+      y: sy,
       hue: this.rng.pick(HUES),
       enriched: recipe.enriched,
       affixes: recipe.affixes,
@@ -4440,8 +4412,19 @@ export class World {
     const dy = y - this.player.y;
     if (Math.abs(dx) > halfW || Math.abs(dy) > halfH) return { x, y };
 
+    // The *smallest* scale that clears either edge, not the largest.
+    //
+    // This was `Math.max`, which insists the point clear *both* axes — and for a
+    // spawn roughly level with the player that means dividing by a guard
+    // constant: with dy at zero, `halfH / 1e-3` is four hundred and seventy-seven
+    // thousand. The point was flung a quarter of a billion units away, sailed
+    // through the sealed test because nothing that far out is inside any level,
+    // and was then clamped to the arena edge — which is inside the next room.
+    //
+    // That is the whole of "enemies spawn in the next level": not the director,
+    // not the gate, a `max` that should always have been a `min`.
     const scale =
-      Math.max(halfW / Math.max(1e-3, Math.abs(dx)), halfH / Math.max(1e-3, Math.abs(dy))) * 1.06;
+      Math.min(halfW / Math.max(1e-3, Math.abs(dx)), halfH / Math.max(1e-3, Math.abs(dy))) * 1.06;
     return { x: this.player.x + dx * scale, y: this.player.y + dy * scale };
   }
 
@@ -4488,6 +4471,8 @@ export class World {
       spawnAge: 0,
       enriched: false,
       affixes: [],
+      traits: [],
+      steers: false,
       phased: false,
       facing: 0,
       meals: 0,
@@ -4501,17 +4486,19 @@ export class World {
     };
 
     // §10.3 — Wardens always roll affixes; in Meltdown they are standard on
-    // everything substantial (§13.2).
+    // everything substantial (§13.2). Traits are resolved after, because an
+    // affix is a trait and the list has to include it.
     const eliteRoll =
       def.elite === true || (this.phase === 'meltdown' && def.hp >= 20 && this.rng.chance(0.25));
     if (eliteRoll) {
-      const pool: EliteAffix[] = ['volatile', 'phasing', 'anchored'];
+      const pool = this.affixPool();
       const count = def.elite === true ? 1 + this.rng.int(2) : 1;
       for (let i = 0; i < count; i++) {
         const pick = pool[this.rng.int(pool.length)]!;
         if (!e.affixes.includes(pick)) e.affixes.push(pick);
       }
     }
+    this.resolveTraits(e);
 
     this.enemies.push(e);
     return e;
@@ -4665,9 +4652,7 @@ function compactInPlace<T extends { alive: boolean }>(arr: T[]): void {
   arr.length = w;
 }
 
-function clamp(v: number, lo: number, hi: number): number {
-  return v < lo ? lo : v > hi ? hi : v;
-}
+
 
 /** Shortest signed distance between two angles, in radians. */
 function angleDelta(a: number, b: number): number {
