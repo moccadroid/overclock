@@ -29,7 +29,15 @@ jobs:
       - run: pnpm test
 
       # `build` runs `tsc --noEmit` before vite, so this is the typecheck too.
+      #
+      # The commit is the one thing a running build cannot work out for itself,
+      # and telemetry needs it: without a build stamp on every run, a balance
+      # change has no before and after. Nothing else is injected — the Firestore
+      # project id is written down in meta/telemetry-send.ts, because it is an
+      # address rather than a secret and a static bundle has no secrets anyway.
       - run: pnpm build
+        env:
+          VITE_BUILD_SHA: ${{ github.sha }}
 
       - uses: FirebaseExtended/action-hosting-deploy@v0
         with:

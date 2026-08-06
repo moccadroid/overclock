@@ -9,7 +9,7 @@
     "radius": 5,
     "contactDamage": 1,
     "xp": 1,
-    "description": "Weakest enemy. Walks at you. 1 HP.",
+    "description": "Baseline unit, issued in quantity. Closes on the Engine and is destroyed on contact. Not expected to survive engagement.",
     "hue": "thermal",
     "family": "mote"
   },
@@ -23,7 +23,7 @@
     "radius": 13,
     "contactDamage": 6,
     "xp": 2,
-    "description": "Walks at you. The baseline body.",
+    "description": "Standard chassis. Closes at a steady rate and does not manoeuvre. Most site procedure is written around this unit.",
     "hue": "void",
     "family": "drifter"
   },
@@ -40,7 +40,7 @@
     "windup": 0.6,
     "dashSpeed": 620,
     "dashDuration": 0.45,
-    "description": "Telegraphs, then dashes in a straight line.",
+    "description": "Holds, commits to a straight run, and cannot correct once committed. The pause before the run is deliberate and is not a fault.",
     "hue": "thermal",
     "family": "charger"
   },
@@ -55,7 +55,7 @@
     "contactDamage": 10,
     "xp": 6,
     "shieldArc": 1.5,
-    "description": "Slow and heavy. Blocks projectiles hitting its front arc \u2014 attack it from the side or behind.",
+    "description": "Frontal plating stops projectile fire. Ineffective against fire arriving from the flank or behind, and against effects that do not travel.",
     "hue": "void"
   },
   {
@@ -72,7 +72,7 @@
       "enemy": "charger",
       "count": 2
     },
-    "description": "Splits into smaller enemies when killed.",
+    "description": "Divides on destruction. Each fragment continues the engagement, so asset count rises before it falls.",
     "hue": "thermal"
   },
   {
@@ -86,7 +86,7 @@
     "contactDamage": 7,
     "xp": 4,
     "growthPerMeal": 0.12,
-    "description": "Fast. Chases your projectiles and eats them. Anything of yours that touches it feeds it: +12% size per meal, 18 meals maximum. Full, it stops eating and detonates when killed.",
+    "description": "Consumes projectiles in flight. Capacity is finite; a unit at capacity destabilises and is expended as a blast. Feeding it is the intended use.",
     "hue": "voltaic"
   },
   {
@@ -100,7 +100,7 @@
     "contactDamage": 0,
     "xp": 22,
     "zoneRadius": 300,
-    "description": "Never attacks. Projects a 300-unit field where your Triggers do not fire. 160 HP.",
+    "description": "Carries no weapon. Projects a field within which the Engine cannot fire. The primary containment measure and the reason the Engine relocates.",
     "hue": "voltaic"
   },
   {
@@ -113,7 +113,7 @@
     "radius": 13,
     "contactDamage": 0,
     "xp": 3,
-    "description": "Contact adds 16 Heat instead of dealing damage.",
+    "description": "Draws off accumulated charge on contact. Deployed against Engines that bank resources rather than spend them.",
     "heatOnTouch": 16,
     "hue": "void"
   },
@@ -130,7 +130,7 @@
     "standoff": 520,
     "windup": 1.1,
     "beamDamage": 12,
-    "description": "Keeps its distance and fires a beam along a telegraphed line.",
+    "description": "Engages at range along a fixed line. The line is drawn before discharge. Procedure limits how many may charge at once.",
     "hue": "voltaic"
   },
   {
@@ -144,7 +144,7 @@
     "contactDamage": 14,
     "xp": 24,
     "elite": true,
-    "description": "Elite. Rolls affixes. Appears from Threat 7.",
+    "description": "Escalation unit, deployed at intervals once severity passes threshold. Carries site modifications as standard.",
     "hue": "void"
   },
   {
@@ -168,7 +168,7 @@
       "tier": 1
     },
     "hue": "thermal",
-    "description": "Mote with an armoured front arc. Projectiles hitting the front do nothing."
+    "description": "Baseline unit with frontal plating fitted. Same chassis, same expectancy."
   },
   {
     "id": "mote_charged",
@@ -194,7 +194,7 @@
       "tier": 1
     },
     "hue": "thermal",
-    "description": "Mote that detonates when killed: 14 damage, 95 units."
+    "description": "Baseline unit carrying an unstable charge. Detonates on destruction. Engage at distance."
   },
   {
     "id": "mote_ghost",
@@ -218,7 +218,7 @@
       "tier": 2
     },
     "hue": "thermal",
-    "description": "Mote that is untargetable for 0.9s out of every 2.5s."
+    "description": "Baseline unit with intermittent phase. Fire passes through while out of phase. The interval is fixed and can be timed."
   },
   {
     "id": "drifter_brood",
@@ -244,7 +244,7 @@
       "tier": 1
     },
     "hue": "void",
-    "description": "Drifter that splits into 4 Motes when killed."
+    "description": "Standard chassis, seeded. Destruction releases the seeded units. Asset count rises where these are engaged."
   },
   {
     "id": "drifter_shielded",
@@ -257,7 +257,7 @@
     "radius": 18,
     "contactDamage": 7,
     "xp": 5,
-    "shieldArc": 1.0,
+    "shieldArc": 1,
     "marks": [
       "shield"
     ],
@@ -267,7 +267,7 @@
       "tier": 1
     },
     "hue": "void",
-    "description": "Drifter with an armoured front arc. 90 HP."
+    "description": "Standard chassis with frontal plating fitted. Flank it, or use effects that do not travel."
   },
   {
     "id": "drifter_spined",
@@ -289,7 +289,7 @@
       "tier": 2
     },
     "hue": "void",
-    "description": "Faster Drifter. 16 contact damage instead of 6."
+    "description": "Standard chassis with contact spines. Returns damage to anything closing to touch, including the Engine."
   },
   {
     "id": "charger_crowned",
@@ -314,7 +314,7 @@
       "tier": 1
     },
     "hue": "thermal",
-    "description": "Charger with 140 HP, a shorter telegraph and a longer dash."
+    "description": "Reinforced charge unit. Commits harder and takes considerably more to stop. The telegraph is unchanged."
   },
   {
     "id": "charger_charged",
@@ -343,6 +343,6 @@
       "tier": 2
     },
     "hue": "thermal",
-    "description": "Charger that detonates when killed: 22 damage, 130 units."
+    "description": "Charge unit carrying an unstable charge. Detonates at the end of its run, whether or not the run connects."
   }
 ]

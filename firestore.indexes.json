@@ -1,0 +1,10 @@
+{
+  "indexes": [],
+  "fieldOverrides": [
+    {
+      "collectionGroup": "runs",
+      "fieldPath": "doc",
+      "indexes": []
+    }
+  ]
+}

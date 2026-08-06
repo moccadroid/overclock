@@ -1,12 +1,25 @@
 import { describe, expect, it } from 'vitest';
 import { validateCollection, type Schema } from './validate';
-import { ACTIONS, ALL_NODES, AXIOMS, ENEMIES, MODIFIERS, TRIGGERS, WAVES } from './index';
+import {
+  ACTIONS,
+  ALL_NODES,
+  AXIOMS,
+  DRAFT_POOL,
+  DRAFT_POOLS,
+  ENEMIES,
+  MODIFIERS,
+  TRIGGERS,
+  WAVES,
+  WAVE_EVENTS,
+} from './index';
 import { World } from '../sim/world';
-import { rollDraft, STAT_CARDS } from '../sim/draft';
+import { rollDraft, STAT_CARDS, STAT_KINDS } from '../sim/draft';
 import { AFFIX_IDS, AFFIX_TRAITS, TRAIT_RUNNERS, deriveTraits } from '../sim/traits';
 import { HAZARDS, HAZARD_KINDS } from '../sim/hazards';
 import { HAZARD_DRAW } from '../app/renderer';
 import { SHAPE_NAMES, shapeOutline } from '../app/gfx/shapes';
+import { ACTION_PRIMITIVES } from '../sim/world';
+import { PRIMITIVE_FIELDS } from '../sim/engine';
 
 /** The declared vocabularies, mirrored from types.ts so drift is a failure. */
 const SHAPES = [
@@ -157,6 +170,103 @@ describe('shipped content loads and cross-references resolve', () => {
     }
   });
 
+  it('an affix exclusion names an affix that exists', () => {
+    // A typo here is silent and expensive: the wave rolls the affix it meant to
+    // forbid, and the exclusion reads as present in the data. That is how a
+    // Cache kept fielding suppression under a line that said it must not.
+    for (const event of WAVE_EVENTS) {
+      for (const step of event.via) {
+        if (step.op !== 'affix' || !step.exclude) continue;
+        for (const id of step.exclude) {
+          expect(AFFIX_IDS, `wave event "${event.id}" excludes unknown affix "${id}"`).toContain(id);
+        }
+      }
+    }
+  });
+
+  it('every draft profile is runnable, not just the active one', () => {
+    // A variant nobody has run is a variant that names an op that was renamed
+    // two months ago, and it is discovered mid-sweep. draft.ts validates the
+    // whole file at load, so an unknown filter or op is already a build failure;
+    // this is the other half — that each profile actually produces cards.
+    for (const profile of DRAFT_POOLS) {
+      const world = new World({ seed: `profile-${profile.id}`, axiomId: 'ignition' });
+      const cards = rollDraft(world, profile).cards;
+      expect(cards.length, `profile "${profile.id}" rolled nothing`).toBeGreaterThan(0);
+    }
+  });
+
+  it('each pool filter is the only thing enforcing its own rule', () => {
+    // `affordable` used to return `landed !== null && load <= capacity`, and
+    // `autoSlot` returns null when there is no free slot — so it quietly
+    // enforced `placeable` as well. Invisible while both always ran, and it made
+    // the first variant anyone wrote a no-op: dropping `placeable` produced
+    // results identical to `default` down to the last digit, which reads as "the
+    // experiment showed no effect" rather than "the experiment did not run".
+    const fill = () => {
+      const w = new World({ seed: 'filters', axiomId: 'ignition' });
+      // Every row has a Trigger, so no drafted Trigger can land anywhere.
+      for (const p of w.engine.programs) p.triggerId = 'clock';
+      w.engine.recompile();
+      return w;
+    };
+    const triggersOffered = (poolId: string) => {
+      const w = fill();
+      const profile = DRAFT_POOLS.find((p) => p.id === poolId)!;
+      let seen = 0;
+      for (let i = 0; i < 300; i++) {
+        for (const c of rollDraft(w, profile).cards) {
+          if (c.kind === 'node' && TRIGGERS.some((t) => t.id === c.nodeId)) seen++;
+        }
+      }
+      return seen;
+    };
+
+    expect(triggersOffered('default'), 'a Trigger with nowhere to go was offered').toBe(0);
+    expect(
+      triggersOffered('no_placeable_filter'),
+      'dropping the placeable filter changed nothing — some other filter is enforcing it',
+    ).toBeGreaterThan(0);
+  });
+
+  it('the stat vocabulary, the verbs and the roll table all agree', () => {
+    // Three lists that had to match, and twice did not: a stat existed in the
+    // type, had an effect, and was in no roll table, so it was documented and
+    // undraftable. Two of those three are now one list in data; this is the
+    // third edge.
+    for (const profile of DRAFT_POOLS) {
+      const stats = profile.stats.map((s) => s.stat);
+      expect(new Set(stats).size, `profile "${profile.id}" lists a stat twice`).toBe(stats.length);
+      expect([...stats].sort()).toEqual([...STAT_KINDS].sort());
+    }
+  });
+
+  it('the filler slice covers the whole roll, in order', () => {
+    // The bands are cumulative bounds on one 0..1 draw, not widths. Unsorted or
+    // not reaching 1 and some roll lands in no band at all — which would fall
+    // back to the last entry and read as a weighting decision nobody made.
+    for (const profile of DRAFT_POOLS) {
+      const bounds = profile.filler.slice.map((s) => s.upTo);
+      expect([...bounds], `profile "${profile.id}" filler bands are out of order`).toEqual(
+        [...bounds].sort((a, b) => a - b),
+      );
+      expect(bounds[bounds.length - 1], `profile "${profile.id}" filler leaves a gap`).toBe(1);
+    }
+  });
+
+  it('a card body never restates a number the card also applies', () => {
+    // `+40 max Integrity` was written twice, in two languages, and the Momentum
+    // card said `+45%` while the cap it described was 40%. Interpolation is what
+    // fixes that, so the data has to actually use it.
+    for (const s of DRAFT_POOL.stats) {
+      const magnitude = s.format === 'percent' ? `${Math.round(s.amount * 100)}%` : `${s.amount}`;
+      expect(
+        s.body.includes(magnitude),
+        `stat "${s.stat}" spells out "${magnitude}" instead of interpolating {n}`,
+      ).toBe(false);
+    }
+  });
+
   it('every Trigger listens for an event the sim actually emits', () => {
     // A Trigger whose event is never emitted is a card that cannot do anything,
     // and On Overheat spent a whole release in exactly that state because Heat
@@ -247,6 +357,30 @@ describe('every vocabulary has an implementation (GDD §10, §11.4, §16.4)', ()
         e.shape,
       );
       for (const mark of e.marks ?? []) expect(MARKS).toContain(mark);
+    }
+  });
+  it('every Action primitive has a runner and a modifier list (GDD §5)', () => {
+    // Two tables in two files that had to agree and nothing checked them. A
+    // primitive missing from ACTION_RUNNERS is a card that fires and does
+    // nothing; missing from PRIMITIVE_FIELDS is subtler and worse — the card
+    // works, and every modifier on its row is silently ignored, so the player
+    // is paying Cycles for stats that never apply.
+    for (const action of ACTIONS) {
+      expect(
+        ACTION_PRIMITIVES,
+        `action "${action.id}" has primitive "${action.primitive}" and no runner`,
+      ).toContain(action.primitive);
+      expect(
+        PRIMITIVE_FIELDS[action.primitive],
+        `primitive "${action.primitive}" takes no modifiers — every one on its row is ignored`,
+      ).toBeDefined();
+    }
+    // ...and nothing implemented that no Action can reach.
+    for (const primitive of ACTION_PRIMITIVES) {
+      expect(
+        ACTIONS.some((a) => a.primitive === primitive),
+        `primitive "${primitive}" is implemented but no Action uses it`,
+      ).toBe(true);
     }
   });
 });

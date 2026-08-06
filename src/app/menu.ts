@@ -16,6 +16,7 @@ import { ACTIONS, AXIOMS, DISCOVERIES, ENEMIES, MODIFIERS, TRIGGERS } from '../c
 import type { EnemyDef, NodeDef } from '../sim/types';
 import { TUNABLE } from '../sim/tunables';
 import type { Library } from '../meta/profile';
+import { grantsOf } from '../meta/progression';
 import { BRANDING } from '../branding';
 import { shapeSvg } from './gfx/shapes';
 import { inspector } from './overlays';
@@ -359,7 +360,7 @@ export class TitleScreen {
 
     const discoveries = DISCOVERIES.map((d) => {
       const got = held.has(d.id);
-      const unlocks = d.unlocks.map((u) => nodeName(u)).join(' · ');
+      const unlocks = grantsOf(d.id).map((u) => nodeName(u)).join(' · ');
       return (
         `<div class="lib-row${got ? ' got' : ''}">` +
         `<span class="lib-mark">${got ? '▣' : '▢'}</span>` +

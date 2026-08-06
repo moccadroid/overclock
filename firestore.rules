@@ -1,0 +1,63 @@
+rules_version = '2';
+
+// Telemetry ingest, and nothing else.
+//
+// Runs are written by an unauthenticated browser and read by nobody — the corpus
+// leaves through an admin export, never through a client. So the rules here are
+// not defending a secret; they are keeping the collection well-formed enough that
+// an export can trust its own columns.
+//
+// They deliberately do not defend against forged runs. A browser client can
+// always lie about what it did, and the only real answer — replaying every
+// submission server-side — costs a backend and tens of seconds of CPU per run to
+// protect a corpus with nothing at stake. If that ever changes, the determinism
+// is already there to do it with.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function wellFormed() {
+      let d = request.resource.data;
+      return d.keys().hasAll(['v', 'build', 'tun', 'axiomId', 'seed', 'startedAt', 'doc'])
+        && d.v is int && d.v > 0
+        && d.build is string && d.build.size() <= 64
+        && d.tun is string && d.tun.size() <= 32
+        && d.axiomId is string && d.axiomId.size() <= 64
+        && d.seed is string && d.seed.size() <= 128
+        && d.startedAt is int
+        && (d.end == null || (d.end is string && d.end.size() <= 16))
+        // Validated if present rather than required, so a client that cannot
+        // reach storage still gets its run counted instead of rejected.
+        && (!('pid' in d) || d.pid == null || (d.pid is string && d.pid.size() <= 64))
+        // The run itself, as JSON. Capped well under Firestore's 1 MiB document
+        // limit: a twenty-minute run is single-digit kilobytes, so anything near
+        // this ceiling is a bug rather than a long session.
+        && d.doc is string && d.doc.size() <= 200000;
+    }
+
+    match /runs/{runId} {
+      // Update as well as create, because the same run is sent more than once —
+      // a partial when the tab goes hidden, the real one when it ends — and the
+      // run id is the document id so the last write wins. Create-only would
+      // freeze the partial in place as the permanent record of that run.
+      allow create, update: if wellFormed();
+
+      // Open, because there is nothing in here to protect. A run carries a seed,
+      // an axiom, counters and a list of cards — no account, no name, no
+      // identifier that outlives it. Closing reads would buy no privacy that
+      // does not already exist and would cost a service-account key on somebody's
+      // disk to run `pnpm pull`.
+      //
+      // If a leaderboard ever arrives, the names go in their own collection with
+      // their own rules. That boundary is why this one can stay open.
+      allow read: if true;
+
+      // The one thing still shut. Append-only is the whole contract: a corpus
+      // that can be deleted from a browser is a corpus somebody deletes.
+      allow delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

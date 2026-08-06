@@ -15,6 +15,8 @@
     "sim": "tsx src/harness/headless.ts",
     "inspect": "tsx src/harness/inspect.ts",
     "probe": "tsx src/harness/probe.ts",
+    "pull": "tsx src/harness/pull.ts",
+    "analytics": "tsx src/harness/analytics.ts",
     "lint": "biome lint src",
     "lint:fix": "biome lint src --write",
     "check": "pnpm typecheck && pnpm lint && pnpm test"

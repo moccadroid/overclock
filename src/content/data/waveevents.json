@@ -18,7 +18,7 @@
       }
     ],
     "cue": "summons",
-    "description": "The Beacon pulls the next wave in early. One parcel, from the usual edge origins, at the substitution level the run has already earned. It is not harder than the flow, it is the flow arriving now \u2014 including whatever punctuation the room allows."
+    "description": "The Beacon pulls the next wave in early. One parcel, from the usual edge origins, at the substitution level the run has already earned. It is not harder than the flow, it is the flow arriving now — including whatever punctuation the room allows."
   },
   {
     "id": "cache_menagerie",
@@ -44,7 +44,10 @@
       },
       {
         "op": "affix",
-        "count": 1
+        "count": 1,
+        "exclude": [
+          "anchored"
+        ]
       },
       {
         "op": "toughen",
@@ -53,7 +56,7 @@
       }
     ],
     "cue": "hardened",
-    "description": "A purchase. One ring around the box you opened, two Threat points past the wave you were already fighting, one affix each. Opt-in difficulty, so the toughen is honest. No events: a hardened Suppressor is a 640hp Engine-off zone, which is not a crowd and was the whole of the level-one difficulty spike."
+    "description": "A purchase. One ring around the box you opened, two Threat points past the wave you were already fighting, one affix each. Opt-in difficulty, so the toughen is honest. No events: a hardened Suppressor is a 640hp Engine-off zone, which is not a crowd and was the whole of the level-one difficulty spike. And no `anchored` either — that affix grants a suppression field of its own, so for as long as it was in the pool the Cache kept fielding the exact thing `noEvents` exists to keep out. A Cache never switches your Engine off: you paid for a card and a fight, not for the game stopping."
   },
   {
     "id": "gate_siege",
@@ -61,56 +64,44 @@
       {
         "at": 2,
         "share": 0.3,
-        "ring": [
-          460,
-          1000
-        ],
-        "spread": 70
+        "spread": 90,
+        "from": "door",
+        "stream": 3
       },
       {
         "at": 6,
         "share": 0.36,
-        "ring": [
-          460,
-          1000
-        ],
-        "spread": 70
+        "spread": 90,
+        "from": "door",
+        "stream": 3
       },
       {
         "at": 10,
         "share": 0.42,
-        "ring": [
-          420,
-          950
-        ],
-        "spread": 70
+        "spread": 90,
+        "from": "door",
+        "stream": 3
       },
       {
         "at": 13,
         "share": 0.21,
-        "ring": [
-          700,
-          1200
-        ],
-        "spread": 70
+        "spread": 90,
+        "from": "door",
+        "stream": 3
       },
       {
         "at": 17,
         "share": 0.63,
-        "ring": [
-          360,
-          820
-        ],
-        "spread": 70
+        "spread": 90,
+        "from": "door",
+        "stream": 3
       },
       {
         "at": 20.5,
         "share": 0.93,
-        "ring": [
-          300,
-          760
-        ],
-        "spread": 70
+        "spread": 90,
+        "from": "door",
+        "stream": 3
       }
     ],
     "via": [
@@ -130,6 +121,6 @@
       }
     ],
     "cue": "siege",
-    "description": "The map refusing you. Six parcels across a twenty-two second hold, at the destination room's ceiling regardless of Threat, two affixes each. `at` is seconds of BAR, not wall clock, so the schedule rewinds when the hold drains \u2014 and it is applied once, by the gate; callWave does not delay again. Events are allowed here: a Suppressor in a siege is the room defending itself, which is the point. It is only a Cache that must not field them. Sized against TUNABLE.siegeAmbientFraction, which drops the director's floor to a third while a gate is held \u2014 these shares and that number are one balance decision in two files."
+    "description": "The map refusing you, and it comes through the door. Six parcels across a twenty-two second hold, at the destination room’s ceiling regardless of Threat, two affixes each. They emerge at the barrier and stream in over three seconds a parcel — the room behind the gate pouring through the gap, which is the only thing a siege was ever supposed to be. It used to arrive as a ring around the gate: half of it landing behind the player in ground they had already cleared, and about a quarter of every parcel silently discarded for falling inside the sealed room it was defending. The \"at\" field is seconds of BAR, not wall clock, so the schedule rewinds when the hold drains — and it is applied once, by the gate; callWave does not delay again. Events are allowed here: a Suppressor in a siege is the room defending itself, and with the tutorial level fielding none at all this is where a player meets their first one. Sized against TUNABLE.siegeAmbientFraction, which drops the director’s floor to a third while a gate is held — these shares and that number are one balance decision in two files."
   }
 ]

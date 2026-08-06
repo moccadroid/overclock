@@ -1,0 +1,65 @@
+[
+  {
+    "id": "default",
+    "active": true,
+    "description": "§8.2 — the shipped draft. `filters` run in order and are all-or-nothing; `weights` multiply in order onto a card's base share. Every number here used to be a literal in draft.ts, which meant asking 'what if the pool leaned differently' was a commit rather than a measurement.",
+
+    "filters": ["library", "purged", "refused", "placeable", "affordable"],
+
+    "weights": [
+      { "op": "classShare", "shares": { "trigger": 1, "action": 1, "modifier": 2 } },
+      { "op": "hunger", "kinds": ["trigger", "action"], "curve": [4.2, 2.6, 1.5, 1] },
+      { "op": "emptySlotPull", "mult": 2 },
+      { "op": "inertPenalty", "mult": 0.12 },
+      { "op": "axiomBias" },
+      { "op": "poolWeight" }
+    ],
+
+    "filler": {
+      "chance": { "base": 0.3, "starving": 0.12, "meltdown": 0.4 },
+      "starvingBelow": 2,
+      "slice": [
+        { "card": "program_slot", "upTo": 0.16, "needs": "programSlot" },
+        { "card": "tool", "upTo": 0.28, "purgeChance": 0.32 },
+        { "card": "stat", "upTo": 0.74 },
+        { "card": "capacity", "upTo": 1 }
+      ]
+    },
+
+    "stats": [
+      { "stat": "power", "weight": 1, "amount": 0.2, "format": "percent", "title": "Gain", "body": "+{n} damage on every Action you own." },
+      { "stat": "crit", "weight": 1, "amount": 0.1, "format": "percent", "title": "Precision", "body": "+{n} crit chance. A crit deals double damage and fires On Crit." },
+      { "stat": "magnet", "weight": 1, "amount": 0.5, "format": "percent", "title": "Collector", "body": "+{n} pickup radius." },
+      { "stat": "speed", "weight": 1, "amount": 0.15, "format": "percent", "title": "Servo", "body": "+{n} move speed." },
+      { "stat": "integrity", "weight": 1, "amount": 40, "format": "number", "title": "Plating", "body": "+{n} max Integrity. Heals {n} now." },
+      { "stat": "reach", "weight": 4, "amount": 0.35, "format": "percent", "title": "Reach", "body": "+{n} range. Projectile flight distance, beam length, chain jump distance." },
+      { "stat": "dashHaste", "weight": 2, "amount": 0.25, "format": "percent", "title": "Capacitor Bank", "body": "-{n} dash cooldown, and +0.05s of dash i-frames." },
+      { "stat": "coolant", "weight": 1, "amount": 3, "format": "number", "title": "Coolant", "body": "+{n} Heat vented per second. Base venting is 8." },
+      { "stat": "capacitor", "weight": 1, "amount": 8, "format": "number", "title": "Capacitor", "body": "+{n} Cycle capacity for each Program row that is not live." },
+      { "stat": "salvage", "weight": 1, "amount": 1, "format": "number", "title": "Salvage", "body": "Each Purge also adds +4% output permanently, on top of the +4% a Purge already gives." },
+      { "stat": "momentum", "weight": 1, "amount": 0.03, "format": "percent", "title": "Momentum", "body": "+{n} output for each second since you were last hurt, up to +{cap}. Resets to zero when you take damage." },
+      { "stat": "travels", "weight": 2, "amount": 1, "format": "number", "title": "Ballistics", "body": "+{n} Pierce and +20% projectile speed. Projectiles only." },
+      { "stat": "area", "weight": 2, "amount": 0.3, "format": "percent", "title": "Yield", "body": "+{n} radius on bursts, fields, mines, vortices and shoves." },
+      { "stat": "lingers", "weight": 2, "amount": 0.4, "format": "percent", "title": "Half-Life", "body": "+{n} duration on fields, mines, orbitals, vortices and buffs." }
+    ]
+  },
+
+  {
+    "id": "no_placeable_filter",
+    "extends": "default",
+    "active": false,
+    "description": "The experiment behind the trigger famine: offer a Trigger even when every row already has one. Measured on the shipped pool, 40% of draft moments have no free Trigger slot and 47% none free for an Action, so past draft six the offer is modifiers and filler and nothing else. Everything but `filters` is inherited — the point of a variant is that it states its difference and nothing else, or two policies drift apart in the fields nobody meant to change.",
+    "filters": ["library", "purged", "refused", "affordable"]
+  },
+
+  {
+    "id": "flat",
+    "extends": "default",
+    "active": false,
+    "description": "No pool intelligence at all: no hunger, no empty-slot pull, no inert penalty, no Axiom lean. The control group. Every reading about what the weighting buys is a comparison against this, and there has never been one to compare against.",
+    "weights": [
+      { "op": "classShare", "shares": { "trigger": 1, "action": 1, "modifier": 2 } },
+      { "op": "poolWeight" }
+    ]
+  }
+]

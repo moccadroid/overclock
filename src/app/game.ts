@@ -17,12 +17,20 @@ import {
 } from './overlays';
 import { Input } from './input';
 import { NO_INPUT, World, type RunConfig } from '../sim/world';
-import { Recorder, type Recording } from '../sim/record';
+import { Recorder, type Command, type Recording } from '../sim/record';
 import { clearPartial, keepRun, stashPartial, STASH_EVERY } from '../meta/runstore';
+import { RunTelemetry, type EndReason, type TelemetryDoc } from '../meta/telemetry';
+import { queueRun } from '../meta/outbox';
+import { playerId } from '../meta/player';
+import { describeDevice } from '../meta/device';
+import { flushOutbox, installLifecycleHooks } from '../meta/telemetry-send';
+import { cardId } from '../sim/draft';
 import { SIM_DT } from '../sim/tunables';
 import { VISUAL } from './visual';
 import type { Library } from '../meta/profile';
 import { Stinger } from './stinger';
+import { EpisodeReport } from './shell/report';
+import type { StoryStore } from '../story/store';
 import type { Audio } from '../audio/audio';
 import { derivePart } from '../audio/parts';
 import type { EngineRow } from '../audio/arrange';
@@ -49,6 +57,8 @@ export class Game {
   private ceremony!: CeremonyOverlay;
   private recompileChoice!: RecompileOverlay;
   private stinger!: Stinger;
+  /** §14 — the end-of-episode report, on a Sheet like every other document. */
+  private report!: EpisodeReport;
 
   private mode: Mode = 'running';
   private accumulator = 0;
@@ -87,20 +97,75 @@ export class Game {
   /** Seconds of play since the run was last written out. */
   private stashTimer = 0;
 
+  /**
+   * The corpus half of §14. See meta/telemetry.ts — a recording answers what
+   * happened in *this* run and costs a replay to read; this answers what happens
+   * across all of them and costs a query. Purely observational, like the
+   * recorder: it reads the world and never asks it for anything.
+   */
+  private readonly telemetry: RunTelemetry;
+  /**
+   * Whether the run's final document has already been queued.
+   *
+   * Once a run has ended, a later `visibilitychange` must not queue a fresh
+   * snapshot over it — the id is the document id, so an unsealed re-send would
+   * overwrite `end: 'death'` with `end: null` and turn a finished run into an
+   * abandoned one at next boot.
+   */
+  private telemetrySealed = false;
+  /** Last level seen, so a level-up can be noticed without the sim announcing it. */
+  private lastLevel = 1;
+  /** §11.2 — edge-detected so the corpus records crossings, not a sampled state. */
+  private lastSuppressed = false;
+  /** How many of `world.markers` have been shipped. The sim already timestamps them. */
+  private markersSent = 0;
+  /** Last GPU reading, so a held value is not counted as a fresh sample. */
+  private lastGpuMs = -1;
+
   constructor(
     config: RunConfig,
     private readonly library: Library,
     private readonly audio: Audio,
+    private readonly story?: StoryStore,
   ) {
     this.world = new World(config);
     // ?sandbox — a rehearsal room. See World.sandbox: it exists so structure
     // that has to be walked to can be judged without fighting the way there.
     this.world.sandbox = new URLSearchParams(location.search).has('sandbox');
     this.recorder = new Recorder(config);
+    // Wall-clock is stamped here, at the boundary, for the same reason the
+    // recorder's `startedAt` is: the sim may never read a clock.
+    //
+    // Experience is read here too, and that timing is the point: these are the
+    // numbers the player walked in with. Sampled at the end instead, a Discovery
+    // banked on the killing tick would make every run look slightly more
+    // practised than the person playing it actually was, and a first run would
+    // report having already found things.
+    const lib = library.snapshot;
+    this.telemetry = new RunTelemetry(config.seed, config.axiomId, {
+      build: import.meta.env.VITE_BUILD_SHA ?? 'dev',
+      startedAt: Date.now(),
+      pid: playerId(),
+      fx: [...lib.settings.fx],
+      exp: {
+        runs: lib.runs,
+        discoveries: lib.discoveries.length,
+        unlocked: lib.unlocked.length,
+        codex: lib.codex.length,
+        bestScore: lib.bestScore,
+        bestDepth: lib.bestDepth,
+        bestTime: Math.round(lib.bestTime),
+      },
+    });
   }
 
   async start(mount: HTMLElement): Promise<void> {
     await this.renderer.init(mount, this.world);
+    // Here rather than in the constructor: the GPU string and the backend only
+    // exist once there is a renderer to ask, and asking early would have meant
+    // standing up a throwaway WebGL context on the machines least able to
+    // spare one.
+    this.telemetry.describe(describeDevice(this.renderer.app, this.renderer.gpu?.available ?? false));
 
     const ui = document.createElement('div');
     ui.id = 'ui';
@@ -113,10 +178,35 @@ export class Game {
     this.ceremony = new CeremonyOverlay(ui);
     this.recompileChoice = new RecompileOverlay(ui);
     this.stinger = new Stinger(ui);
+    this.report = new EpisodeReport(this.renderer.app.stage);
     this.editor.attach(this.library, (cmd) => this.onCommand(cmd));
     // §14 — the two places a run changes by hand rather than by time passing.
-    this.draft.onCommand = (c) => this.recorder.command(c);
-    this.editor.onCommand = (c) => this.recorder.command(c);
+    // Both feed the recorder and the corpus; the recorder needs the index, the
+    // corpus needs what was on the table beside it.
+    this.draft.onCommand = (c) => {
+      this.recorder.command(c);
+      this.noteDecision(c);
+    };
+    this.editor.onCommand = (c) => {
+      this.recorder.command(c);
+      this.telemetry.emit(this.world, 'edit', { c: c.k });
+    };
+
+    // The last chance to say anything, and it is not a reliable one. See
+    // telemetry-send.ts: `visibilitychange` is the only signal a locked phone
+    // fires, and everything past it is the outbox's problem.
+    // The teardown handle is discarded on purpose: nothing unwinds a run in
+    // place — every exit is a page load — so there is never anything to detach.
+    installLifecycleHooks(() =>
+      this.telemetrySealed ? null : this.telemetry.snapshot(this.world),
+    );
+
+    // Everything that throws outside the frame loop: an input handler, an audio
+    // callback, a rejected promise nobody awaited. The loop's own try/catch
+    // cannot see any of it, and a run killed by one of these would otherwise
+    // report itself as merely abandoned — a player who quit rather than a bug.
+    window.addEventListener('error', (ev) => this.crashed(ev.error ?? ev.message));
+    window.addEventListener('unhandledrejection', (ev) => this.crashed(ev.reason));
 
     this.input.onCommand((cmd) => this.onCommand(cmd));
     // §18.4 — the chrome answers when you touch it. See Audio.chrome.
@@ -231,6 +321,11 @@ export class Game {
         if (this.recorder.length > 0) {
           keepRun({ ...this.recorder.finish(this.world), startedAt: Date.now() });
         }
+        // Before the navigation, not after — queuing is synchronous storage and
+        // the send is `keepalive`, so both survive the page going away. A quit is
+        // also the single most informative ending in the corpus: nobody
+        // abandons a run that is going well.
+        this.sealTelemetry('quit');
         location.href = location.pathname;
         return;
       }
@@ -301,7 +396,101 @@ export class Game {
     });
   }
 
+  /**
+   * Record a draft decision, and what it was chosen *against*.
+   *
+   * The offer is read from the overlay rather than rolled, which is the whole
+   * trick: `rollDraft` draws from the run's Rng, so an observer that re-rolls to
+   * see the cards consumes a draw and changes the run. record.ts documents that
+   * bug; this is the site where it would come back. `onCommand` fires while the
+   * presented offer is still live and before `applyDraft`, so watching is free.
+   *
+   * Knowing what somebody *refused* is most of the value of the whole corpus — a
+   * node offered two hundred times and taken twice is dead weight, and no
+   * counter of what people built will ever say so.
+   */
+  private noteDecision(c: Command): void {
+    const offer = this.draft.currentOffer;
+    if (!offer) return;
+    const offered = offer.cards.map(cardId);
+    const w = this.world;
+    if (c.k === 'draft') {
+      this.telemetry.emit(w, 'draft', {
+        o: offered,
+        // `c` for chosen. Never `k` — see TelemetryEvent; that name belongs to
+        // the envelope and this field is the reason the two must not share one.
+        c: offered[c.i] ?? null,
+        lv: w.level,
+        rows: w.engine.compiled.filter((x) => x.live).length,
+        eps: Math.round(w.eps * 10) / 10,
+        heat: Math.round(w.budget.heat),
+        load: Math.round(w.engine.staticLoad * 10) / 10,
+        cap: w.budget.capacity,
+      });
+    } else if (c.k === 'reroll') {
+      this.telemetry.emit(w, 'reroll', { o: offered, lv: w.level });
+    } else if (c.k === 'purge' || c.k === 'lock') {
+      this.telemetry.emit(w, c.k, { o: offered, c: offered[c.i] ?? null, lv: w.level });
+    }
+  }
+
+  /**
+   * Queue the run's final document and try to ship it.
+   *
+   * Idempotent, because more than one thing can legitimately end a run — dying
+   * during the frame a player also hits quit, say — and the first answer is the
+   * true one. Queuing is synchronous localStorage, so it completes even on the
+   * quit path where the next statement navigates the page away.
+   */
+  private sealTelemetry(end: EndReason): void {
+    if (this.telemetrySealed) return;
+    this.telemetrySealed = true;
+    try {
+      queueRun(this.telemetry.snapshot(this.world, end));
+      void flushOutbox(true);
+    } catch {
+      // Telemetry never costs the run, and least of all at the end of one.
+    }
+  }
+
+  /** The document as it stands. Dev tooling and tests; never the game. */
+  telemetrySnapshot(end: EndReason | null = null): TelemetryDoc {
+    return this.telemetry.snapshot(this.world, end);
+  }
+
+  /**
+   * The frame, and the net under it.
+   *
+   * A throw anywhere in a tick ends the run — the loop stops rescheduling and
+   * the tab is a still image — so this is the last moment the run can say what
+   * happened to it. Sealed first, rethrown after: swallowing would turn a crash
+   * into a mystery freeze, which is the failure mode this whole thing exists to
+   * stop being invisible.
+   *
+   * Worth the two lines because the sim is deterministic. A crash arrives with
+   * the seed and the command log that produced it, so `end: 'error'` is not a
+   * shrug — it is a reproduction, replayable at a breakpoint.
+   */
   private frame(now: number): void {
+    try {
+      this.step(now);
+    } catch (err) {
+      this.crashed(err);
+      throw err;
+    }
+  }
+
+  /** Seal the run as a crash. Safe to call more than once; the first wins. */
+  private crashed(err: unknown): void {
+    try {
+      this.telemetry.fail(this.world, err);
+    } catch {
+      // Reporting the failure must not become a second one.
+    }
+    this.sealTelemetry('error');
+  }
+
+  private step(now: number): void {
     const elapsed = Math.min(0.25, (now - this.lastFrame) / 1000);
     this.lastFrame = now;
 
@@ -330,6 +519,42 @@ export class Game {
         // what this tick saw. See sim/record.ts.
         this.recorder.step(this.world, input);
         this.world.advance(input, SIM_DT);
+        // A compare against a counter until it is not — see SAMPLE_EVERY. Driven
+        // per tick rather than off the stash timer so the trajectory keeps its
+        // own cadence instead of inheriting one that happens to be nearby.
+        this.telemetry.sample(this.world);
+        // §8.1 asks for a decision every 30-45s, and the honest measure of that
+        // is when a level *arrives* — not when a draft is resolved. Drafts queue:
+        // two level-ups banked and clicked through land 1.7s apart and drag any
+        // median off a cliff, describing how fast somebody clears a backlog
+        // rather than how often the game gives them something to decide.
+        if (this.world.level !== this.lastLevel) {
+          this.lastLevel = this.world.level;
+          this.telemetry.emit(this.world, 'level', { lv: this.world.level });
+        }
+        // §11.2 — the Engine going quiet, as a pair of crossings.
+        //
+        // "There were inhibitors when I opened the Cache" was unanswerable from
+        // the corpus for as long as this was missing: `cachesOpened` said a box
+        // was opened and nothing said when, and suppression had no column at
+        // all. The dwell is a counter in `world.stats` — it has an exact
+        // integral, so sampling it would be strictly worse — and this is the
+        // half a counter cannot carry, which is *where in the run* it happened.
+        if (this.world.suppressedNow !== this.lastSuppressed) {
+          this.lastSuppressed = this.world.suppressedNow;
+          this.telemetry.emit(this.world, this.lastSuppressed ? 'suppress_in' : 'suppress_out', {
+            lv: this.world.level,
+            eps: Math.round(this.world.eps * 10) / 10,
+          });
+        }
+        // §12 — POIs, from the markers the sim already timestamps for the
+        // Results trace. Read rather than re-derived: a second definition of
+        // "a Cache opened" is a second thing to keep in step, and the marker
+        // list is the one the player is shown.
+        for (; this.markersSent < this.world.markers.length; this.markersSent++) {
+          const m = this.world.markers[this.markersSent]!;
+          this.telemetry.emit(this.world, `poi_${m.kind}`, { label: m.label, lv: this.world.level });
+        }
         this.stashTimer += SIM_DT;
         this.accumulator -= SIM_DT;
         steps++;
@@ -348,6 +573,13 @@ export class Game {
               return;
             }
             this.recorder.command({ k: 'recompile', rows: indices });
+            // Measured before the sacrifice, because afterwards those rows are
+            // gone and the share they were carrying is unrecoverable.
+            this.telemetry.emit(this.world, 'recompile', {
+              rows: indices.length,
+              share: Math.round(this.world.outputShareOf(indices) * 1000) / 1000,
+              kernels: this.world.kernels,
+            });
             this.world.recompile(indices);
             const pending = this.world.pendingCeremony;
             this.world.pendingCeremony = null;
@@ -363,7 +595,14 @@ export class Game {
           break;
         }
       }
-      if (steps === 8) this.accumulator = 0;
+      if (steps === 8) {
+        // Time the run never experienced. Recorded rather than only discarded:
+        // a machine that keeps landing here is playing a shorter game than the
+        // one the balance was tuned against, and nothing else in the document
+        // would ever say so.
+        this.telemetry.starve();
+        this.accumulator = 0;
+      }
 
       // §14 — write the run out periodically, so a crash costs seconds rather
       // than everything. A twenty-minute run that froze the tab took every byte
@@ -373,8 +612,26 @@ export class Game {
       if (this.stashTimer >= STASH_EVERY) {
         this.stashTimer = 0;
         stashPartial({ ...this.recorder.finish(this.world), startedAt: Date.now() });
+        // Same reasoning, same timer, different destination. Nothing fires when a
+        // tab freezes, so this interval *is* the worst-case loss: whatever the
+        // outbox last saw is what next boot ships as `abandoned`.
+        if (!this.telemetrySealed) queueRun(this.telemetry.snapshot(this.world));
       }
     }
+
+    // Every displayed frame, running or not — a stall in a draft is still a
+    // stall. `elapsed` is already clamped to 250ms above, so the worst frame
+    // this can report is a quarter second even when the tab was asleep for a
+    // minute; that clamp is the reason `starved` exists to count the rest.
+    // GPU time is sampled only when it *changes*. A timer query resolves a frame
+    // or two after it is issued, so `lastMs` holds its value across several
+    // frames — read every frame it reported 13,914 samples of one number, whose
+    // mean and worst were identical to two decimal places. That is an artefact
+    // of oversampling a step function, not a GPU with no variance.
+    const gpuMs = this.renderer.gpu?.lastMs ?? 0;
+    const freshGpu = gpuMs !== this.lastGpuMs ? gpuMs : 0;
+    this.lastGpuMs = gpuMs;
+    this.telemetry.frame(elapsed * 1000, freshGpu);
 
     // §18.2 read backwards: the picture is told where the beat is. Read every
     // frame from the audio clock rather than accumulated here, because the audio
@@ -590,8 +847,22 @@ export class Game {
     this.recording = { ...this.recorder.finish(this.world), startedAt: Date.now() };
     keepRun(this.recording);
     clearPartial();
+    // §2.1 — "there is no you win", but `extracted` is the one ending somebody
+    // chose rather than suffered, and folding it in with dying would lose the
+    // only voluntary exit in the game. `ending` carries the full distinction.
+    this.sealTelemetry(this.world.ending === 'extracted' ? 'victory' : 'death');
 
-    this.message.showResults(this.world, this.library, (cmd) => this.onCommand(cmd));
+    // §6.3 — the run is over, so the arc gets a look at what happened. The sim
+    // never learns this happened; `openBiomes` is a set it keeps for the camera.
+    this.story?.advance('run-end', {
+      runsCompleted: this.library.snapshot.runs,
+      levelsOpened: [...this.world.openBiomes],
+      ending: this.world.ending,
+      peakEps: this.world.stats.peakEps,
+    });
+
+    // §14 — on the site's own stationery, not a DOM panel. See `report.ts`.
+    this.report.show(this.world, this.library, (cmd) => this.onCommand(cmd));
   }
 
   /**

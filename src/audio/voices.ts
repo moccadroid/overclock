@@ -355,16 +355,34 @@ export function motif(
   const { ctx } = v;
 
   if (voice === 'bell') {
+    // Orbital. Softened, and the reason it was harsh is worth writing down.
+    //
+    // It was FM at a ratio of 2.41 with a modulation index of 2.4 held for most
+    // of the note, and **no filter at all**. An inharmonic ratio at that index
+    // throws sidebands a long way either side of the carrier, and every one of
+    // them went straight out. Orbital also sits at register +12, and a voltaic
+    // build adds another +12 — so the worst case was a dense inharmonic spray
+    // two octaves up, which is precisely the band the ear is most sensitive to.
+    //
+    // Now: a harmonic ratio, an index around 1 that collapses in the first fifth
+    // of the note, and a ceiling. That is a struck bell — bright in the attack,
+    // a tone immediately after — rather than a tone that keeps screaming.
     const dur = 0.75;
     const g = env(ctx, at, 0.006, dur, gain * 0.07);
     const carrier = osc(ctx, 'sine', hz, at, at + dur + 0.1);
-    const mod = osc(ctx, 'sine', hz * 2.41, at, at + dur + 0.1);
+    const mod = osc(ctx, 'sine', hz * 2, at, at + dur + 0.1);
     const depth = ctx.createGain();
-    depth.gain.setValueAtTime(hz * 2.4, at);
-    depth.gain.exponentialRampToValueAtTime(hz * 0.05, at + dur * 0.7);
+    depth.gain.setValueAtTime(hz * 1.05, at);
+    depth.gain.exponentialRampToValueAtTime(hz * 0.02, at + dur * 0.2);
     mod.connect(depth);
     depth.connect(carrier.frequency);
-    carrier.connect(g).connect(v.out);
+
+    // The ceiling every other voice in here already had.
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = Math.min(4800, hz * 5);
+    lp.Q.value = 0.6;
+    carrier.connect(lp).connect(g).connect(v.out);
     return;
   }
 
@@ -740,19 +758,35 @@ export function playPart(
       // A tone that stays. Field and Beam persist in the arena, so they persist
       // here — but gated by the step so it still belongs to the grid rather
       // than floating over it the way the old pad did.
+      // Beam and Field. The edge came from two things multiplying.
+      //
+      // Detuned sawtooths through a lowpass at `hz * (3 + bite * 6)` with Q 2.5:
+      // at high bite that is a resonant peak nine harmonics up, sitting on a
+      // waveform that has energy at every one of them. And the corner was
+      // relative only, so a high note put the peak somewhere the ear cannot
+      // ignore. Capped absolutely now, and the resonance pulled back to where it
+      // colours the tone instead of announcing it.
       const dur = 0.55 * length;
       const g = env(ctx, at, 0.02, dur, gain * 0.13);
       const filter = ctx.createBiquadFilter();
       filter.type = 'lowpass';
-      filter.frequency.value = hz * (3 + bite * 6);
-      filter.Q.value = 2.5;
+      filter.frequency.value = Math.min(2400, hz * (2 + bite * 3.5));
+      filter.Q.value = 0.9;
       for (const cents of [-9, 9]) {
         const o = osc(ctx, 'sawtooth', hz * Math.pow(2, cents / 1200), at, at + dur + 0.1);
         const vg = ctx.createGain();
         vg.gain.value = 0.4;
         o.connect(vg).connect(filter);
       }
-      filter.connect(g).connect(v.out);
+
+      // And a shelf on top of the corner, because a lowpass at Q 0.9 still
+      // passes plenty an octave above it and a Beam is *held*, not struck: a
+      // sound you hear for four bars gets judged on its top end, not its attack.
+      const air = ctx.createBiquadFilter();
+      air.type = 'highshelf';
+      air.frequency.value = 2600;
+      air.gain.value = -9;
+      filter.connect(air).connect(g).connect(v.out);
       return;
     }
 
@@ -879,7 +913,15 @@ export function gatedChord(
 
 // ------------------------------------------------------------------- chrome
 
-export type UiSound = 'hover' | 'click' | 'draft' | 'confirm' | 'start' | 'death';
+export type UiSound =
+  | 'hover'
+  | 'click'
+  | 'draft'
+  | 'confirm'
+  | 'start'
+  | 'death'
+  | 'type'
+  | 'wire';
 
 /**
  * Interface sounds. GDD §18.4 — "silence is banned: even the menu hums."
@@ -915,6 +957,26 @@ export function ui(v: VoiceCtx, at: number, sound: UiSound): void {
       return tick(v, at, 0.07, 950, 0.03);
     case 'click':
       return tick(v, at, 0.24, 780, 0.05);
+
+    /**
+     * A key struck on somebody else's keyboard. §8 — the channel has to feel
+     * *occupied*, and a message that arrives in silence is a document.
+     *
+     * Quieter and far shorter than a hover, and detuned per strike: a fixed
+     * pitch at forty a second is a machine gun, and the small random spread is
+     * what makes it read as fingers. The caller fires it every few characters
+     * rather than every one.
+     */
+    case 'type':
+      return keyClick(v, at);
+
+    /**
+     * The handshake printing itself. Higher, drier and perfectly even, so the
+     * change of register when the typing starts is audible before it is legible
+     * — banner first, then a hand.
+     */
+    case 'wire':
+      return tick(v, at, 0.04, 2600, 0.01);
 
     case 'draft': {
       // A Draft arriving. Two notes up, quiet: an offer, not an announcement.
@@ -981,6 +1043,154 @@ export function ui(v: VoiceCtx, at: number, sound: UiSound): void {
       return;
     }
   }
+}
+
+/**
+ * A key bottoming out. Two layers, because one is a tick and two is a keyboard.
+ *
+ * Deliberately **not** built on `tick()`. That has a 6ms attack, which is right
+ * for a button — fast enough to feel immediate, soft enough not to bite after
+ * the thousandth press. A key is the opposite: the whole character of a click is
+ * the step at the front, and 6ms rounds it off into a blip. This attacks in half
+ * a millisecond and is over in eight, which is a *snap* rather than a tone with
+ * a short envelope.
+ *
+ * The high layer is the keycap; the low one is the key hitting the plate. The
+ * ear needs the second to believe something physical happened, and everything is
+ * jittered per strike or forty a second becomes a texture instead of fingers.
+ */
+function keyClick(v: VoiceCtx, at: number): void {
+  const { ctx } = v;
+
+  // Noise, not a tone: a click with a pitch is a beep, and a beep is a sound the
+  // player will learn to resent.
+  const frames = Math.ceil(ctx.sampleRate * 0.02);
+  const buf = ctx.createBuffer(1, frames, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < frames; i++) {
+    data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / frames, 6);
+  }
+
+  const snap = ctx.createBufferSource();
+  snap.buffer = buf;
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = 2900 + (Math.random() - 0.5) * 1100;
+  bp.Q.value = 1.1;
+
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, at);
+  g.gain.exponentialRampToValueAtTime(0.09 + Math.random() * 0.04, at + 0.0005);
+  g.gain.exponentialRampToValueAtTime(0.0001, at + 0.008);
+  snap.start(at);
+  snap.stop(at + 0.02);
+  snap.connect(bp).connect(g).connect(v.out);
+
+  // The plate. Short enough that it is felt rather than heard as a note.
+  const thock = env(ctx, at, 0.0008, 0.022, 0.055 + Math.random() * 0.02);
+  const lowOsc = osc(ctx, 'sine', 130 + Math.random() * 50, at, at + 0.04);
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 380;
+  lowOsc.connect(lp).connect(thock).connect(v.out);
+}
+
+/**
+ * The handshake, once, at the top of an intrusion. §8.
+ *
+ * Played rather than held: a modem screeches while it is negotiating and then
+ * shuts up, and a carrier droning under six lines of dialogue is just a hum the
+ * player stops hearing. The whole thing is over inside the banner.
+ *
+ * The sequence is the real one, in the real order — dial tone, tones dialled,
+ * answer tone, then the negotiation. Every frequency below is the actual value:
+ * DTMF is 697/770/852 by 1209/1336/1477, the answer tone is 2100 Hz, and the
+ * warble is Bell 103's mark and space pairs. None of that is audible as
+ * *correct*, but the intervals between them are what makes it sound like a
+ * modem rather than like sound effects.
+ */
+export function dialup(v: VoiceCtx, at: number): void {
+  const { ctx } = v;
+  const out = ctx.createGain();
+  out.gain.value = 0.5;
+  out.connect(v.out);
+
+  const pair = (t: number, low: number, high: number, dur: number, gain: number): void => {
+    const g = env(ctx, t, 0.008, dur, gain);
+    for (const hz of [low, high]) osc(ctx, 'sine', hz, t, t + dur + 0.02).connect(g);
+    g.connect(out);
+  };
+
+  // Dial tone: the two-tone hum of a line waiting to be told where to go.
+  pair(at, 350, 440, 0.42, 0.06);
+
+  // Dialling. Six digits, unevenly spaced, because a hand is pressing them.
+  const digits: [number, number][] = [
+    [697, 1209],
+    [852, 1477],
+    [770, 1336],
+    [941, 1336],
+    [697, 1477],
+    [852, 1209],
+  ];
+  let t = at + 0.6;
+  for (const [low, high] of digits) {
+    pair(t, low, high, 0.085, 0.05);
+    t += 0.12 + Math.random() * 0.05;
+  }
+
+  // The far end picks up. A steady 2100 Hz is the sound of something answering.
+  const answer = at + 1.55;
+  pair(answer, 2100, 2100, 0.7, 0.05);
+
+  // Negotiation: two carriers hopping between mark and space, over hiss, run
+  // through a soft clip. This is the screech, and it is the only part anybody
+  // actually remembers.
+  const start = at + 2.25;
+  const dur = 1.7;
+  const shaper = ctx.createWaveShaper();
+  const curve = new Float32Array(1024);
+  for (let i = 0; i < curve.length; i++) {
+    const x = (i / (curve.length - 1)) * 2 - 1;
+    curve[i] = Math.tanh(x * 3.2);
+  }
+  shaper.curve = curve;
+
+  const band = ctx.createBiquadFilter();
+  band.type = 'bandpass';
+  band.frequency.value = 1700;
+  band.Q.value = 0.6;
+
+  const swell = env(ctx, start, 0.15, dur, 0.075);
+  shaper.connect(band).connect(swell).connect(out);
+
+  for (const [mark, space] of [
+    [1070, 1270],
+    [2025, 2225],
+  ]) {
+    const o = ctx.createOscillator();
+    o.type = 'square';
+    const g = ctx.createGain();
+    g.gain.value = 0.5;
+    for (let step = 0; step < dur; step += 0.03 + Math.random() * 0.04) {
+      o.frequency.setValueAtTime(Math.random() < 0.5 ? mark! : space!, start + step);
+    }
+    o.start(start);
+    o.stop(start + dur + 0.05);
+    o.connect(g).connect(shaper);
+  }
+
+  const frames = Math.ceil(ctx.sampleRate * dur);
+  const buf = ctx.createBuffer(1, frames, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < frames; i++) data[i] = (Math.random() * 2 - 1) * 0.5;
+  const hiss = ctx.createBufferSource();
+  hiss.buffer = buf;
+  const hissGain = ctx.createGain();
+  hissGain.gain.value = 0.35;
+  hiss.start(start);
+  hiss.stop(start + dur);
+  hiss.connect(hissGain).connect(shaper);
 }
 
 /** The whole UI vocabulary: a short filtered tick. Weight is the only variable. */

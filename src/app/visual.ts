@@ -7,6 +7,7 @@
  * "never change gameplay outcomes"). Most of this file becomes the Video
  * settings panel in a later milestone.
  */
+import type { Hue } from '../sim/types';
 
 /**
  * §16.2 — the legibility law. Reserved luminance bands, strictly enforced.
@@ -52,6 +53,22 @@ export const PALETTE = {
   xp: 0xdfe8f5,
   beacon: 0x9fd0ff,
 } as const;
+
+/**
+ * §16.3 — hue is threat class, so this is the one table that says what a hue
+ * looks like.
+ *
+ * It was three tables: the renderer's, a copy in the shell's title screen, and a
+ * third in the file register. Three places to edit when a hue moves, and the
+ * shell's copies were already the thing making the register's plate not match
+ * the fight it describes. There is one now, and it lives beside the palette it
+ * reads from.
+ */
+export const HUE_COLOR: Record<Hue, number> = {
+  thermal: PALETTE.thermal,
+  voltaic: PALETTE.voltaic,
+  void: PALETTE.void,
+};
 
 /**
  * §21b.5 — the gate opening, as a score rather than a formula.

@@ -5,7 +5,22 @@
       "name": "overclock-dev",
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["dev"],
-      "port": 5173
+      "port": 5173,
+      "autoPort": true
+    },
+    {
+      "name": "overclock-preview",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["preview", "--port", "4173", "--strictPort"],
+      "port": 4173,
+      "url": "http://localhost:4173"
+    },
+    {
+      "name": "shell-lab",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "--port", "5199", "--strictPort"],
+      "port": 5199,
+      "url": "http://localhost:5199"
     }
   ]
 }

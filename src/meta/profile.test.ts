@@ -1,7 +1,16 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { Library } from './profile';
-import { DISCOVERIES, ALL_NODES, AXIOMS } from '../content/index';
+import { ALL_NODES, AXIOMS, DISCOVERIES } from '../content/index';
 import { DISCOVERY_CHECKS } from '../sim/discoveries';
+import { gatedBy, grantsOf, progression } from './progression';
+
+/**
+ * §15.2's curated pool is a *design*, and the design stays under test whether or
+ * not it is the profile in force. Every case below that is about gating names
+ * `default` explicitly; the ones about storage use whatever is active, because
+ * remembering what you earned is not a progression decision.
+ */
+const CURATED = progression('default');
 
 /**
  * The sim runs headless, so the test environment has no DOM. An in-memory shim
@@ -57,7 +66,7 @@ describe('the Library (GDD §15)', () => {
   });
 
   it('§15.2 — a fresh account starts with roughly 60% of the node pool', () => {
-    const lib = new Library();
+    const lib = new Library(CURATED);
     const share = lib.availableNodes.length / ALL_NODES.length;
     expect(share).toBeGreaterThan(0.5);
     expect(share).toBeLessThan(0.7);
@@ -67,7 +76,7 @@ describe('the Library (GDD §15)', () => {
     // §15.2: "enough for every archetype, thin enough to learn". A starting pool
     // missing a whole hue or the ability to build a loop is not thin, it is
     // broken — the first run would have no way to express a direction.
-    const lib = new Library();
+    const lib = new Library(CURATED);
     const available = new Set(lib.availableNodes);
     const kinds = ALL_NODES.filter((n) => available.has(n.id));
 
@@ -84,18 +93,18 @@ describe('the Library (GDD §15)', () => {
   it('starts with Ignition alone, and earns the other two by playing', () => {
     // An Axiom is a starting Program, and you cannot evaluate one before you
     // know what a Program is. Three on run one is three ways to be confused.
-    const lib = new Library();
+    const lib = new Library(CURATED);
     expect(lib.availableAxioms).toEqual(['ignition']);
 
     // Circuit for building a loop; Feedback — which is nothing but a loop — for
     // taking one deep.
     expect(lib.earn('chain_reaction')).toContain('circuit');
     expect(lib.earn('deep_six')).toContain('feedback');
-    expect(new Library().availableAxioms).toEqual(['ignition', 'circuit', 'feedback']);
+    expect(new Library(CURATED).availableAxioms).toEqual(['ignition', 'circuit', 'feedback']);
   });
 
   it('earning the same Discovery twice unlocks nothing the second time', () => {
-    const lib = new Library();
+    const lib = new Library(CURATED);
     expect(lib.earn('chain_reaction').length).toBeGreaterThan(0);
     expect(lib.earn('chain_reaction')).toEqual([]);
   });
@@ -107,14 +116,21 @@ describe('the Library (GDD §15)', () => {
     expect(lib.availableNodes.length).toBeGreaterThan(0);
   });
 
-  it('every unlockable is reachable, and every Discovery is detectable', () => {
+  it('an account keeps what it banked when the gating graph is re-cut', () => {
+    // §15.2 — the Library only ever grows. Availability is derived, so editing
+    // progression.json takes effect immediately; the stored `unlocked` list is
+    // what stops that edit taking something away from an account that earned it.
+    localStorage.setItem(
+      'overclock.library.v1',
+      JSON.stringify({ discoveries: [], unlocked: ['mirror'] }),
+    );
+    expect(new Library(CURATED).availableNodes).toContain('mirror');
+  });
+
+  it('every Discovery is detectable, and every grant names something real', () => {
     // The classic content bug this guards: a reward that unlocks an id nobody
     // grants, or a Discovery in the data with no condition behind it. Both are
     // invisible until a player fails to get something.
-    const reachable = new Set(DISCOVERIES.flatMap((d) => d.unlocks));
-    const known = new Set([...ALL_NODES.map((n) => n.id), ...AXIOMS.map((a) => a.id)]);
-    for (const id of reachable) expect(known.has(id)).toBe(true);
-
     for (const d of DISCOVERIES) {
       expect(DISCOVERY_CHECKS[d.id], `no condition for "${d.id}"`).toBeTypeOf('function');
     }
@@ -122,11 +138,48 @@ describe('the Library (GDD §15)', () => {
       expect(DISCOVERIES.some((d) => d.id === id), `orphan condition "${id}"`).toBe(true);
     }
 
-    // Everything locked at start must have a way out of the lock.
-    const lib = new Library();
-    const locked = ALL_NODES.filter((n) => !lib.availableNodes.includes(n.id));
-    for (const n of locked) {
-      expect(lib.unlockedBy(n.id), `"${n.id}" is locked with no Discovery granting it`).toBeTruthy();
-    }
+    // Under the old model this had a matching half — "everything locked must
+    // have a way out" — which could not be written down without a second list
+    // to compare against, and which passed while two ids in that list were not
+    // nodes at all. Gating *is* granting now, so the failure it looked for is
+    // no longer expressible. What is left worth checking is the other
+    // direction, and the validator does that at load: every id in a grant is a
+    // real node or Axiom.
+    const known = new Set([...ALL_NODES.map((n) => n.id), ...AXIOMS.map((a) => a.id)]);
+    for (const id of gatedBy(CURATED)) expect(known.has(id)).toBe(true);
+  });
+
+  it('reproduces the hand-written lock list it replaced', () => {
+    // The migration, pinned. `LOCKED_AT_START` was 29 ids maintained by hand
+    // beside a `unlocks` field that was supposed to agree with it; this asserts
+    // the derived gate is the same set, minus the two entries that named
+    // nothing. If a future edit to progression.json changes who starts gated,
+    // that is a design decision and this is where it gets noticed.
+    const gated = [...gatedBy(CURATED)].filter((id) => ALL_NODES.some((n) => n.id === id));
+    expect(gated.sort()).toEqual(
+      [
+        'convert_bleed', 'convert_cashout', 'convert_coolant', 'convert_stim',
+        'grounding_rod', 'ground', 'governor', 'insulate', 'mine', 'mirror',
+        'on_convert', 'on_dash', 'on_depth', 'on_enter', 'on_glutton',
+        'on_overheat', 'on_sweep', 'on_threshold', 'on_wave', 'orbital',
+        'overdrive', 'quantize', 'resonate', 'rupture', 'siphon', 'stagger',
+        'volatile',
+      ].sort(),
+    );
+    // ...and the Axioms ride the same rule rather than a second list.
+    expect([...gatedBy(CURATED)].filter((id) => AXIOMS.some((a) => a.id === id)).sort()).toEqual([
+      'circuit',
+      'feedback',
+    ]);
+  });
+
+  it('the open profile gates nothing', () => {
+    // The switch. Progression off must be indistinguishable from progression
+    // never having existed: every node, every Axiom, no grants to consult.
+    const lib = new Library(progression('open'));
+    expect(lib.availableNodes.length).toBe(ALL_NODES.length);
+    expect(lib.availableAxioms.length).toBe(AXIOMS.length);
+    expect(gatedBy(progression('open')).size).toBe(0);
+    for (const d of DISCOVERIES) expect(grantsOf(d.id, progression('open'))).toEqual([]);
   });
 });

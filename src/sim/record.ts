@@ -83,6 +83,7 @@ export interface Recording {
     seed: string;
     axiomId: string;
     availableNodes?: string[];
+    draftPoolId?: string;
     knownDiscoveries?: string[];
     meltdownAt?: number;
   };
@@ -173,6 +174,7 @@ export class Recorder {
       axiomId: this.config.axiomId,
     };
     if (this.config.availableNodes) config.availableNodes = [...this.config.availableNodes];
+    if (this.config.draftPoolId) config.draftPoolId = this.config.draftPoolId;
     if (this.config.knownDiscoveries) {
       config.knownDiscoveries = [...this.config.knownDiscoveries];
     }
@@ -253,6 +255,7 @@ export function replay(
     axiomId: recording.config.axiomId,
   };
   if (recording.config.availableNodes) config.availableNodes = recording.config.availableNodes;
+  if (recording.config.draftPoolId) config.draftPoolId = recording.config.draftPoolId;
   if (recording.config.knownDiscoveries) {
     config.knownDiscoveries = new Set(recording.config.knownDiscoveries);
   }

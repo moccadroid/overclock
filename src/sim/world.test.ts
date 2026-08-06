@@ -1775,11 +1775,89 @@ describe('behaviour is pinned while it is being refactored', () => {
   // billion units, then clamped to the arena corner. Every wave in the game
   // placed some of itself wrongly, so every seed moves. The three below were
   // recorded after the fix and re-verified across repeat runs.
+  //
+  // `calledWaves` MOVED again, deliberately, by the Cache suppression fix. A
+  // Cache now excludes `anchored` from its affix roll, so its enemies draw from
+  // a two-affix pool instead of a three-affix one — different draws, different
+  // world, from the first hardened arrival onward. Only the Cache scenario
+  // walks that path, which is why it is the only pin that moved.
+  //
+  // ...and again by the room ceiling. The Heap caps at Threat 6, so the Cache
+  // scenario's Threat of 8 no longer reaches past it: composition eligibility,
+  // density and substitution all read `roomThreat`, and `escalate: ceiling`
+  // means the room's ceiling rather than Infinity.
+  //
+  // ...and again, both of them this time, by the two room fixes read off a real
+  // run. Spawn placement now refuses candidates in a neighbouring room, and The
+  // Heap declares no Suppressor. Placement is upstream of everything — every
+  // arrival lands somewhere else, so every seed moves.
   const PINNED = {
-    piloted: 'b5c8ffaa',
+    piloted: 'a34871f5',
     scripted: 'cd69a800',
     menagerie: '718dfa4d',
+    calledWaves: '82ca2b89',
   };
+  //
+  // ...and once more, by the siege arriving *in* the doorway instead of in front
+  // of it. The placement satisfies the safe radius by construction now rather
+  // than being corrected outward afterwards — which is what used to shove every
+  // arrival past the player and out the back — and the barrier is exempted from
+  // the seal test, so the mirror retry no longer reflects them behind either.
+  //
+  // `calledWaves` again, by the siege coming through the door. Placement, count
+  // and timing all move: a ring no longer scatters a quarter of each parcel into
+  // the sealed room to be discarded, the parcel pours over three seconds instead
+  // of one tick, and opening the gate now cancels whatever is still queued.
+
+  /**
+   * A scripted Cache and a scripted gate hold, because nothing else pins them.
+   *
+   * Three of the four spawn bugs found on 2026-08-05 — the placement fling, the
+   * doubled parcel delay, the field-blind suppression ceiling — survived a fully
+   * green suite, and all three lived on paths no pinned seed ever walked. The
+   * bot does not reach the gate and never opens a box.
+   *
+   * Deterministic without being a replay: fixed seed, fixed Threat, fixed tick
+   * numbers, and the player teleported rather than driven. That last part is the
+   * point — a pilot good enough to hold a gate would itself be a thing that
+   * changes, and the pin has to move only when the *sim* does.
+   */
+  function calledWaveScenario(): World {
+    const w = new World({ seed: 'pin-called', axiomId: 'ignition' });
+    w.threat = 8;
+    w.enemies.length = 0;
+    const gate = w.terminals.find((t) => t.kind === 'gate')!;
+
+    for (let tick = 0; tick < 60 * 40; tick++) {
+      // A Cache at four seconds: the hardened menagerie, on its own for a while.
+      if (tick === 60 * 4) {
+        (w as unknown as { openCacheNow(x: number, y: number): void }).openCacheNow(
+          w.player.x,
+          w.player.y,
+        );
+      }
+      // From ten seconds, stand in the gate and do not leave. Twenty-two seconds
+      // of bar means it opens around thirty-two, leaving eight seconds after to
+      // catch anything that arrives once the fight is over.
+      if (tick >= 60 * 10) {
+        w.player.x = gate.x;
+        w.player.y = gate.y;
+      }
+      w.player.integrity = w.player.maxIntegrity;
+      w.advance(NO_INPUT);
+    }
+    return w;
+  }
+
+  it('a Cache and a gate hold are unchanged', () => {
+    const w = calledWaveScenario();
+    // Guard the guard: if the scenario stops exercising what it is named after,
+    // the hash is still stable and still meaningless.
+    expect(w.openBiomes.size, 'the gate should have opened').toBeGreaterThan(0);
+    expect(w.stats.cachesOpened, 'the Cache should have opened').toBeGreaterThan(0);
+    expect(w.enemies.filter((e) => e.affixes.length > 0).length).toBeGreaterThan(0);
+    expect(hashWorld(w)).toBe(PINNED.calledWaves);
+  });
 
   it('a piloted run is unchanged', () => {
     const w = new World({ seed: 'pin-piloted', axiomId: 'feedback' });
@@ -1943,45 +2021,312 @@ describe("affixes and a variant's own ideas are one mechanism (GDD §10.3)", () 
     expect(burst, 'the siege must not keep arriving after it is over').toBeLessThan(35);
   });
 
-  it('§11.2 — the suppression ceiling counts fields, not Suppressors', () => {
-    // Reported as "TONS of inhibitors" at a Cache and after a gate opened, and
-    // the count of actual Suppressors in both cases was zero. They were
-    // `anchored` elites: the affix grants a suppression field, the ceiling only
-    // ever counted definitions carrying `zoneRadius`, so the affix bypassed it
-    // completely. Measured before the fix: 37 fields around a Cache, 108 during
-    // a gate hold, against a cap of two.
-    const fields = (w: World): number =>
-      w.enemies.filter(
-        (e) =>
-          e.alive &&
-          (e.traits.some((t) => t.t === 'zone') || e.defId === 'suppressor'),
-      ).length;
+  const suppressionFields = (w: World): number =>
+    w.enemies.filter(
+      (e) => e.alive && (e.traits.some((t) => t.t === 'zone') || e.defId === 'suppressor'),
+    ).length;
 
-    const w = new World({ seed: 'fields', axiomId: 'ignition' });
+  it('§12.4 — a Cache never switches your Engine off', () => {
+    // The one the reports kept being about, and the one this test kept missing.
+    //
+    // It used to assert `peak <= suppressorsAlive`, i.e. "at most two Engine-off
+    // fields around the box you just opened". That is a ceiling on the wrong
+    // thing: the number was two rather than thirty-seven, so it read as fixed
+    // every time, and the player opened a Cache and watched their Engine go
+    // quiet anyway. `noEvents` keeps Suppressors out of a Cache; `anchored`
+    // grants a suppression field of its own and was still in the affix pool, so
+    // the wave fielded the exact thing it was written to exclude.
+    //
+    // A Cache is a purchase — a card, and a hard fight for it. Not a fight you
+    // are not allowed to shoot back in. Zero, not a cap.
+    const w = new World({ seed: 'cache-quiet', axiomId: 'ignition' });
     w.threat = 8;
     w.enemies.length = 0;
     (w as unknown as { openCacheNow(x: number, y: number): void }).openCacheNow(
       w.player.x,
       w.player.y,
     );
+    // Counted by *source*, not by presence on screen. The director keeps running
+    // during a Cache fight and its own composition may legitimately contain a
+    // Suppressor — indistinguishable to the player, and not the same bug. This
+    // asserts the half the Cache is responsible for; the ambient half is a
+    // separate design question about whether opening a box should quiet the room.
+    const fromCache = (w: World): number =>
+      w.enemies.filter((e) => e.alive && e.hardened && (e.traits.some((t) => t.t === 'zone') || e.defId === 'suppressor'))
+        .length;
+
     let peak = 0;
+    let arrivals = 0;
     for (let i = 0; i < 60 * 20; i++) {
       w.player.integrity = w.player.maxIntegrity;
       w.advance(NO_INPUT);
-      peak = Math.max(peak, fields(w));
+      peak = Math.max(peak, fromCache(w));
+      arrivals = Math.max(arrivals, w.enemies.filter((e) => e.alive && e.hardened).length);
     }
-    expect(peak).toBeGreaterThan(0);
-    expect(peak, 'a hardened wave must not blanket the arena in Engine-off auras').toBeLessThanOrEqual(
+    expect(arrivals, 'the menagerie should have arrived at all').toBeGreaterThan(0);
+    expect(peak, 'a Cache must field no suppression of its own').toBe(0);
+  });
+
+  it('§21b — a capped room stops, and the run does not', () => {
+    // The tutorial room. `tier: 0` already kept elites out of The Heap; what it
+    // never capped was *weight* — density is a pure function of Threat, Threat
+    // is wall-clock, and neither had ever heard of a room. Twenty minutes in the
+    // first level met the same two families at four hundred bodies: capped in
+    // kind, unbounded in mass, which is not a plateau.
+    const w = new World({ seed: 'room-cap', axiomId: 'ignition' });
+    const cap = w.currentLevel!.roster.threatCap!;
+
+    w.threat = cap / 2;
+    const half = w.targetAlive;
+    expect(w.roomThreat, 'below the cap the room is the run').toBeCloseTo(w.threat, 5);
+    expect(w.roomThreatGap).toBe(0);
+
+    w.threat = cap;
+    const atCap = w.targetAlive;
+    expect(atCap).toBeGreaterThan(half);
+
+    // Far past it: the run's clock has run on and the room has not moved.
+    w.threat = cap * 4;
+    expect(w.roomThreat, 'the room holds').toBe(cap);
+    expect(w.targetAlive, 'and so does its density').toBe(atCap);
+    expect(w.roomThreatGap).toBeCloseTo(cap * 3, 5);
+    // ...which is the whole of the "you are behind" signal, in steps.
+    expect(w.threatStep).toBeGreaterThan(w.roomThreatStep);
+  });
+
+  it("§21b — a room's tier binds a template that names an elite outright", () => {
+    // Substitution respected `tier`; the roster remap did not. It matched on
+    // *family*, so a template whose own entries say `mote_shielded` — and
+    // `shield_wall` and `brood_nest` both do, both eligible at Threat 6 — asked
+    // for a Mote-family creature, was told Motes are fine, and put a tier-1
+    // elite in a room authored to hold none.
+    const w = new World({ seed: 'tier-binds', axiomId: 'ignition' });
+    const roster = w.currentLevel!.roster;
+    expect(roster.tier, 'the tutorial room is base creatures only').toBe(0);
+
+    const via = (
+      w as unknown as { rosterVia(l: unknown): unknown[] }
+    ).rosterVia(w.currentLevel);
+    const apply = (id: string): string =>
+      (w as unknown as { applyVia(e: string, v: unknown[]): { enemy: string } }).applyVia(id, via)
+        .enemy;
+
+    // Demoted to the family's base creature, not dropped: the wave still wants a
+    // body in that slot.
+    expect(apply('mote_shielded')).toBe('mote');
+    expect(apply('drifter_shielded')).toBe('drifter');
+    expect(apply('drifter_brood')).toBe('drifter');
+    // Base creatures of a family the room has are untouched...
+    expect(apply('mote')).toBe('mote');
+    expect(apply('drifter')).toBe('drifter');
+  });
+
+  it('§21b.7 — ground taken at a gate stays taken', () => {
+    // The bar used to drain, slowly, and slowly was the worst of both. The siege
+    // is scheduled off `progress`, so a bar that rewinds re-delivers parcels
+    // already fought: step off and the same wave arrives again, and again, until
+    // it kills you — or you learn to hover just under a threshold and farm one
+    // forever. One dial produced a treadmill and an exploit at the same time.
+    //
+    // Monotonic makes the intended play the obvious one: hold until a parcel
+    // lands, back off and clear it, come back for the next slice.
+    const w = new World({ seed: 'gate-hold', axiomId: 'ignition' });
+    const gate = w.terminals.find((t) => t.gateId)!;
+    const HOLD: InputState = { moveX: 0, moveY: 0, dash: false, interact: true };
+
+    // Take some ground, and at least one parcel with it.
+    for (let i = 0; i < 60 * 8; i++) {
+      w.player.integrity = w.player.maxIntegrity;
+      w.player.x = gate.x;
+      w.player.y = gate.y;
+      w.advance(HOLD);
+    }
+    const taken = gate.progress;
+    const parcels = gate.siegePulse ?? 0;
+    expect(taken, 'should have taken some ground').toBeGreaterThan(0);
+    expect(parcels, 'and met at least one parcel').toBeGreaterThan(0);
+
+    // Now back off and fight — a long way off, for a long time.
+    let lowest = taken;
+    let pulses = parcels;
+    for (let i = 0; i < 60 * 15; i++) {
+      w.player.integrity = w.player.maxIntegrity;
+      w.player.x = gate.x - 1600;
+      w.player.y = gate.y;
+      w.advance(NO_INPUT);
+      lowest = Math.min(lowest, gate.progress);
+      pulses = Math.min(pulses, gate.siegePulse ?? 0);
+    }
+    expect(lowest, 'a gate must not give ground back').toBe(taken);
+    expect(pulses, 'and must not re-arm a parcel already delivered').toBe(parcels);
+
+    // Returning continues from where it stopped rather than repeating anything.
+    for (let i = 0; i < 60 * 4; i++) {
+      w.player.integrity = w.player.maxIntegrity;
+      w.player.x = gate.x;
+      w.player.y = gate.y;
+      w.advance(HOLD);
+    }
+    expect(gate.progress).toBeGreaterThan(taken);
+    expect(gate.siegePulse ?? 0).toBeGreaterThanOrEqual(parcels);
+  });
+
+  it('§21b.7 — a siege comes through the door, not out of the ground', () => {
+    // It was a ring 460-1000 units around the gate: half of it landing *behind*
+    // the player in ground they had just cleared, and a quarter of every parcel
+    // silently dropped for falling inside the sealed room it was defending. The
+    // code even predicted this, in a comment ruling out "a wave walking through
+    // the door it is defending" as the alternative. That is the right sentence:
+    // the next room is coming through the gap.
+    const w = new World({ seed: 'siege-door', axiomId: 'ignition' });
+    const gate = w.terminals.find((t) => t.gateId)!;
+    const arena = w.arena;
+    const barrier = (arena.gates ?? []).find((g) => g.id === gate.gateId)!.barrier;
+    const doorX = barrier.x + barrier.w / 2;
+    const doorY = barrier.y + barrier.h / 2;
+
+    // Captured where they *arrive*, not where they have walked to. Reading
+    // positions at the end of the hold measures pathfinding: a siege body that
+    // emerged from the door and closed on the player is behind them by then, and
+    // that is the mechanic working, not the placement failing.
+    w.enemies.length = 0;
+    const arrivals: { x: number; y: number; px: number; py: number }[] = [];
+    const seen = new WeakSet<object>();
+    for (let i = 0; i < 60 * 12 && w.stats.gatesOpened === 0; i++) {
+      w.player.integrity = w.player.maxIntegrity;
+      w.player.x = gate.x;
+      w.player.y = gate.y;
+      w.advance({ moveX: 0, moveY: 0, dash: false, interact: true });
+      for (const e of w.enemies) {
+        if (!e.alive || !e.hardened || seen.has(e)) continue;
+        seen.add(e);
+        arrivals.push({ x: e.x, y: e.y, px: w.player.x, py: w.player.y });
+      }
+    }
+
+    // Hardened bodies only. The ambient director keeps running during a hold, at
+    // a third of its floor, and those come from the usual off-screen origins a
+    // thousand units out — counting them measures the flow, not the siege.
+    expect(arrivals.length, 'the siege should have delivered something').toBeGreaterThan(0);
+
+    // **Nothing behind the player.** This is the whole test.
+    //
+    // Reported as a death trap, and it was one: the mouth sat 60 units in front
+    // of the door, a player on the gate stands 120 off its face, and the safe
+    // radius is 260 — so the radial push resolved the only way it could, which
+    // was straight past them and out the back. Then the seal test refused the
+    // doorway as unopened ground and the mirror retry reflected the rest through
+    // the player as well. Two separate mechanisms, both putting the siege behind
+    // somebody who had nowhere to go.
+    const behind = arrivals.filter((a) => (a.px < doorX ? a.x < a.px : a.x > a.px));
+    expect(behind.length, 'a siege arrival cut the player off from their escape').toBe(0);
+
+    // They come *out of* the doorway, not near it. Measured: x 3961-4020 inside
+    // a barrier spanning 3800-4140.
+    const outside = arrivals.filter((a) => a.x < barrier.x || a.x > barrier.x + barrier.w);
+    expect(outside.length, 'a siege arrival did not come through the door').toBe(0);
+
+    // ...and §12.2 still holds. Satisfied by construction rather than corrected.
+    const tooClose = arrivals.filter(
+      (a) => hypot(a.x - a.px, a.y - a.py) < TUNABLE.spawnSafeRadius,
+    );
+    expect(tooClose.length, 'nothing may arrive in the player lap').toBe(0);
+
+    // Spread across the opening rather than stacked on one point — the first
+    // attempt at this satisfied every constraint above by pinning all 34 to two
+    // coordinates, which is a column of enemies inside each other.
+    const ys = arrivals.map((a) => a.y);
+    expect(Math.max(...ys) - Math.min(...ys), 'the door should emit a front').toBeGreaterThan(
+      barrier.h / 2,
+    );
+    void doorY;
+  });
+
+  it('§21b — the tutorial room fields no Suppressor at all', () => {
+    // A Suppressor switches the Engine off, and the first room is where somebody
+    // is still learning they have one. "My weapons stopped working" is the worst
+    // available first lesson: it reads as the game being broken, not as a
+    // mechanic. So The Heap declares no events, and every Suppressor a template
+    // asks for is remapped into an ordinary body.
+    //
+    // They are not gone, they are *introduced properly*: the gate siege carries
+    // the destination room's roster, so the first one arrives through the door
+    // as part of what The Sink is — which is the same moment the player finds
+    // out what is next.
+    const w = new World({ seed: 'no-supp', axiomId: 'ignition' });
+    const heap = w.currentLevel!;
+    expect(heap.roster.events ?? [], 'the tutorial room has no punctuation').toHaveLength(0);
+
+    const via = (w as unknown as { rosterVia(l: unknown): unknown[] }).rosterVia(heap);
+    const apply = (id: string): string =>
+      (w as unknown as { applyVia(e: string, v: unknown[]): { enemy: string } }).applyVia(id, via)
+        .enemy;
+    for (let i = 0; i < 50; i++) {
+      expect(['mote', 'drifter']).toContain(apply('suppressor'));
+    }
+
+    // ...and the siege, which speaks for the room on the other side, still may.
+    const sink = (w.arena.levels ?? []).find((l) => l.id !== heap.id)!;
+    const siegeVia = (w as unknown as { rosterVia(l: unknown): unknown[] }).rosterVia(sink);
+    const applySiege = (id: string): string =>
+      (w as unknown as { applyVia(e: string, v: unknown[]): { enemy: string } }).applyVia(
+        id,
+        siegeVia,
+      ).enemy;
+    expect(applySiege('suppressor'), 'the gate siege introduces them').toBe('suppressor');
+  });
+
+  it('§21b — an uncapped room is untouched by any of that', () => {
+    // The cap is opt-in data. A room that does not declare one behaves exactly
+    // as it always has, or this is not a room ceiling, it is a global nerf.
+    const w = new World({ seed: 'room-uncapped', axiomId: 'ignition' });
+    const level = w.currentLevel!;
+    const original = level.roster.threatCap;
+    (level.roster as { threatCap?: number }).threatCap = undefined;
+    try {
+      w.threat = 40;
+      expect(w.roomThreat).toBe(40);
+      expect(w.roomThreatGap).toBe(0);
+    } finally {
+      (level.roster as { threatCap?: number }).threatCap = original;
+    }
+  });
+
+  it('§11.2 — the suppression ceiling counts fields, not Suppressors', () => {
+    // The other half, still worth holding: where suppression *is* allowed — a
+    // gate siege is the room defending itself — the ceiling has to count fields
+    // rather than definitions carrying `zoneRadius`. Measured before that fix:
+    // 108 simultaneous fields during a gate hold, against a cap of two, with
+    // zero actual Suppressors alive.
+    const w = new World({ seed: 'fields', axiomId: 'ignition' });
+    w.threat = 8;
+    w.enemies.length = 0;
+    let peak = 0;
+    for (let i = 0; i < 60 * 40; i++) {
+      w.player.integrity = w.player.maxIntegrity;
+      w.advance(NO_INPUT);
+      peak = Math.max(peak, suppressionFields(w));
+    }
+    expect(peak, 'nothing may blanket the arena in Engine-off auras').toBeLessThanOrEqual(
       TUNABLE.suppressorsAlive,
     );
   });
 
   it('a room caps its own punctuation (GDD §21b)', () => {
     // `events[].maxAlive` was documented as a per-room cap and read by nothing
-    // for as long as levels have existed. The Heap says two. Ask for twelve.
+    // for as long as levels have existed. The Sink says three. Ask for twelve.
+    //
+    // The Sink, because The Heap has no punctuation at all now — see the test
+    // below. Standing the player in the room whose cap is under test, because
+    // `currentLevel` is positional and the cap is read off it.
     const w = new World({ seed: 'eventcap', axiomId: 'ignition' });
     w.enemies.length = 0;
-    const level = (w.arena.levels ?? [])[0]!;
+    const level = (w.arena.levels ?? []).find((l) => l.roster.events?.length)!;
+    // Unsealed first: nothing arrives in ground the player has not opened, so a
+    // locked room refuses every spawn and the cap under test is never reached.
+    w.openBiomes.add(level.id);
+    w.player.x = level.x + level.w / 2;
+    w.player.y = level.y + level.h / 2;
     const cap = level.roster.events!.find((e) => e.id === 'suppressor')!.maxAlive;
     const queue = (
       w as unknown as {

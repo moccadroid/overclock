@@ -372,15 +372,18 @@ export const TUNABLE = {
   cacheThreatLead: 2,
   /**
    * §21b.5 — how fast a hold drains when you step off it, as a fraction of how
-   * fast it fills.
+   * fast it fills. Ordinary POIs only.
    *
-   * A gate drains four times slower than an ordinary POI because losing twenty
-   * seconds of holding to one dodge would make the mechanic a punishment for
-   * playing well. This is also the dial behind "you can't run away for long" —
-   * lowering it makes retreating from a siege cheaper without touching the
-   * siege.
+   * `gateDrainRate` used to sit beside this at a quarter of the fill rate, on
+   * the reasoning that losing twenty seconds of holding to one dodge punishes
+   * playing well. True, and it turned out to be the smaller half of the problem:
+   * a siege is *scheduled off the bar*, so a bar that rewinds re-delivers waves
+   * that were already fought. Backing off meant meeting the same parcel again,
+   * and hovering just below a threshold meant farming one forever. A gate does
+   * not drain at all now — see `updateTerminals` — and the dial is gone rather
+   * than left at zero, because a knob that does nothing answers "where do I tune
+   * this" with a lie.
    */
-  gateDrainRate: 0.25,
   poiDrainRate: 0.6,
   /**
    * §9.1 — how still "standing still" is, in units per second.
@@ -442,10 +445,35 @@ export const TUNABLE = {
    * the player on a map twenty screens across.
    */
   recycleDistance: 2900,
+  /**
+   * §21b.7 — how far in front of a barrier a siege emerges, in units.
+   *
+   * Far enough clear of the wall that nothing starts inside it and gets pathed
+   * around its own doorway; close enough that the door is visibly where they are
+   * coming from. The gate circle sits about 290 units from the barrier face, so
+   * this also keeps the mouth outside `spawnSafeRadius` of a player holding it —
+   * the safe radius still enforces that, this just means it rarely has to.
+   */
+  doorMouth: 60,
 
   // ---- §12 director ----
   /** Threat reaches ~24 by the 20:00 Meltdown line — the scale wave bands use. */
   threatPerSecond: 0.02,
+  /**
+   * §12.1 — how much Threat one *step* is, for the player's benefit only.
+   *
+   * Threat is continuous underneath and nothing about the director changes here.
+   * What changes is that it becomes sayable: people do not perceive a smooth
+   * invisible variable, they perceive events, which is exactly why Heat is a
+   * float with named tiers and nobody has ever said "I am at 63 Heat".
+   *
+   * 1.8 is ninety seconds. The binding constraint is that a step must be rarer
+   * than a composition rotation (`compositionDuration`, 26s) — at parity every
+   * rotation would be an escalation and the player would learn to ignore both.
+   * Two to three compositions per step, and about a dozen steps before Meltdown,
+   * which is a legible number of difficulty levels to have lived through.
+   */
+  threatPerStep: 1.8,
   /** How long one composition holds before the director rotates to another. */
   compositionDuration: 26,
   /** The burst that announces a new composition, as a fraction of target density. */

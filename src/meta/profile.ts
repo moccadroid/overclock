@@ -12,72 +12,17 @@
  * Everything is stored as ids. Nothing here is a number the sim reads as a
  * multiplier, and that is deliberate — there is no field to accidentally add
  * one to.
+ *
+ * **This module is storage.** It used to also own the gating rules, as a
+ * hand-written `LOCKED_AT_START` array that no test could reconcile with the
+ * Discoveries that were supposed to open it — and which listed two ids that
+ * were not nodes at all. Deciding what is available is progression's job now
+ * (src/meta/progression.ts); this remembers what you have earned and asks.
  */
-import { ALL_NODES, AXIOMS, DISCOVERIES } from '../content/index';
+import { DISCOVERIES } from '../content/index';
+import { ACTIVE, grantedBy, grantsOf, resolve, type ProgressionDef } from './progression';
 
 const STORAGE_KEY = 'overclock.library.v1';
-
-/**
- * §15.2 — "fresh accounts start with a curated ~60% of nodes: enough for every
- * archetype, thin enough to learn."
- *
- * The locked set is chosen so that every archetype is playable on run one. What
- * is held back is the *spicy* half: the nodes that reward understanding a system
- * you have not met yet. You cannot appreciate On Overheat before you have
- * overheated, and Convert is incoherent before fuel means anything to you.
- */
-const LOCKED_AT_START: readonly string[] = [
-  // Triggers that reference a system the player has not met.
-  'on_overheat',
-  'on_convert',
-  'on_dash',
-  'on_wave',
-  // The fuel-economy layer, meaningless before fuel is legible.
-  'convert_bleed',
-  'convert_rectify',
-  'convert_cashout',
-  'convert_coolant',
-  'convert_stim',
-  'siphon',
-  // Actions whose value is positional or delayed rather than immediate.
-  'orbital',
-  'rupture',
-  'mine',
-  // Modifiers that trade against a cost the player cannot yet price.
-  'overdrive',
-  'ground',
-  'resonate',
-  'quantize',
-  'attune',
-  'volatile',
-  // The triggers that listen to systems you meet later in a run, or later in an
-  // account: a Magnet, a Glutton, a suppression field, your own cascade depth.
-  // Every one of them is a card that would read as noise on run one.
-  'on_sweep',
-  'on_glutton',
-  'on_enter',
-  'on_depth',
-  'on_threshold',
-  // And the modifiers that are decisions about the *shape* of an Engine rather
-  // than about an Action: taking the row above's Action, resetting cascade
-  // depth, capping your own output to afford another row.
-  'mirror',
-  'grounding_rod',
-  'governor',
-  'insulate',
-  'stagger',
-];
-
-/**
- * Axioms available before any milestone. §15.2 says three, but three on run one
- * is three ways to be confused at once: an Axiom is a *starting Program*, and
- * you cannot evaluate one before you know what a Program is. Ignition — the
- * plainest possible `Clock -> Bolt` — is the only honest first choice.
- *
- * Circuit arrives once you have built a loop; Feedback, which is nothing but a
- * loop, once you have taken one deep.
- */
-const STARTING_AXIOMS: readonly string[] = ['ignition'];
 
 export interface LibraryData {
   /** Discovery ids earned, ever. */
@@ -119,6 +64,17 @@ export interface LibraryData {
      * that list and this is a feel decision, not a fidelity one.
      */
     beatSync: boolean;
+    /**
+     * Which tube the terminal is being read on. An id from `PHOSPHOR`.
+     *
+     * Its own setting rather than one of `fx`, for the same reason `beatSync`
+     * is: the `fx` list is swept by the quality presets, and this is not a
+     * fidelity decision. Choosing amber costs you the ability to tell thermal
+     * from signal red — a real trade the presets have no business making.
+     */
+    phosphor: string;
+    /** Scanline depth on the terminal, 0..1. 0 is a flat panel. */
+    scanlines: number;
   };
 }
 
@@ -131,14 +87,29 @@ function emptyData(): LibraryData {
     bestScore: 0,
     bestDepth: 0,
     bestTime: 0,
-    settings: { muted: false, volume: 0.7, music: 0.85, effects: 0.9, fx: ['lighting', 'bloom'], beatSync: true },
+    settings: {
+      muted: false,
+      volume: 0.7,
+      music: 0.85,
+      effects: 0.9,
+      fx: ['lighting', 'bloom'],
+      beatSync: true,
+      phosphor: 'colour',
+      scanlines: 0.3,
+    },
   };
 }
 
 export class Library {
   private data: LibraryData = emptyData();
 
-  constructor() {
+  /**
+   * Which gating graph this Library answers under. Defaults to the active one,
+   * so nothing at a call site has to know progression exists — but it is an
+   * argument rather than a global read, which is what lets a test (or the
+   * harness) exercise §15.2's curated pool while the shipped profile is open.
+   */
+  constructor(private readonly progression: ProgressionDef = ACTIVE) {
     this.load();
   }
 
@@ -168,6 +139,8 @@ export class Library {
           effects: number(parsed.settings?.effects) ?? base.settings.effects,
           fx: array(parsed.settings?.fx) ?? base.settings.fx,
           beatSync: parsed.settings?.beatSync !== false,
+          phosphor: string(parsed.settings?.phosphor) ?? base.settings.phosphor,
+          scanlines: number(parsed.settings?.scanlines) ?? base.settings.scanlines,
         },
       };
     } catch {
@@ -194,30 +167,39 @@ export class Library {
     return new Set(this.data.discoveries);
   }
 
+  /**
+   * What this account may use, resolved fresh from the gating graph every time.
+   *
+   * `unlocked` is still consulted rather than trusted alone: it is what a stored
+   * Library banked under whatever graph was in force when it was written, so an
+   * account never loses a node because the graph was re-cut. Everything else is
+   * derived, which is what lets progression.json be edited — or switched off —
+   * without a migration.
+   */
+  private get library(): { nodes: string[]; axioms: string[] } {
+    return resolve(this.data.discoveries, {
+      progression: this.progression,
+      alsoGranted: this.data.unlocked,
+    });
+  }
+
   /** Node ids this account may be offered. Passed into the run, never read live. */
   get availableNodes(): string[] {
-    const unlocked = new Set(this.data.unlocked);
-    return ALL_NODES.filter((n) => !LOCKED_AT_START.includes(n.id) || unlocked.has(n.id)).map(
-      (n) => n.id,
-    );
+    return this.library.nodes;
   }
 
   get availableAxioms(): string[] {
-    const unlocked = new Set(this.data.unlocked);
-    return AXIOMS.filter((a) => STARTING_AXIOMS.includes(a.id) || unlocked.has(a.id)).map(
-      (a) => a.id,
-    );
+    return this.library.axioms;
   }
 
   isUnlocked(id: string): boolean {
-    if (!LOCKED_AT_START.includes(id) && !AXIOMS.some((a) => a.id === id)) return true;
-    if (STARTING_AXIOMS.includes(id)) return true;
-    return this.data.unlocked.includes(id);
+    const { nodes, axioms } = this.library;
+    return nodes.includes(id) || axioms.includes(id);
   }
 
-  /** Which Discovery, if any, is the key to a given locked id. */
+  /** Which Discovery, if any, is the key to a given gated id. */
   unlockedBy(id: string): string | null {
-    return DISCOVERIES.find((d) => d.unlocks.includes(id))?.id ?? null;
+    return grantedBy(id, this.progression);
   }
 
   // ------------------------------------------------------------------- writes
@@ -232,7 +214,12 @@ export class Library {
     if (!def) return [];
     if (!this.data.discoveries.includes(discoveryId)) this.data.discoveries.push(discoveryId);
 
-    const fresh = def.unlocks.filter((u) => !this.data.unlocked.includes(u));
+    // Banked as well as derived. Deriving alone would be enough to *play*, but
+    // the stored list is what survives a later re-cut of the gating graph, and
+    // §15.2's promise is that the Library only ever grows.
+    const fresh = grantsOf(discoveryId, this.progression).filter(
+      (u) => !this.data.unlocked.includes(u),
+    );
     this.data.unlocked.push(...fresh);
     this.save();
     return fresh;
@@ -258,6 +245,12 @@ export class Library {
     const on = this.data.settings.fx;
     const fx = on.includes(id) ? on.filter((e) => e !== id) : [...on, id];
     this.data.settings = { ...this.data.settings, fx };
+    this.save();
+  }
+
+  /** The tube the terminal is read on, and how hard the beam misses a row. */
+  setGlass(g: Partial<Pick<LibraryData['settings'], 'phosphor' | 'scanlines'>>): void {
+    this.data.settings = { ...this.data.settings, ...g };
     this.save();
   }
 
@@ -292,4 +285,7 @@ function array(v: unknown): string[] | null {
 }
 function number(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+function string(v: unknown): string | null {
+  return typeof v === 'string' && v.length > 0 ? v : null;
 }

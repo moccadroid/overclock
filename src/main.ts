@@ -1,6 +1,6 @@
 /**
- * Boot. §19.1–19.3 — the menu sits in front of a run: PLAY, and the Codex,
- * Music, Settings and Credits behind it.
+ * Boot. NARRATIVE §5 — the start screen sits in front of a run, and behind
+ * LOGIN is the terminal: `run`, `files`, `config`.
  *
  * Deep-linking survives: `?seed=abc&axiom=circuit` goes straight in without the
  * title, because reproducing a reported run must never require clicking through
@@ -8,13 +8,17 @@
  * as the default.
  */
 import { Game } from './app/game';
-import { TitleScreen } from './app/menu';
+import { TitleScreen } from './app/shell/title';
 import { BRANDING } from './branding';
 import { Library } from './meta/profile';
 import { Audio } from './audio/audio';
 import { applyEffects } from './app/visual';
 import { installUserCells } from './meta/cellstore';
 import { describeRun, loadRuns, recoverPartial } from './meta/runstore';
+import { sealAbandoned } from './meta/outbox';
+import { StoryStore } from './story/store';
+import { configure } from './story/arc';
+import { flushOutbox, loadTelemetryConfig } from './meta/telemetry-send';
 import './app/ui.css';
 
 const params = new URLSearchParams(location.search);
@@ -22,6 +26,7 @@ const params = new URLSearchParams(location.search);
 // read once, here, and passed into the run as config: the sim never touches
 // storage, so a run stays reproducible from its config alone.
 const library = new Library();
+const story = new StoryStore();
 // One instrument for the whole app. The title screen previews tracks with it and
 // hands it to the run, which keeps the AudioContext alive across the handover —
 // browsers only grant one per gesture, and losing it means a silent run.
@@ -51,20 +56,64 @@ if (crashed) {
 }
 
 /**
+ * The other half of that recovery, for the corpus rather than the recording.
+ *
+ * Anything left in the outbox is from a session that is already over, so a
+ * document still carrying a null end is a run nobody finished — sealed
+ * `abandoned` here and shipped with the rest. That is the only way an abandoned
+ * run is ever observed: the game itself is gone by the time it becomes one.
+ *
+ * Deliberately not awaited. Telemetry must never be between the player and the
+ * title screen, and a boot that waited on the network would be exactly that.
+ */
+sealAbandoned();
+void loadTelemetryConfig().then(() => flushOutbox());
+
+/**
  * Playtest hook: `?meltdown=90` brings the Meltdown line forward so the third
  * act can be seen without playing twenty minutes first. Never set in a real run
  * — the Results screen reports it so a run tuned this way is never mistaken for
  * a scored one.
  */
+/**
+ * ?story= — put the arc wherever you need it.
+ *
+ * The reason this is one line rather than a debug menu: the story state is a
+ * plain value and every operation on it is pure, so "put the campaign at the
+ * archive" is an assignment. The same functions the tests call.
+ *
+ *   ?story=wipe          back to shift one, keeping nothing
+ *   ?story=cycle         §12 — RESET: keeps the scars, increments the revision
+ *   ?story=<rule id>     force every rule up to and including that one
+ */
+const storyParam = params.get('story');
+if (storyParam) {
+  if (storyParam === 'wipe') story.wipe();
+  else if (storyParam === 'cycle') story.cycle();
+  else story.forceTo(storyParam);
+
+  // And out of the URL immediately.
+  //
+  // Returning to the menu is a full page load, so a debug param left in the bar
+  // is not a one-shot — it re-applies on every reload. `?story=wipe` wiped the
+  // arc every single time the player came back from a run, which reads as the
+  // first message replaying forever and is nothing to do with the arc. Same
+  // reason `start` is stripped below.
+  const cleaned = new URL(location.href);
+  cleaned.searchParams.delete('story');
+  history.replaceState(null, '', cleaned);
+}
+
 const meltdownParam = Number(params.get('meltdown'));
 const meltdownAt = Number.isFinite(meltdownParam) && meltdownParam > 0 ? meltdownParam : undefined;
 
 const mount = document.getElementById('app');
 if (!mount) throw new Error('missing #app mount');
 
-const menuUi = document.createElement('div');
-menuUi.id = 'menu-ui';
-mount.appendChild(menuUi);
+// The shell renders itself. It brings up its own Pixi context, mounts a canvas
+// over the app root, and tears both down when the run begins — the run wants a
+// renderer of its own and two live WebGL contexts on one page buys nothing.
+const menuUi = mount;
 
 if (import.meta.env.DEV) {
   // Exposed before the title screen, not after: half the things worth poking at
@@ -156,7 +205,7 @@ const autoStart =
 async function boot(): Promise<void> {
   const setup = autoStart
     ? { seed: linkedSeed!, axiomId: linkedAxiom! }
-    : await new TitleScreen(menuUi, library, audio).present({
+    : await new TitleScreen(menuUi, library, audio, story).present({
         ...(linkedSeed ? { seed: linkedSeed } : {}),
         ...(linkedAxiom ? { axiomId: linkedAxiom } : {}),
       });
@@ -171,16 +220,20 @@ async function boot(): Promise<void> {
   url.searchParams.delete('start');
   history.replaceState(null, '', url);
 
+  // §6.2 — the story's whole influence on a run: which arena it is built from.
+  // Without a story this is the identity function and the run is what it was.
+  story.advance('run-start', { runsCompleted: library.snapshot.runs, levelsOpened: [] });
   const game = new Game(
-    {
+    configure(story.state, {
       seed: setup.seed,
       axiomId: setup.axiomId,
       availableNodes: library.availableNodes,
       knownDiscoveries: library.earnedDiscoveries,
       ...(meltdownAt === undefined ? {} : { meltdownAt }),
-    },
+    }),
     library,
     audio,
+    story,
   );
   await game.start(mount!);
 

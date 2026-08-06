@@ -11,13 +11,15 @@ import waveEventsRaw from './data/waveevents.json';
 import axiomsRaw from './data/axioms.json';
 import arenasRaw from './data/arenas.json';
 import discoveriesRaw from './data/discoveries.json';
+import draftPoolRaw from './data/draftpool.json';
 
-import { validateCollection, type Schema, type RegistrySet } from './validate';
+import { ContentError, validateCollection, type Schema, type RegistrySet } from './validate';
 import type {
   ActionDef,
   ArenaDef,
   AxiomDef,
   DiscoveryDef,
+  DraftPoolDef,
   EnemyDef,
   ModifierDef,
   NodeDef,
@@ -178,6 +180,8 @@ const arenaSchema: Schema = {
           required: true,
           fields: {
             tier: { type: 'number', required: true, min: 0 },
+            /** §21b — the Threat this room stops at. Omitted means never. */
+            threatCap: { type: 'number', min: 0 },
             families: { type: 'array', required: true, items: { type: 'string' } },
             events: {
               type: 'array',
@@ -391,6 +395,9 @@ const waveEventSchema: Schema = {
         at: { type: 'number', required: true, min: 0 },
         share: { type: 'number', required: true, min: 0 },
         ring: { type: 'array', items: { type: 'number' } },
+        /** §21b.7 — arrive through the doorway rather than around the call site. */
+        from: { type: 'string', oneOf: ['door'] },
+        stream: { type: 'number', min: 0 },
         spread: { type: 'number', min: 0 },
       },
     },
@@ -410,6 +417,8 @@ const waveEventSchema: Schema = {
         lead: { type: 'number' },
         ceiling: { type: 'boolean' },
         count: { type: 'number', min: 0 },
+        /** `affix` only — affix ids this wave may never roll. Checked in traits.ts. */
+        exclude: { type: 'array', items: { type: 'string' } },
         hp: { type: 'number', min: 0 },
         damage: { type: 'number', min: 0 },
         tier: { type: 'number' },
@@ -454,9 +463,13 @@ const axiomSchema: Schema = {
 };
 
 /**
- * A Discovery unlocks either a node or an Axiom, so its refs are checked against
- * both. Getting this wrong is the classic content bug: a reward that silently
- * unlocks nothing, discovered by a player and never by a test.
+ * What a Discovery *is*, and nothing about what it is worth.
+ *
+ * `unlocks` used to live here, which put a progression concept in sim content
+ * and meant the gating graph could not be swapped without editing the data the
+ * simulation reads. It lives in src/meta/data/progression.json now, where the
+ * same validator checks its refs against these registries — the dependency runs
+ * one way, and content stays ignorant of the Library.
  */
 const discoverySchema: Schema = {
   id: { type: 'string', required: true },
@@ -464,16 +477,96 @@ const discoverySchema: Schema = {
   hint: { type: 'string', required: true },
   teaches: { type: 'string', required: true },
   score: { type: 'number', required: true, min: 0 },
-  unlocks: { type: 'array', required: true, items: { type: 'string', ref: 'unlockable' } },
+};
+
+/**
+ * §8.2 — the draft, as a described policy rather than as control flow.
+ *
+ * `filters` and `weights[].op` name functions in a registry over in draft.ts,
+ * the same way a wave event's `via` steps name transforms and an Action's
+ * `primitive` names a runner. The verbs are code because a verb is code; the
+ * composition, the ordering and every number are here. Which means "should the
+ * pool lean harder toward Triggers", "is the hunger curve too steep", and
+ * "should a card you cannot place still be offered" are variants and a sweep,
+ * not a commit and an argument.
+ *
+ * `extends` is shallow and one level deep on purpose. A variant should say what
+ * it changes and nothing else — the first draft of this file restated all
+ * fourteen stat cards to change one filter, which is how two policies end up
+ * differing in a field nobody meant to touch.
+ */
+const draftPoolSchema: Schema = {
+  id: { type: 'string', required: true },
+  extends: { type: 'string' },
+  active: { type: 'boolean' },
+  description: { type: 'string', required: true },
+  filters: { type: 'array', items: { type: 'string' } },
+  weights: {
+    type: 'array',
+    items: {
+      type: 'object',
+      fields: {
+        op: { type: 'string', required: true },
+        // Op-specific payloads. Which of these an op reads is the op's business;
+        // that every op named exists is checked against the registry in draft.ts.
+        shares: { type: 'object' },
+        kinds: { type: 'array', items: { type: 'string' } },
+        curve: { type: 'array', items: { type: 'number', min: 0 } },
+        mult: { type: 'number', min: 0 },
+      },
+    },
+  },
+  filler: {
+    type: 'object',
+    fields: {
+      chance: {
+        type: 'object',
+        required: true,
+        fields: {
+          base: { type: 'number', required: true, min: 0, max: 1 },
+          starving: { type: 'number', required: true, min: 0, max: 1 },
+          meltdown: { type: 'number', required: true, min: 0, max: 1 },
+        },
+      },
+      starvingBelow: { type: 'number', required: true, min: 0 },
+      slice: {
+        type: 'array',
+        required: true,
+        items: {
+          type: 'object',
+          fields: {
+            card: {
+              type: 'string',
+              required: true,
+              oneOf: ['program_slot', 'tool', 'stat', 'capacity'],
+            },
+            upTo: { type: 'number', required: true, min: 0, max: 1 },
+            needs: { type: 'string', oneOf: ['programSlot'] },
+            purgeChance: { type: 'number', min: 0, max: 1 },
+          },
+        },
+      },
+    },
+  },
+  stats: {
+    type: 'array',
+    items: {
+      type: 'object',
+      fields: {
+        stat: { type: 'string', required: true },
+        weight: { type: 'number', required: true, min: 1 },
+        amount: { type: 'number', required: true },
+        format: { type: 'string', required: true, oneOf: ['percent', 'number'] },
+        title: { type: 'string', required: true },
+        body: { type: 'string', required: true },
+      },
+    },
+  },
 };
 
 const registries: RegistrySet = {
   enemy: enemyIds,
   node: nodeIds,
-  unlockable: new Set([
-    ...nodeIds,
-    ...(axiomsRaw as { id: string }[]).map((a) => a.id),
-  ]),
   trigger: new Set((triggersRaw as { id: string }[]).map((n) => n.id)),
   action: new Set((actionsRaw as { id: string }[]).map((n) => n.id)),
   modifier: new Set((modifiersRaw as { id: string }[]).map((n) => n.id)),
@@ -542,9 +635,56 @@ export const AXIOMS = validateCollection<AxiomDef>(
   axiomSchema,
   registries,
 );
+/**
+ * An arena that says only what it adds to another.
+ *
+ * §6.2 — the campaign's rooms are levels in an arena definition, so a story room
+ * is one more level and one more door on a map that already exists. Restating
+ * the base arena to add them would duplicate forty ruins and two long level
+ * descriptions, and that is exactly how two arenas end up differing in a field
+ * nobody meant to touch.
+ *
+ * Additive rather than overriding for `levels`, `gates` and `ruins`, because a
+ * variant never wants to *replace* the rooms — it wants one more, and a room
+ * that is not walled in is not a room. Everything else is a
+ * plain override, one level deep, the same shape `draftpool.json` uses.
+ *
+ * Resolved before validation rather than after: a variant carries none of the
+ * required fields of its own, so there is nothing to validate until it has been
+ * merged with its base.
+ */
+interface ArenaVariant {
+  id: string;
+  extends?: string;
+  addLevels?: unknown[];
+  addGates?: unknown[];
+  addRuins?: unknown[];
+  [field: string]: unknown;
+}
+
+function resolveArenas(raw: readonly ArenaVariant[]): unknown[] {
+  const bases = new Map(raw.filter((a) => !a.extends).map((a) => [a.id, a]));
+  return raw.map((arena) => {
+    if (!arena.extends) return arena;
+    const base = bases.get(arena.extends);
+    if (!base) {
+      throw new ContentError('arenas.json', arena.id, `extends unknown arena "${arena.extends}"`);
+    }
+    const { extends: _base, addLevels = [], addGates = [], addRuins = [], ...own } = arena;
+    return {
+      ...base,
+      ...own,
+      levels: [...((base.levels as unknown[]) ?? []), ...addLevels],
+      gates: [...((base.gates as unknown[]) ?? []), ...addGates],
+      // A new room needs the wall it is behind as much as the door through it.
+      ruins: [...((base.ruins as unknown[]) ?? []), ...addRuins],
+    };
+  });
+}
+
 export const ARENAS = validateCollection<ArenaDef>(
   'arenas.json',
-  arenasRaw,
+  resolveArenas(arenasRaw as ArenaVariant[]),
   arenaSchema,
   registries,
 );
@@ -554,6 +694,47 @@ export const DISCOVERIES = validateCollection<DiscoveryDef>(
   discoverySchema,
   registries,
 );
+
+const DRAFT_POOLS_RAW = validateCollection<DraftPoolDef & { extends?: string }>(
+  'draftpool.json',
+  draftPoolRaw,
+  draftPoolSchema,
+  registries,
+);
+
+/**
+ * Resolved variants: a profile's own fields over its base's, one level deep.
+ *
+ * Done here rather than in draft.ts so the sim only ever sees whole policies —
+ * the same reason `VARIANTS_BY_FAMILY` is precomputed. A consumer that had to
+ * remember to resolve inheritance is a consumer that will one day forget.
+ */
+export const DRAFT_POOLS: readonly DraftPoolDef[] = DRAFT_POOLS_RAW.map((p) => {
+  if (!p.extends) return p;
+  const base = DRAFT_POOLS_RAW.find((b) => b.id === p.extends);
+  if (!base) throw new Error(`draftpool.json: "${p.id}" extends unknown profile "${p.extends}"`);
+  if (base.extends) {
+    throw new Error(
+      `draftpool.json: "${p.id}" extends "${base.id}", which extends "${base.extends}" — ` +
+        `inheritance is one level deep, so a profile always has exactly one base to read`,
+    );
+  }
+  return { ...base, ...p };
+});
+
+export const DRAFT_POOL_BY_ID = index(DRAFT_POOLS);
+
+/** The policy in force. One, checked here rather than discovered at a call site. */
+export const DRAFT_POOL: DraftPoolDef = (() => {
+  const on = DRAFT_POOLS.filter((p) => p.active);
+  if (on.length !== 1) {
+    throw new Error(
+      `draftpool.json: exactly one profile must be active, found ${on.length} ` +
+        `(${on.map((p) => p.id).join(', ') || 'none'})`,
+    );
+  }
+  return on[0]!;
+})();
 
 function index<T extends { id: string }>(items: readonly T[]): ReadonlyMap<string, T> {
   return new Map(items.map((i) => [i.id, i]));

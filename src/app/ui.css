@@ -927,6 +927,15 @@ textarea {
   color: var(--thermal);
   letter-spacing: 0.14em;
 }
+/* §19.4 — how long you have been in it.
+   Tabular figures so the minute rolling over does not shift everything after it
+   sideways, and a little brighter than its neighbours because it is the one
+   number on the HUD somebody looks for deliberately rather than monitors. */
+.runclock {
+  color: var(--ink-bright);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+}
 .surge {
   color: var(--void);
 }
@@ -1065,52 +1074,7 @@ textarea {
 /* §14 — Results. The run-trace chart is the hero, everything else annotates it. */
 /* The panel itself does not scroll — only the middle does. The way out of a run
    must never be something you have to scroll down to find. */
-.results-panel {
-  width: min(1000px, 95vw) !important;
-  max-height: 92vh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  white-space: normal !important;
-  line-height: 1.6 !important;
-}
-.results-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding-right: 6px;
-}
-.results-panel .trace {
-  display: block;
-  margin: 16px 0 22px;
-}
-.results-panel .cols {
-  display: flex;
-  gap: 34px;
-  align-items: flex-start;
-}
-.results-panel pre {
-  margin: 0;
-  font: inherit;
-  color: var(--ink);
-  line-height: 1.75;
-}
-.results-panel .score {
-  color: var(--ink-bright);
-}
-.results-panel .snapshot {
-  flex: 1;
-  min-width: 0;
-}
-.results-panel .k {
-  color: #46586e;
-  letter-spacing: 0.22em;
-  margin: 0 0 4px;
-}
-.results-panel .snapshot pre {
-  margin-bottom: 16px;
-  overflow-x: auto;
-}
+
 /* ---- §19.1-19.5 the menu: Play, Codex, Music, Settings, Credits ---- */
 
 #menu-ui {
@@ -1921,22 +1885,6 @@ textarea {
 .discoveries {
   margin-bottom: 16px;
 }
-.discoveries .disc-row {
-  display: flex;
-  gap: 10px;
-  align-items: baseline;
-  line-height: 1.7;
-}
-.discoveries .disc-name {
-  color: #4fbf87;
-}
-.discoveries .disc-unlock {
-  color: #d0b46a;
-}
-.discoveries .disc-todo {
-  color: #46586e;
-  line-height: 1.7;
-}
 
 /* §19.6 — the collected stats, shown where the build is read. */
 .chassis {
@@ -2037,97 +1985,12 @@ textarea {
   color: #4fbf87;
   line-height: 1.7;
 }
-.results-panel .foot .again.danger {
-  color: #c48a80;
-}
-.results-panel .foot .again.danger:hover {
-  border-color: var(--signal);
-  color: var(--signal);
-}
 
-.postmortem {
-  margin-bottom: 16px;
-}
-.postmortem .pm-blow {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 16px;
-}
-.postmortem .pm-name {
-  color: var(--signal);
-  font-size: 15px;
-  letter-spacing: 0.08em;
-}
-.postmortem .pm-mode {
-  color: #46586e;
-}
-.postmortem .glyph {
-  flex: none;
-  overflow: visible;
-}
-.postmortem .pm-row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  line-height: 1.7;
-}
-.postmortem .pm-src {
-  flex: 0 0 38%;
-  color: var(--ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.postmortem .pm-bar {
-  color: #7a3a34;
-  letter-spacing: -1px;
-}
-.postmortem .pm-pct {
-  color: #46586e;
-  margin-left: auto;
-}
-.results-panel .wasted {
-  margin-top: 18px;
-  padding: 10px 12px;
-  border: 1px solid #7a5a2a;
-  color: #c9a25e;
-}
-.results-panel .foot {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 18px;
-  padding-top: 14px;
-  border-top: 1px solid var(--structure);
-  color: #3f5570;
-  font-size: 11px;
-}
 /* One line, one size, never wrapped. These carried their keyboard shortcut in
    the label, which made "RETURN TO MENU [L / ESC]" long enough to break across
    two lines in a fixed-width foot — three buttons of three different heights
    reading as a layout accident. The keys moved to the hint on the right, where
    they were always going to be read anyway. */
-.results-panel .foot .again {
-  flex: none;
-  min-width: 96px;
-  padding: 8px 16px;
-  border: 1px solid var(--structure);
-  background: none;
-  color: var(--ink-bright);
-  font: inherit;
-  font-size: 11px;
-  letter-spacing: 0.18em;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.results-panel .foot .again:hover {
-  border-color: var(--voltaic);
-  color: var(--voltaic);
-}
-.results-panel .foot .dim {
-  margin-left: auto;
-}
 
 #results .panel {
   width: min(620px, 92vw);

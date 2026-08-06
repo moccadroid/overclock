@@ -387,6 +387,24 @@ export interface RosterDef {
   families: readonly string[];
   /** Rare arrivals used as events, each with its own live cap. */
   events?: readonly { id: string; maxAlive: number }[];
+  /**
+   * §21b — the Threat this room stops at. Omitted means it never stops.
+   *
+   * `tier` already caps *what* a room may field. It does not cap *how much*:
+   * density is `targetAliveBase + threat x targetAlivePerThreat`, Threat is pure
+   * wall-clock, and neither has ever heard of a room. So a player who parks in
+   * the tutorial level for twenty minutes met the same two families they met at
+   * minute one, at four hundred bodies — capped in kind and unbounded in weight,
+   * which is not what a cap is for.
+   *
+   * This is the room's own clock stopping. Past it the room fields the same
+   * composition, the same density and the same punctuation forever: an honest
+   * plateau you can stand on, and stop earning from. The global Threat keeps
+   * climbing regardless — it is what is behind the *next* door, and the gap
+   * between the two is the game telling you how far the world has moved on
+   * without you.
+   */
+  threatCap?: number;
 }
 
 export interface ArenaDef {
@@ -606,7 +624,14 @@ export type AudioCueKind =
  */
 export type WaveTransform =
   /** §21b — the room's vocabulary. Anything outside it is remapped into it. */
-  | { op: 'roster'; tier: number; families: readonly string[]; events?: readonly string[] }
+  | {
+      op: 'roster';
+      tier: number;
+      families: readonly string[];
+      events?: readonly string[];
+      /** The room's `threatCap`, carried so `escalate: ceiling` can mean it. */
+      cap?: number;
+    }
   /**
    * §10.4 — how far up the substitution ladder this wave may climb.
    *
@@ -619,8 +644,16 @@ export type WaveTransform =
    * map refusing you does not scale to how well you are doing.
    */
   | { op: 'escalate'; mode: 'roll' | 'best'; lead?: number; ceiling?: boolean }
-  /** §10.3 — elite affixes, drawn without replacement. */
-  | { op: 'affix'; count: number }
+  /**
+   * §10.3 — elite affixes, drawn without replacement.
+   *
+   * `exclude` is what stops a wave rolling an affix it must not have. A Cache
+   * already refuses to field Suppressors (`noEvents`) — and then handed out
+   * `anchored`, which grants a suppression field of its own, so the box you
+   * opened switched your Engine off anyway. The enemy was not on the list of
+   * things that do that, so nothing about the exclusion applied to it.
+   */
+  | { op: 'affix'; count: number; exclude?: readonly string[] }
   /**
    * The one honest multiplier, and deliberately awkward to reach for.
    *
@@ -674,8 +707,30 @@ export interface WaveParcel {
    * the horde in rather than conjuring it around a place.
    */
   ring?: readonly [number, number];
+  /**
+   * §21b.7 — arrive *through the door*, rather than around the call site.
+   *
+   * A siege placed as a ring is the room you are standing in waking up around
+   * you, and that is the wrong sentence. Half of it lands behind the player,
+   * inside ground they have already cleared, and about a quarter of every parcel
+   * was silently discarded for landing in the sealed room on the far side.
+   *
+   * The right sentence is that the next room is coming through the gap. So the
+   * parcel emerges at the doorway's mouth on the player's side, spread along its
+   * width, and walks in. It is the only placement in the game that is allowed to
+   * be *seen* arriving — see `queueSpawn`'s `visible`.
+   */
+  from?: 'door';
   /** Per-enemy jitter on top of the ring. */
   spread?: number;
+  /**
+   * Seconds to pour the parcel over, instead of delivering it in one frame.
+   *
+   * A door that emits forty bodies on a single tick is a wall of enemies that
+   * appeared; the same forty over three seconds is something coming through.
+   * Same count, same place, and the reading is completely different.
+   */
+  stream?: number;
 }
 
 /**
@@ -713,8 +768,75 @@ export interface DiscoveryDef {
   /** Why it mattered, shown once you have done it. */
   teaches: string;
   score: number;
-  /** Node or Axiom ids added to the Library. §15.1: breadth, never power. */
-  unlocks: readonly string[];
+  // What earning one *opens* is deliberately not here. That is a progression
+  // decision, and progression is a system outside the simulation
+  // (src/meta/progression.ts): the sim detects Discoveries, the Library decides
+  // what they are worth. Keeping the reward here would have put a meta concept
+  // in the sim's vocabulary and made the gating graph unswappable.
+}
+
+/**
+ * GDD §8.2 — the draft pool, described.
+ *
+ * `op`, `filters[]` and `stat` name entries in registries over in draft.ts.
+ * Nothing here is validated against those by the content loader, because the
+ * loader must not import the simulation; draft.ts checks its own vocabulary at
+ * module load instead, which fails just as loudly and one file closer to the
+ * thing that would be wrong.
+ */
+export interface DraftWeightOp {
+  op: string;
+  /** `classShare` — relative share per node kind, before per-card division. */
+  shares?: Record<string, number>;
+  /** `hunger` — which kinds it applies to, and the multiplier per owned count. */
+  kinds?: readonly string[];
+  curve?: readonly number[];
+  /** `emptySlotPull`, `inertPenalty` — the single factor they apply. */
+  mult?: number;
+}
+
+export interface DraftFillerSlice {
+  card: 'program_slot' | 'tool' | 'stat' | 'capacity';
+  /**
+   * Upper bound of this card's band in a single 0..1 roll — cumulative, not a
+   * width. Absolute rather than renormalised, so a band whose `needs` is unmet
+   * falls through to the next one instead of resizing every other band: the
+   * roll is one draw either way, and that is what keeps a seed reproducible.
+   */
+  upTo: number;
+  /** A precondition for this band. Unmet, the roll falls through. */
+  needs?: 'programSlot';
+  /** `tool` only — the chance the tool is a Purge rather than a Reroll. */
+  purgeChance?: number;
+}
+
+export interface DraftStatDef {
+  stat: string;
+  /** Relative frequency within the stat slice. Whole numbers. */
+  weight: number;
+  /** The magnitude the card applies. The card's text interpolates it. */
+  amount: number;
+  format: 'percent' | 'number';
+  title: string;
+  /** `{n}` is `amount` formatted; `{cap}` is the Momentum ceiling. */
+  body: string;
+}
+
+export interface DraftPoolDef {
+  id: string;
+  /** Inherit every unstated field from another profile. One level deep. */
+  extends?: string;
+  active?: boolean;
+  description: string;
+  filters: readonly string[];
+  weights: readonly DraftWeightOp[];
+  filler: {
+    chance: { base: number; starving: number; meltdown: number };
+    /** Owning fewer than this many Triggers *or* Actions counts as starving. */
+    starvingBelow: number;
+    slice: readonly DraftFillerSlice[];
+  };
+  stats: readonly DraftStatDef[];
 }
 
 export interface AxiomDef {

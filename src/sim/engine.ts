@@ -225,7 +225,7 @@ export type MoveResult = 'ok' | 'empty' | 'wrong-slot' | 'over-capacity';
  * (pillar 1: combinations stay legal), but the editor has to *say* so, or the
  * player is left guessing which of their picks are doing nothing.
  */
-const PRIMITIVE_FIELDS: Record<string, readonly FireField[]> = {
+export const PRIMITIVE_FIELDS: Record<string, readonly FireField[]> = {
   projectile: ['output', 'count', 'echo', 'pierce', 'bounce', 'volatile', 'leech', 'range', 'speed', 'seek'],
   burst: ['output', 'count', 'echo', 'area', 'leech', 'bloom'],
   chain: ['output', 'count', 'echo', 'leech', 'jumps', 'range'],

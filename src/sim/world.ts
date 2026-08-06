@@ -147,6 +147,8 @@ export type EliteAffix = 'volatile' | 'phasing' | 'anchored';
 interface SpawnRecipe {
   enemy: string;
   affixes: number;
+  /** §10.3 — affix ids this arrival may not roll. See the `affix` transform. */
+  affixExclude: string[];
   hpScale: number;
   damageScale: number;
   enriched: boolean;
@@ -415,6 +417,113 @@ export const POIS: readonly PoiDef[] = [
   },
 ];
 
+/**
+ * §5 — Action primitive to implementation.
+ *
+ * The last if-chain in the sim, and it sat in the system the GDD calls the game:
+ * twelve primitives behind a `switch (def.primitive)`, each arm calling a
+ * differently-shaped private method with a different subset of arguments in a
+ * different order. Adding an Action meant a string, a case, a bespoke method and
+ * a row in `PRIMITIVE_FIELDS` over in engine.ts — with nothing checking the last
+ * two agreed. A primitive missing from `PRIMITIVE_FIELDS` silently ignores every
+ * modifier, which is the "card exists and does nothing" failure this codebase
+ * has already shipped twice in other systems.
+ *
+ * It was split three ways as well: `convert` handled *before* the switch, `buff`
+ * and `knockback` inside it, the rest in their own methods. Three places to look
+ * for "what does an Action do".
+ *
+ * ---
+ *
+ * **`phase` is not decoration.** `each` runs once per instance, inside the loop
+ * that rolls output, damage and corruption. `all` runs once for the whole cast,
+ * *before* any of that — which is what `convert` did by returning early, and
+ * that early return skips an `rng.chance` draw per instance. Model it any other
+ * way and the RNG stream shifts: a balance change wearing a refactor's clothes,
+ * and the pinned hashes would say so.
+ */
+interface ActionRunner {
+  phase: 'each' | 'all';
+  run(w: World, c: ActionCast): void;
+}
+
+/** One cast of one Action. Reused per fire — this is the hottest path there is. */
+interface ActionCast {
+  def: ActionDef;
+  damage: number;
+  depth: number;
+  index: number;
+  x: number;
+  y: number;
+  hue: Hue;
+  ctx: FireContext;
+  corrupted: boolean;
+  spread: number[] | null;
+  /** §5.5 — how many copies. Only an `all` runner reads it. */
+  instances: number;
+}
+
+const ACTION_RUNNERS: Record<string, ActionRunner> = {
+  projectile: {
+    phase: 'each',
+    run: (w, c) =>
+      w.actProjectile(c.def.id, c.damage, c.depth, c.index, c.x, c.y, c.ctx, c.corrupted, c.hue, c.spread),
+  },
+  burst: {
+    phase: 'each',
+    run: (w, c) => w.actBurst(c.def.id, c.damage, c.depth, c.index, c.x, c.y, c.ctx, c.hue),
+  },
+  chain: {
+    phase: 'each',
+    run: (w, c) => w.actChain(c.def.id, c.damage, c.depth, c.index, c.x, c.y, c.hue, c.ctx),
+  },
+  zone: {
+    phase: 'each',
+    run: (w, c) => w.actZone(c.def.id, c.damage, c.depth, c.index, c.x, c.y, c.hue, c.ctx),
+  },
+  // A vortex is a zone that pulls. Same runner; the difference is in the data,
+  // which is the whole point of having a table.
+  vortex: {
+    phase: 'each',
+    run: (w, c) => w.actZone(c.def.id, c.damage, c.depth, c.index, c.x, c.y, c.hue, c.ctx),
+  },
+  mine: {
+    phase: 'each',
+    run: (w, c) => w.actMine(c.def, c.damage, c.depth, c.index, c.ctx, c.hue),
+  },
+  delayed: {
+    phase: 'each',
+    run: (w, c) => w.actRupture(c.def, c.damage, c.depth, c.index, c.x, c.y, c.ctx, c.hue),
+  },
+  beam: {
+    phase: 'each',
+    run: (w, c) => w.actBeam(c.def, c.damage, c.depth, c.index, c.x, c.y, c.ctx, c.hue),
+  },
+  orbital: {
+    phase: 'each',
+    run: (w, c) => w.actOrbital(c.def, c.damage, c.depth, c.index, c.ctx, c.hue),
+  },
+  buff: {
+    phase: 'each',
+    run: (w, c) => w.actSurge(c.def, c.ctx),
+  },
+  knockback: {
+    phase: 'each',
+    run: (w, c) => w.actShove(c.def, c.damage, c.depth, c.index, c.x, c.y, c.ctx, c.hue),
+  },
+  // §7.4 — Convert exchanges resources instead of dealing damage, so it runs
+  // before there is any damage to speak of and never rolls for corruption.
+  convert: {
+    phase: 'all',
+    run: (w, c) => {
+      for (let n = 0; n < c.instances; n++) w.actConvert(c.def, c.depth);
+    },
+  },
+};
+
+/** The primitives that have an implementation. Compared against the data. */
+export const ACTION_PRIMITIVES = Object.keys(ACTION_RUNNERS);
+
 /** What channelling one does. One entry per POI, and nothing else to touch. */
 const POI_EFFECTS: Record<TerminalKind, (w: World, t: Terminal) => void> = {
   beacon: (w) => {
@@ -427,8 +536,8 @@ const POI_EFFECTS: Record<TerminalKind, (w: World, t: Terminal) => void> = {
     w.cueNow('summons', 'voltaic');
     w.mark('beacon', 'beacon');
   },
-  cache: (w, t) => w.openCacheNow(t.x, t.y),
-  gate: (w, t) => w.openGateNow(t),
+  cache: (w, t) => w.openCacheNow(t.x, t.y),
+  gate: (w, t) => w.openGateNow(t),
   cooler: () => {},
   // Does not fire immediately: the player chooses how much to sacrifice.
   recompile: (w) => {
@@ -571,6 +680,17 @@ interface PendingSpawn {
   /** §12.4 — from a Cache: arrives wearing an elite affix. */
   /** §10.3 — how many elite affixes to roll. Zero for an ordinary arrival. */
   affixes: number;
+  /**
+   * ...and which ones it may not be. Carried on the spawn rather than checked at
+   * the roll, because by then the only thing left is an enemy id: which *wave*
+   * asked for it is exactly the information that has been thrown away, and it is
+   * the only thing that knows a Cache must not switch your Engine off.
+   */
+  affixExclude: readonly string[];
+  /** §21b.7 — arrived through a door, and is allowed to be seen doing it. */
+  visible: boolean;
+  /** §21b.7 — queued by a siege; dropped if the gate opens before it lands. */
+  siege: boolean;
   hpScale: number;
   damageScale: number;
   alive: boolean;
@@ -630,6 +750,15 @@ export interface RunConfig {
    * outside itself. Omitted means every node.
    */
   availableNodes?: readonly string[];
+  /**
+   * §8.2 — which draft policy this run rolls under, by id from draftpool.json.
+   * Omitted means the active profile.
+   *
+   * Part of the config for the same reason `availableNodes` is: the draft draws
+   * from the run's Rng, so a replay that rolled under a different policy would
+   * diverge on the first card. Recorded alongside the seed.
+   */
+  draftPoolId?: string;
   /** Discoveries already in the Library, so a repeat does not re-announce. */
   knownDiscoveries?: ReadonlySet<string>;
   /** Testing hook: bring Meltdown forward. Never set in a scored run. */
@@ -647,7 +776,17 @@ export interface TraceSample {
   eps: number;
 }
 
-export type TraceMarkerKind = 'level' | 'recompile' | 'meltdown' | 'extract' | 'death' | 'beacon' | 'cache' | 'gate';
+export type TraceMarkerKind =
+  | 'level'
+  | 'recompile'
+  | 'meltdown'
+  | 'extract'
+  | 'death'
+  | 'beacon'
+  | 'cache'
+  | 'gate'
+  /** §12.1 — the run's difficulty crossing a step. See `threatStep`. */
+  | 'threat';
 
 export interface TraceMarker {
   t: number;
@@ -688,6 +827,18 @@ export interface RunStats {
   killsByEnemy: Map<string, number>;
   /** Kills landed while a Suppressor had your Triggers offline (§11.2). */
   suppressedKills: number;
+  /**
+   * §11.2 — seconds the player's Triggers were switched off by a field.
+   *
+   * A counter rather than a trajectory column: this is a transient with an exact
+   * integral, and the trajectory samples every ten seconds for *shape*. A field
+   * you walk through in four seconds is invisible to a sample and is the whole
+   * of the complaint — "my Engine went quiet" is the most player-visible failure
+   * state in the game and until now the corpus had no column for it at all.
+   */
+  suppressedSeconds: number;
+  /** How many separate times they walked into one. Duration alone hides a lot. */
+  suppressionEntries: number;
   /** Conversions that spent Integrity you could not spare (§7.4). */
   desperateConverts: number;
   peakHeat: number;
@@ -895,6 +1046,8 @@ export class World {
     tierSeconds: [0, 0, 0, 0],
     killsByEnemy: new Map(),
     suppressedKills: 0,
+    suppressedSeconds: 0,
+    suppressionEntries: 0,
     desperateConverts: 0,
     peakHeat: 0,
     firstLevelTime: 0,
@@ -949,18 +1102,38 @@ export class World {
    * two different "levels" on one object is how you write a bug you cannot see.
    */
   get currentLevel(): LevelDef | null {
+    return this.levelAt(this.player.x, this.player.y);
+  }
+
+  /**
+   * §21b — which room a point belongs to.
+   *
+   * Levels do not tile the arena. The Heap ends at x=3800 and The Sink begins at
+   * x=4400, with the gate and its barrier in between, so there is a six-hundred
+   * unit corridor that is inside no level at all — and the fallback here was
+   * `levels[0]`. Walk through the door and, until you are clear of the corridor,
+   * the director believes you are back in the tutorial room: its roster, its
+   * families, and now its Threat ceiling. Read straight off a real run, the HUD
+   * announced `room holds at 3` at 510s, four minutes after The Sink was entered.
+   *
+   * Nearest-by-distance instead. A point outside every room belongs to the room
+   * it is closest to, which for a doorway is the one you are walking into.
+   */
+  levelAt(x: number, y: number): LevelDef | null {
     const levels = this.arena.levels ?? [];
+    let nearest: LevelDef | null = null;
+    let bestD2 = Infinity;
     for (const l of levels) {
-      if (
-        this.player.x >= l.x &&
-        this.player.x <= l.x + l.w &&
-        this.player.y >= l.y &&
-        this.player.y <= l.y + l.h
-      ) {
-        return l;
+      const dx = Math.max(l.x - x, 0, x - (l.x + l.w));
+      const dy = Math.max(l.y - y, 0, y - (l.y + l.h));
+      const d2 = dx * dx + dy * dy;
+      if (d2 === 0) return l;
+      if (d2 < bestD2) {
+        bestD2 = d2;
+        nearest = l;
       }
     }
-    return levels[0] ?? null;
+    return nearest;
   }
   private readonly flowSample = { x: 0, y: 0 };
   private nextId = 1;
@@ -978,6 +1151,20 @@ export class World {
   /** §11.4 — the hazard contract, instantiated once. See traitCtx.
    */
   private readonly hazardCtx: HazardCtx;
+  /** §5 — one cast, reused. The fire path runs thousands of times a second. */
+  private readonly actionCast: ActionCast = {
+    def: null as unknown as ActionDef,
+    damage: 0,
+    depth: 0,
+    index: 0,
+    x: 0,
+    y: 0,
+    hue: 'thermal',
+    ctx: null as unknown as FireContext,
+    corrupted: false,
+    spread: null,
+    instances: 1,
+  };
 
   constructor(config: RunConfig) {
     this.config = config;
@@ -1122,7 +1309,15 @@ export class World {
     // §11.2 — inside a Suppressor's zone the player's Triggers do not fire.
     // Actions already in flight resolve; nothing new starts.
     const wasInHazard = this.wasInHazard;
+    const wasSuppressed = this.suppressedNow;
     this.suppressedNow = this.suppressed;
+    // Integrated here, where the state is already known for the tick. Counting
+    // the crossing separately because forty seconds in one field and forty
+    // one-second crossings are different games and the same number.
+    if (this.suppressedNow) {
+      this.stats.suppressedSeconds += dt;
+      if (!wasSuppressed) this.stats.suppressionEntries++;
+    }
     // §5.3 On Enter — fired on the *crossing*, which is the one instant inside a
     // suppression field where a Trigger still works. Walking in is a decision;
     // this is what pays for it.
@@ -1399,11 +1594,8 @@ export class World {
     const def = ACTION_BY_ID.get(program.actionId)!;
     const instances = Math.max(1, Math.round(compiled.ctx.count));
 
-    // §7.4 — Convert exchanges resources instead of dealing damage.
-    if (def.primitive === 'convert') {
-      for (let n = 0; n < instances; n++) this.runConvert(def, depth);
-      return;
-    }
+    const runner = ACTION_RUNNERS[def.primitive];
+    if (!runner) return;
 
     const hue = def.hue;
 
@@ -1417,6 +1609,27 @@ export class World {
     // enemy still puts all of it into that enemy.
     const spread = def.primitive === 'projectile' && instances > 1 ? this.splitTaken : null;
     if (spread) spread.length = 0;
+
+    // §7.4 — an `all` runner owns the whole cast and runs before output, damage
+    // or corruption exist. Convert is the only one, and it must stay this side
+    // of the loop: its early return is what keeps the corruption draw off the
+    // stream, and moving it would shift every seed.
+    const cast = this.actionCast;
+    cast.def = def;
+    cast.depth = depth;
+    cast.index = index;
+    cast.hue = hue;
+    cast.ctx = compiled.ctx;
+    cast.spread = spread;
+    cast.instances = instances;
+    if (runner.phase === 'all') {
+      cast.damage = 0;
+      cast.x = x;
+      cast.y = y;
+      cast.corrupted = false;
+      runner.run(this, cast);
+      return;
+    }
 
     // Actions happen where the triggering event happened, unless they say
     // otherwise — see ActionDef.origin. This is what lets a cascade travel.
@@ -1443,65 +1656,157 @@ export class World {
       const corrupted =
         this.budget.corruptionChance > 0 && this.rng.chance(this.budget.corruptionChance);
 
-      switch (def.primitive) {
-        case 'projectile':
-          this.spawnProjectile(def.id, damage, depth, index, ox, oy, compiled.ctx, corrupted, hue, spread);
-          break;
-        case 'burst':
-          this.doBurst(
-            def.id,
-            damage,
-            depth,
-            index,
-            ox,
-            oy,
-            compiled.ctx.area * this.areaMul,
-            hue,
-            compiled.ctx.leech,
-            compiled.ctx.bloom,
-          );
-          break;
-        case 'chain':
-          this.doChain(def.id, damage, depth, index, ox, oy, hue, compiled.ctx);
-          break;
-        case 'zone':
-        case 'vortex':
-          this.dropZone(
-            def.id,
-            damage,
-            depth,
-            index,
-            ox,
-            oy,
-            (compiled.ctx.area * this.areaMul),
-            (compiled.ctx.duration * this.durationMul),
-            hue,
-            compiled.ctx,
-          );
-          break;
-        case 'mine':
-          this.dropMine(def, damage, depth, index, compiled.ctx, hue);
-          break;
-        case 'delayed':
-          this.markRupture(def, damage, depth, index, ox, oy, compiled.ctx, hue);
-          break;
-        case 'beam':
-          this.fireBeam(def, damage, depth, index, ox, oy, compiled.ctx, hue);
-          break;
-        case 'orbital':
-          this.addOrbital(def, damage, depth, index, compiled.ctx, hue);
-          break;
-        case 'buff':
-          this.applySurge(def, compiled.ctx);
-          break;
-        case 'knockback':
-          this.doShove(def, damage, depth, index, ox, oy, compiled.ctx, hue);
-          break;
-      }
+      cast.damage = damage;
+      cast.x = ox;
+      cast.y = oy;
+      cast.corrupted = corrupted;
+      runner.run(this, cast);
     }
   }
 
   // ------------------------------------------------------------------ actions
+
+  /**
+   * §5 — the verbs an Action primitive may use, reached by `ACTION_RUNNERS`.
+   *
+   * Thin on purpose. The bodies below are unchanged; what these buy is one
+   * argument order per verb instead of eleven call sites each passing a
+   * different subset in a different order, and a table the coverage test can
+   * compare against `actions.json` and `PRIMITIVE_FIELDS`.
+   */
+  actProjectile(
+    id: string,
+    damage: number,
+    depth: number,
+    index: number,
+    x: number,
+    y: number,
+    ctx: FireContext,
+    corrupted: boolean,
+    hue: Hue,
+    spread: number[] | null,
+  ): void {
+    this.spawnProjectile(id, damage, depth, index, x, y, ctx, corrupted, hue, spread);
+  }
+
+  actBurst(
+    id: string,
+    damage: number,
+    depth: number,
+    index: number,
+    x: number,
+    y: number,
+    ctx: FireContext,
+    hue: Hue,
+  ): void {
+    this.doBurst(id, damage, depth, index, x, y, ctx.area * this.areaMul, hue, ctx.leech, ctx.bloom);
+  }
+
+  actChain(
+    id: string,
+    damage: number,
+    depth: number,
+    index: number,
+    x: number,
+    y: number,
+    hue: Hue,
+    ctx: FireContext,
+  ): void {
+    this.doChain(id, damage, depth, index, x, y, hue, ctx);
+  }
+
+  actZone(
+    id: string,
+    damage: number,
+    depth: number,
+    index: number,
+    x: number,
+    y: number,
+    hue: Hue,
+    ctx: FireContext,
+  ): void {
+    this.dropZone(
+      id,
+      damage,
+      depth,
+      index,
+      x,
+      y,
+      ctx.area * this.areaMul,
+      ctx.duration * this.durationMul,
+      hue,
+      ctx,
+    );
+  }
+
+  actMine(
+    def: ActionDef,
+    damage: number,
+    depth: number,
+    index: number,
+    ctx: FireContext,
+    hue: Hue,
+  ): void {
+    this.dropMine(def, damage, depth, index, ctx, hue);
+  }
+
+  actRupture(
+    def: ActionDef,
+    damage: number,
+    depth: number,
+    index: number,
+    x: number,
+    y: number,
+    ctx: FireContext,
+    hue: Hue,
+  ): void {
+    this.markRupture(def, damage, depth, index, x, y, ctx, hue);
+  }
+
+  actBeam(
+    def: ActionDef,
+    damage: number,
+    depth: number,
+    index: number,
+    x: number,
+    y: number,
+    ctx: FireContext,
+    hue: Hue,
+  ): void {
+    this.fireBeam(def, damage, depth, index, x, y, ctx, hue);
+  }
+
+  actOrbital(
+    def: ActionDef,
+    damage: number,
+    depth: number,
+    index: number,
+    ctx: FireContext,
+    hue: Hue,
+  ): void {
+    this.addOrbital(def, damage, depth, index, ctx, hue);
+  }
+
+  actSurge(def: ActionDef, ctx: FireContext): void {
+    this.applySurge(def, ctx);
+  }
+
+  actShove(
+    def: ActionDef,
+    damage: number,
+    depth: number,
+    index: number,
+    x: number,
+    y: number,
+    ctx: FireContext,
+    hue: Hue,
+  ): void {
+    this.doShove(def, damage, depth, index, x, y, ctx, hue);
+  }
+
+  actConvert(def: ActionDef, depth: number): void {
+    this.runConvert(def, depth);
+  }
 
   private spawnProjectile(
     actionId: string,
@@ -2064,13 +2369,23 @@ export class World {
           t.alive = false;
           this.completeTerminal(t);
         }
-      } else if (t.progress > 0) {
+      } else if (t.progress > 0 && !t.gateId) {
         // Generous interrupt-resume: it drains rather than snapping to zero.
-        // A gate drains more slowly still — losing twenty seconds of holding to
-        // one dodge would make the mechanic a punishment for playing well.
-        const drain = t.holdRadius ? TUNABLE.gateDrainRate : TUNABLE.poiDrainRate;
-        t.progress = Math.max(0, t.progress - (dt / t.channelTime) * drain);
+        t.progress = Math.max(0, t.progress - (dt / t.channelTime) * TUNABLE.poiDrainRate);
       }
+      // §21b.7 — a gate does not drain at all. Ground taken is taken.
+      //
+      // It used to, slowly, and slowly was the worst of both. The siege is
+      // scheduled off `progress`, so a bar that rewinds re-delivers parcels the
+      // player has already fought: stand off a little and the same wave arrives
+      // again, and again, until either it kills them or they learn to hover just
+      // under a threshold and farm it. One dial produced both a treadmill and an
+      // exploit.
+      //
+      // Monotonic makes the intended play the obvious one: hold until a parcel
+      // lands, back off and kill it, come back and take the next slice. Retreat
+      // stops being punished *and* stops being free — the bar simply waits, and
+      // the room you are standing in does not.
     }
   }
 
@@ -2121,10 +2436,12 @@ export class World {
     const held = t.progress * t.channelTime;
     const due = event.parcels.filter((p) => p.at <= held).length;
     const delivered = t.siegePulse ?? 0;
-    if (due <= delivered) {
-      if (due < delivered) t.siegePulse = due;
-      return;
-    }
+    // Never rewound. The counter only ever climbs, so each parcel is delivered
+    // exactly once per gate however the hold goes — which is the other half of
+    // the bar not draining, and the half that actually stops the treadmill. A
+    // rewinding counter re-fought the same wave every time the player stepped
+    // out and back in, and rewarded hovering just under a threshold.
+    if (due <= delivered) return;
     const next = delivered;
     t.siegePulse = delivered + 1;
 
@@ -2139,6 +2456,9 @@ export class World {
       y: t.y,
       via: this.rosterVia(into ?? this.currentLevel),
       only: next,
+      // §21b.7 — and it comes through the barrier, not out of the ground around
+      // you. The wall is the thing being defended and the thing being breached.
+      door: gate.barrier,
     });
 
     // One announcement, on the first parcel. After that the wave is the warning.
@@ -2198,6 +2518,16 @@ export class World {
     // behind you the moment you walk through.
     const b = gate.barrier;
     this.dropPickup('magnet', b.x + b.w / 2, b.y + b.h / 2, 'voltaic', 1);
+
+    // §21b.7 — the siege ends with the hold that summoned it.
+    //
+    // A parcel streams in over a few seconds, so the last one can still be
+    // pouring when the bar completes. Letting it finish is a smaller version of
+    // the bug reported as "AFTER the gate opened, a TON kept spawning" — and the
+    // schedule that would avoid it lives in data and will be edited, so this is
+    // a guarantee rather than an arithmetic coincidence. The ordinary flow is
+    // untouched: only what the siege queued is dropped.
+    for (const s of this.pendingSpawns) if (s.siege) s.alive = false;
 
     this.pushFx('rupture', 'voltaic', gate.x, gate.y, 900, [], 1.2);
     this.cue('gate', 'voltaic', 0, 1);
@@ -2673,8 +3003,20 @@ export class World {
     // candidate made spawns queue up along one compass line, which reads as a
     // procession rather than a swarm.
     const viable: { x: number; y: number }[] = [];
+    // §21b — same room, hidden, but not necessarily ahead. The tier below
+    // `viable`, so the forward bias is the first thing given up rather than the
+    // room constraint.
+    const inRoom: { x: number; y: number }[] = [];
     let best = { x: this.player.x, y: this.player.y };
     let bestHidden = -Infinity;
+
+    // §21b — the spawn ring is 1180-1480 units and rooms are 600 apart, so
+    // standing anywhere near a doorway put most of the ring in the room next
+    // door. Reported as "shit kept spawning in the first level" after crossing
+    // into the second, and it is exactly that: the roster is the player's room,
+    // the *placement* had never heard of rooms at all, so The Sink's enemies
+    // arrived in The Heap and walked back through the gate.
+    const here = this.currentLevel;
 
     for (let i = 0; i < TUNABLE.spawnCandidates; i++) {
       const angle = offset + (i / TUNABLE.spawnCandidates) * Math.PI * 2;
@@ -2685,7 +3027,9 @@ export class World {
         Math.abs(x - this.player.x) - halfW,
         Math.abs(y - this.player.y) - halfH,
       );
-      if (hidden > 0) {
+      const sameRoom = !here || this.levelAt(x, y) === here;
+      if (hidden > 0 && sameRoom) {
+        inRoom.push({ x, y });
         // When biasing forward, only keep candidates roughly ahead of travel.
         if (!forward || (pcos(angle) * fx + psin(angle) * fy) > 0.25) {
           viable.push({ x, y });
@@ -2697,18 +3041,59 @@ export class World {
       }
     }
     // Near an arena corner nothing may be fully hidden; fall back to the least
-    // visible option rather than spawning in the player's lap.
-    return viable.length > 0 ? viable[this.rng.int(viable.length)]! : best;
+    // visible option rather than spawning in the player's lap. Room first,
+    // heading second, visibility last — arriving from the wrong side of a door
+    // you already walked through is worse than arriving slightly on-screen.
+    if (viable.length > 0) return viable[this.rng.int(viable.length)]!;
+    if (inRoom.length > 0) return inRoom[this.rng.int(inRoom.length)]!;
+    return best;
   }
 
   /** A point at a given distance band from the player that is not inside a ruin. */
+  /**
+   * Somewhere in *this* room to put a thing the player has to walk to.
+   *
+   * §21b — everything the map offers belongs to the room the operator is in.
+   * Enemies already work this way (the roster is the current level's); Beacons,
+   * Caches, Coolers and the Magnets they hand out did not, and it showed twice:
+   *
+   *   **The ring did not know about rooms.** A point was clamped to the *arena*,
+   *   so standing anywhere near a doorway scattered POIs back through it. The
+   *   Heap and The Sink are 3800 and 3600 wide against a ring measured in
+   *   hundreds — from the near edge of a new room, most of the ring is still the
+   *   old one.
+   *
+   *   **The fallback was the arena's spawn point.** Twelve failed attempts and
+   *   the thing was placed at `spawnX, spawnY` — which is not "somewhere safe",
+   *   it is *the middle of the first room*, however many rooms ago that was. The
+   *   more the ring failed, the more reliably everything piled up back at the
+   *   start, which is exactly the shape of "all the new beacons are spawning in
+   *   the last room".
+   *
+   * So: reject anything outside the current room, and when the ring cannot find
+   * a spot, fall back inside that room rather than to the other end of the map.
+   */
   private findOpenSpot(minDist: number, maxDist: number): { x: number; y: number } {
-    for (let attempt = 0; attempt < 12; attempt++) {
+    const room = this.currentLevel;
+    for (let attempt = 0; attempt < 24; attempt++) {
       const angle = this.rng.next() * Math.PI * 2;
       const dist = this.rng.range(minDist, maxDist);
       const x = clamp(this.player.x + pcos(angle) * dist, 60, this.arena.width - 60);
       const y = clamp(this.player.y + psin(angle) * dist, 60, this.arena.height - 60);
-      if (!this.insideRuin(x, y, 40)) return { x, y };
+      if (this.insideRuin(x, y, 40)) continue;
+      if (room && this.levelAt(x, y) !== room) continue;
+      return { x, y };
+    }
+
+    // Nothing in the ring worked — a cramped room, or a corner. Anywhere in the
+    // room that is not a wall will do; the point is that it is in *this* one.
+    if (room) {
+      for (let attempt = 0; attempt < 24; attempt++) {
+        const x = room.x + this.rng.range(room.w * 0.15, room.w * 0.85);
+        const y = room.y + this.rng.range(room.h * 0.15, room.h * 0.85);
+        if (!this.insideRuin(x, y, 40)) return { x, y };
+      }
+      return { x: room.x + room.w / 2, y: room.y + room.h / 2 };
     }
     return { x: this.arena.spawnX, y: this.arena.spawnY };
   }
@@ -3166,10 +3551,22 @@ export class World {
       p.integrity = 0;
       p.alive = false;
       this.deathCause = cause;
-      // §14 — "CONTAINED" in Meltdown, "Garbage collected" before it. Never
-      // shaming language either way.
+      // §14 — one word, because it is one event.
+      //
+      // This read "garbage collected" before Meltdown: a programmer's joke in a
+      // game where §13.6 bans winking. It survived the Results rewrite by hiding
+      // here, in the sim, as a trace label, so it kept printing on the chart
+      // after the screen that used to say it was gone.
+      //
+      // Replacing it with "COLLECTED" was the second mistake and a worse one.
+      // This is a containment facility — the procedure section of every document
+      // in §9 is a containment procedure, the disposition is STANDING, and what
+      // happens when the Engine is stopped is that it is *contained*. Splitting
+      // the label by when the player died invents a distinction the Bureau does
+      // not make and puts two words on the chart and the stamp for one event.
+      // `ending` still carries the difference, because scoring needs it.
       this.ending = this.phase === 'meltdown' ? 'contained' : 'died-early';
-      this.mark('death', this.ending === 'contained' ? 'CONTAINED' : 'garbage collected');
+      this.mark('death', 'CONTAINED');
     }
   }
 
@@ -3795,7 +4192,25 @@ export class World {
 
   private updateDirector(dt: number): void {
     // §12.1 — Threat rises with time and never decreases.
+    const before = this.threatStep;
     this.threat += TUNABLE.threatPerSecond * dt;
+    // ...and says so when it crosses a step. The rise is smooth and the *telling*
+    // is not, for the same reason Heat has tiers: a continuous invisible number
+    // is not something anybody can plan against, and a beat is.
+    //
+    // Marked even in a capped room, where by design nothing about the fight
+    // changes — that is not a wasted notification, it is the signal. The step
+    // climbs, the room cannot follow, and the gap between them is the game
+    // saying how far ahead the next door has got without ever nagging.
+    if (this.threatStep > before) {
+      this.mark(
+        'threat',
+        this.roomThreatGap > 0
+          ? `threat ${this.threatStep} · room holds at ${this.roomThreatStep}`
+          : `threat ${this.threatStep}`,
+      );
+      this.cue('summons', 'void', 0, 0.5);
+    }
 
     this.releasePendingSpawns();
 
@@ -3807,7 +4222,7 @@ export class World {
     }
 
     // §10.2 — Wardens punctuate the flow once Threat is high enough.
-    if (this.threat >= TUNABLE.wardenFromThreat) {
+    if (this.roomThreat >= TUNABLE.wardenFromThreat) {
       this.wardenTimer -= dt;
       if (this.wardenTimer <= 0) {
         this.wardenTimer = TUNABLE.wardenInterval;
@@ -3839,11 +4254,53 @@ export class World {
     return false;
   }
 
+  /**
+   * §21b — Threat as *this room* experiences it.
+   *
+   * `threat` is the run's clock and it only ever rises. `roomThreat` is what the
+   * director is allowed to spend here, and in a capped room it stops. Every
+   * question about what arrives — which compositions are eligible, how many, how
+   * far substitution may climb, whether Wardens have started — asks this one.
+   * `threat` itself stays the global figure, because that is what the *next*
+   * room will be measured against and what the player is shown.
+   *
+   * One value rather than a cap per system, because "the room stopped" has to be
+   * a single fact. Capping the composition and not the density gives you the
+   * tutorial level's two families at four hundred bodies, which is not a plateau,
+   * it is the same cliff wearing a friendlier roster.
+   */
+  get roomThreat(): number {
+    const cap = this.currentLevel?.roster.threatCap;
+    return cap === undefined ? this.threat : Math.min(this.threat, cap);
+  }
+
+  /**
+   * How far the run has moved on without this room, in Threat.
+   *
+   * Zero in an uncapped room and while you are keeping up. Once it opens it is
+   * the whole of the "you are behind" signal, and it is diegetic rather than a
+   * nag: the number is what is waiting on the other side of the door, and the
+   * room you are standing in cannot express it.
+   */
+  get roomThreatGap(): number {
+    return Math.max(0, this.threat - this.roomThreat);
+  }
+
+  /** §12.1 — the run's Threat as a step the player can name. */
+  get threatStep(): number {
+    return Math.floor(this.threat / TUNABLE.threatPerStep);
+  }
+
+  /** ...and what this room is able to express, which in a capped one stops. */
+  get roomThreatStep(): number {
+    return Math.floor(this.roomThreat / TUNABLE.threatPerStep);
+  }
+
   /** Live density the director is actively trying to hold. */
   get targetAlive(): number {
     const target = Math.min(
       TUNABLE.maxAliveHard,
-      TUNABLE.targetAliveBase + this.threat * TUNABLE.targetAlivePerThreat,
+      TUNABLE.targetAliveBase + this.roomThreat * TUNABLE.targetAlivePerThreat,
     );
     return this.sandbox ? Math.max(1, Math.round(target * 0.06)) : target;
   }
@@ -3881,7 +4338,7 @@ export class World {
     }
 
     const maxRate =
-      (TUNABLE.refillRateBase + this.threat * TUNABLE.refillRatePerThreat) * floor;
+      (TUNABLE.refillRateBase + this.roomThreat * TUNABLE.refillRatePerThreat) * floor;
     const rate = Math.min(maxRate, deficit * TUNABLE.refillAggression);
     this.refillDebt += rate * dt;
 
@@ -3906,7 +4363,7 @@ export class World {
   }
 
   private rotateComposition(): void {
-    const eligible = WAVES.filter((w) => this.threat >= w.minThreat && this.threat <= w.maxThreat);
+    const eligible = WAVES.filter((w) => this.roomThreat >= w.minThreat && this.roomThreat <= w.maxThreat);
     if (eligible.length === 0) return;
 
     // Every run opens on the designated opener, not on a weighted roll.
@@ -3972,7 +4429,7 @@ export class World {
       // Re-assert the off-screen and safe-radius guarantees against where the
       // player is NOW: they may have run most of a screen's width since this
       // spawn was queued.
-      const hidden = this.pushOutsideView(s.x, s.y);
+      const hidden = s.visible ? { x: s.x, y: s.y } : this.pushOutsideView(s.x, s.y);
       const safe = this.pushOutsideSafeRadius(hidden.x, hidden.y);
       const e = this.spawnEnemy(
         s.enemy,
@@ -3989,7 +4446,11 @@ export class World {
         // one affix and a wasted roll, and the pool is only three deep. A Cache
         // rolls one, a gate siege rolls two.
         if (s.affixes > 0) {
-          const pool = this.affixPool();
+          // The wave's own veto, applied before the global ceiling's. §12.4: a
+          // Cache is a purchase, and the thing it must never sell you is your
+          // own Engine switched off — `noEvents` already keeps Suppressors out,
+          // and `anchored` walked the same field in through the affix roll.
+          const pool = this.affixPool().filter((a) => !s.affixExclude.includes(a));
           for (let n = 0; n < Math.min(s.affixes, pool.length); n++) {
             e.affixes.push(pool.splice(this.rng.int(pool.length), 1)[0]!);
           }
@@ -4054,10 +4515,12 @@ export class World {
    */
   private applyVia(enemy: string, via: readonly WaveTransform[]): SpawnRecipe {
     this.escalateTier = Infinity;
+    this.escalateCap = Infinity;
     this.chainFamilies = [];
     const out: SpawnRecipe = {
       enemy,
       affixes: 0,
+      affixExclude: [],
       hpScale: 1,
       damageScale: 1,
       enriched: false,
@@ -4066,6 +4529,7 @@ export class World {
       switch (step.op) {
         case 'roster':
           this.escalateTier = step.tier;
+          this.escalateCap = step.cap ?? Infinity;
           this.chainFamilies = step.families;
           out.enemy = this.viaRoster(out.enemy, step.tier, step.families, step.events);
           break;
@@ -4079,6 +4543,10 @@ export class World {
           break;
         case 'affix':
           out.affixes += step.count;
+          // Accumulated across the chain, never replaced: a room that forbids an
+          // affix and an event that forbids another must both be obeyed, and
+          // whichever ran second would otherwise win.
+          if (step.exclude) out.affixExclude.push(...step.exclude);
           break;
         case 'toughen':
           out.hpScale *= step.hp;
@@ -4110,10 +4578,26 @@ export class World {
     families: readonly string[],
     events?: readonly string[],
   ): string {
-    void tier;
     if (families.length === 0) return enemy;
     const family = familyOf(enemy);
-    if (families.includes(family)) return enemy;
+    if (families.includes(family)) {
+      // The family is welcome here. The *variant* still has to be.
+      //
+      // `tier` was accepted and explicitly discarded, and that hole is the whole
+      // of "tier 0 keeps elites out": it does, but only for elites arriving by
+      // substitution. A template that names `mote_shielded` in its own entries
+      // — `shield_wall` and `brood_nest` both do, and both are eligible at
+      // Threat 6 — asked for a Mote-family creature, was told Motes are fine,
+      // and walked a tier-1 elite into the tutorial room. Measured across the
+      // real chains: nine distinct creatures reachable in a room authored to
+      // hold two.
+      //
+      // Demoted to the family's base creature rather than dropped, because the
+      // wave still wants a body in that slot: §10.4's "a wave of forty plain
+      // Motes stays legal forever" only works if the room can *make* it plain.
+      const variantTier = getEnemy(enemy).substitutes?.tier ?? 0;
+      return variantTier > tier ? family : enemy;
+    }
     if (events?.includes(enemy)) return enemy;
     return families[this.rng.int(families.length)]!;
   }
@@ -4147,7 +4631,14 @@ export class World {
     const options = VARIANTS_BY_FAMILY.get(familyOf(enemy));
     if (!options || options.length === 0) return enemy;
     const tier = this.escalateTier;
-    const reach = step.ceiling ? Infinity : this.threat + (step.lead ?? 0);
+    // `ceiling` means the room's ceiling — which is what its own description in
+    // waveevents.json has always claimed — and meant `Infinity` until a room had
+    // a ceiling to name. That is most of why a gate siege was overwhelming: it
+    // took the hardest variant every family had, at any Threat, and then applied
+    // two affixes and quadruple HP on top. Uncapped rooms are unchanged.
+    const reach = step.ceiling
+      ? this.escalateCap
+      : this.roomThreat + (step.lead ?? 0);
 
     if (step.mode === 'roll') {
       for (const variant of options) {
@@ -4182,6 +4673,14 @@ export class World {
    * with the families rather than being read off the player's position.
    */
   private escalateTier = Infinity;
+  /**
+   * ...and the Threat ceiling that travels with it, for `escalate: ceiling`.
+   *
+   * Same reasoning and the same trap: a gate's chain carries the *destination*
+   * room's roster, so reading a cap off the room the player is standing in would
+   * hand The Heap's ceiling to a wave made of The Sink.
+   */
+  private escalateCap = Infinity;
   /** The families the running chain's `roster` step named, for `noEvents`. */
   private chainFamilies: readonly string[] = [];
 
@@ -4211,6 +4710,8 @@ export class World {
     scale?: number;
     /** Deliver only the parcel at this index. The gate ticks its own clock. */
     only?: number;
+    /** §21b.7 — the doorway, for parcels that arrive through one. */
+    door?: { x: number; y: number; w: number; h: number };
   }): void {
     const { event } = call;
     // No named pool means "whatever is already running" — a called wave is
@@ -4236,7 +4737,7 @@ export class World {
       // *after* the gate had opened and the fight was over. Reported as "AFTER
       // the gate opened, a TON kept spawning", and that is exactly what it was.
       const delay = call.only === undefined ? parcel.at : 0;
-      this.deliverParcel(template, weights, parcel, via, call.x, call.y, scale, delay);
+      this.deliverParcel(template, weights, parcel, via, call.x, call.y, scale, delay, call.door);
     }
   }
 
@@ -4251,6 +4752,8 @@ export class World {
     scale: number,
     /** Seconds from now. Zero when the caller is driving the schedule itself. */
     delay: number,
+    /** §21b.7 — the doorway a `from: 'door'` parcel pours through. */
+    door?: { x: number; y: number; w: number; h: number },
   ): number {
     const count = Math.max(1, Math.round(this.targetAlive * parcel.share * scale));
     const spread = parcel.spread ?? 60;
@@ -4258,6 +4761,70 @@ export class World {
       const entry = this.rng.pickWeighted(template.entries, weights);
       let ox: number;
       let oy: number;
+      // §21b.7 — poured out of the doorway, in front of the player. Always.
+      //
+      // The first version put them on the player's side of the barrier and let
+      // the generic safe-radius push sort out the rest. It cannot: the mouth sat
+      // 60 units in front of the door, a player holding the gate stands about 120
+      // from its face, and `spawnSafeRadius` is 260 — so the push moved them
+      // *radially outward from the player*, which from that geometry means
+      // straight past them and out the back. Reported as arriving behind, with no
+      // way out, and it was: the only direction with room was backwards.
+      //
+      // So the placement owns the constraint instead of inheriting it. The door
+      // has a normal (its short axis — the way the corridor runs) and a face (its
+      // long one). Arrivals land on the face pointing at the player and are
+      // separated *along the door*, never around the player. If the face is not
+      // wide enough to clear the safe radius, they retreat along the normal into
+      // the doorway — deeper into the gap they are coming out of — because the
+      // one direction they must never be pushed is behind.
+      if (parcel.from === 'door' && door) {
+        const cxD = door.x + door.w / 2;
+        const cyD = door.y + door.h / 2;
+        // Short axis is the way through; long axis is the width of the opening.
+        const normalX = door.w <= door.h;
+        const halfN = (normalX ? door.w : door.h) / 2;
+        const halfL = (normalX ? door.h : door.w) / 2;
+        const pn = normalX ? this.player.x : this.player.y;
+
+        const cn = normalX ? cxD : cyD;
+        const cl = normalX ? cyD : cxD;
+        // Which way is through: away from the player, deeper into the gap.
+        const through = pn >= cn ? -1 : 1;
+
+
+        // §12.2 — the safe radius is satisfied by *construction* rather than
+        // corrected afterwards, and that is the whole fix. Measuring the point
+        // and pushing it out is what put them behind: from a player standing
+        // 120 units off a door, the only direction with 260 units of room is
+        // backwards. Placing them a safe distance *along the normal* means the
+        // constraint is met before the lateral spread is even chosen, so the
+        // spread stays free and every one of them is in front.
+        //
+        // At the shipped gate that lands them around x 3960 — inside the barrier
+        // itself. They are not arriving near the door, they are coming out of it.
+        const depth = TUNABLE.spawnSafeRadius + 20 + this.rng.range(0, 60);
+        // Clamped into the doorway itself, so they are always emerging from the
+        // gap rather than hovering in front of it — and so the seal exception
+        // below stays exactly as wide as the barrier and no wider.
+        const n = clamp(pn + through * depth, cn - halfN, cn + halfN);
+        const l = cl + this.rng.range(-1, 1) * (halfL + spread * 0.5);
+        ox = clamp(normalX ? n : l, 40, this.arena.width - 40);
+        oy = clamp(normalX ? l : n, 40, this.arena.height - 40);
+        const pour = parcel.stream ? (i / count) * parcel.stream : 0;
+        // The doorway is sealed ground — it is between the rooms, not inside
+        // either — so the siege has to be told it may use its own door. Padded
+        // laterally by the spread, never along the normal: the room behind is
+        // still off limits.
+        const pad = spread;
+        const gap = normalX
+          ? { x: door.x, y: door.y - pad, w: door.w, h: door.h + pad * 2 }
+          : { x: door.x - pad, y: door.y, w: door.w + pad * 2, h: door.h };
+        // Jitter is already in the placement above; passing it again would drag
+        // them back inside the radius and hand the problem to the radial push.
+        this.queueSpawn(entry.enemy, ox, oy, 0, delay + pour, via, true, true, gap);
+        continue;
+      }
       if (parcel.ring) {
         // A ring around the call site: the *place* waking up, which is what a
         // Cache and a gate both want — you are standing in the middle of it.
@@ -4304,14 +4871,14 @@ export class World {
   private rosterVia(level: LevelDef | null | undefined): WaveTransform[] {
     const roster = level?.roster;
     if (!roster) return [];
-    return [
-      {
-        op: 'roster',
-        tier: roster.tier,
-        families: roster.families,
-        events: roster.events?.map((e) => e.id),
-      },
-    ];
+    const step: WaveTransform = {
+      op: 'roster',
+      tier: roster.tier,
+      families: roster.families,
+      events: roster.events?.map((e) => e.id),
+    };
+    if (roster.threatCap !== undefined) step.cap = roster.threatCap;
+    return [step];
   }
 
   /** Place one spawn around an origin and queue it to arrive after `delay`. */
@@ -4327,6 +4894,43 @@ export class World {
      * called wave passes whatever its event and its caller resolved.
      */
     via: readonly WaveTransform[],
+    /**
+     * §12.2 — let this one be seen arriving.
+     *
+     * "Spawns arrive off-screen" is presentation: it stops things blinking into
+     * existence in front of you. A siege pouring through a door you are standing
+     * at is the one case where watching them come *is* the effect, and pushing
+     * them off-screen first means they appear behind the wall and walk back.
+     *
+     * The safe radius is not waived and never is — §12.2's "no spawn-on-top-of
+     * -player, ever" is a guarantee rather than a preference.
+     */
+    visible = false,
+    /**
+     * §21b.7 — queued by a siege, and therefore cancelled when the gate opens.
+     *
+     * The siege *is* the hold. Streaming a parcel over three seconds means the
+     * last one can still be pouring when the bar completes, which is a smaller
+     * version of the bug that was reported as "AFTER the gate opened, a TON kept
+     * spawning" — and a guarantee is worth more here than a schedule that
+     * happens to fit, because the schedule lives in data and will be edited.
+     */
+    siege = false,
+    /**
+     * §21b.6 — ground this particular wave is allowed to use, sealed or not.
+     *
+     * `isSealed` is "not inside an unlocked room", which is the right rule and
+     * deliberately includes the corridor: enemies must not appear in a room the
+     * player has not opened. It also includes the *doorway*, and a siege pouring
+     * out of a doorway is the one wave whose whole point is to start there —
+     * with the seal test refusing it, `queueSpawn`'s mirror retry reflected each
+     * arrival through the player and dropped it behind them, which is precisely
+     * the death trap that was reported.
+     *
+     * So the exception is a rectangle, supplied by the caller that owns it, and
+     * it is the gate's own barrier — never the room behind it.
+     */
+    allowIn?: { x: number; y: number; w: number; h: number },
   ): void {
     if (this.pendingSpawns.length >= SAFETY.maxEntities) return;
 
@@ -4355,8 +4959,8 @@ export class World {
     const rx = ox + this.rng.range(-spread, spread);
     const ry = oy + this.rng.range(-spread, spread);
     // Spread can drag a cluster member back into view; push it out again before
-    // the hard no-spawn-on-player guarantee.
-    const hidden = this.pushOutsideView(rx, ry);
+    // the hard no-spawn-on-player guarantee. Unless it is meant to be seen.
+    const hidden = visible ? { x: rx, y: ry } : this.pushOutsideView(rx, ry);
     const safe = this.pushOutsideSafeRadius(hidden.x, hidden.y);
     // §21b.6 — nothing arrives in ground the player has not opened.
     //
@@ -4366,7 +4970,13 @@ export class World {
     // it, which is an arena corner and possibly a room the player cannot reach.
     let sx = clamp(safe.x, 20, this.arena.width - 20);
     let sy = clamp(safe.y, 20, this.arena.height - 20);
-    if (this.isSealed(sx, sy)) {
+    const permitted =
+      allowIn !== undefined &&
+      sx >= allowIn.x &&
+      sx <= allowIn.x + allowIn.w &&
+      sy >= allowIn.y &&
+      sy <= allowIn.y + allowIn.h;
+    if (!permitted && this.isSealed(sx, sy)) {
       // One deterministic retry, reflected through the player.
       //
       // A gate sits on a boundary, so a ring drawn around one puts half its
@@ -4391,6 +5001,9 @@ export class World {
       hue: this.rng.pick(HUES),
       enriched: recipe.enriched,
       affixes: recipe.affixes,
+      affixExclude: recipe.affixExclude,
+      visible,
+      siege,
       hpScale: recipe.hpScale,
       damageScale: recipe.damageScale,
       alive: true,

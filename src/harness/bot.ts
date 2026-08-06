@@ -1,31 +1,27 @@
 /**
- * A deterministic reference pilot for headless runs.
+ * How a deterministic reference pilot *moves*.
  *
- * It is not meant to play well — it exists so balance sweeps measure the *engine*
+ * It is not meant to play well — it exists so balance sweeps measure the engine
  * rather than the operator. It kites the nearest threat, drifts toward the
  * densest pickup, and dashes off cooldown when something is close.
+ *
+ * What it *wants* — which cards it takes, when it Recompiles, what it burns —
+ * lives in pilots.ts as data, because that half is a balance input rather than
+ * operator skill: the draft reacts to what you own and what you refuse, so the
+ * pool a run sees depends on how that run drafts. Movement is still written
+ * here, and is still one policy; if a reading ever turns out to hinge on kiting
+ * distance rather than on the Engine, this is the next thing to lift out.
  */
 import { TUNABLE } from '../sim/tunables';
 import type { InputState, World } from '../sim/world';
 import type { DraftCard } from '../sim/draft';
-import { NODE_BY_ID } from '../content/index';
 import { hypot } from '../sim/num';
+import { ACTIVE_PILOT, pilotDraftChoice, type PilotDef } from './pilots';
 
-/**
- * Recompile policy, so the harness can A/B the §9.2 claim directly rather than
- * inferring it from one blended pilot.
- *   never  — hoard the engine to the end
- *   eager  — take every terminal the moment it appears
- *   smart  — take it when there is output worth converting and health to spare
- */
-export type RecompilePolicy = 'never' | 'eager' | 'smart';
-let recompilePolicy: RecompilePolicy = 'smart';
+export type { RecompilePolicy, BurnPolicy, PilotDef } from './pilots';
 
-export function setRecompilePolicy(policy: RecompilePolicy): void {
-  recompilePolicy = policy;
-}
-
-export function botInput(world: World): InputState {
+export function botInput(world: World, def: PilotDef = ACTIVE_PILOT): InputState {
+  const recompilePolicy = def.recompile;
   const p = world.player;
   let ax = 0;
   let ay = 0;
@@ -145,82 +141,18 @@ export function botInput(world: World): InputState {
 }
 
 /**
- * Greedy auto-draft. Completing a dead row beats everything (a half-built Program
- * produces nothing); capacity matters only when static load is crowding the cap.
+ * Which card the pilot takes. The scoring is data — see pilots.ts.
+ *
+ * Kept as a function here so every existing call site reads the same, and so
+ * "the pilot" is still one thing from the harness's point of view even though
+ * its taste and its movement now live in different files.
  */
-export function botDraftChoice(world: World, cards: readonly DraftCard[]): number {
-  // A Program needs BOTH a Trigger and an Action to fire, so "needs" has to
-  // include the empty-engine case. Written as "has an action but no trigger" it
-  // is false for a freshly Recompiled Engine, and the pilot then drafts
-  // modifiers onto nothing forever — which is exactly what it did.
-  const liveRows = world.engine.compiled.filter((c) => c.live).length;
-  const live = liveRows > 0;
-  // Widen before deepening: a second and third firing row beats a third modifier
-  // stacked on the first. Without this the pilot ended seven-minute runs holding
-  // a single weapon even when Actions were a third of the pool.
-  const wantMoreRows = liveRows < 3;
-  const needsTrigger = world.engine.programs.some((p) => p.triggerId === null);
-  const needsAction = world.engine.programs.some((p) => p.actionId === null);
-  const rebuilding = !live;
-  // Capacity is the only lever this pilot has against Heat — it never scraps.
-  const headroomTight =
-    live && (world.engine.staticLoad > world.budget.capacity * 0.45 || world.budget.heat > 35);
-
-  let bestIndex = 0;
-  let bestScore = -Infinity;
-  cards.forEach((card, i) => {
-    let score: number;
-    if (card.kind === 'capacity') {
-      score = headroomTight ? 9 : 2;
-    } else if (card.kind === 'program_slot') {
-      score = headroomTight ? 0.5 : 3;
-    } else if (card.kind === 'stat') {
-      // §8.2 calls the stat pool deliberately boring; this pilot treats it as
-      // the floor it is meant to be.
-      score = rebuilding ? 0.5 : 2.5;
-    } else if (card.kind === 'tool') {
-      // The pilot never rerolls and never purges — it has no read on the pool to
-      // narrow toward. Scoring these near zero keeps the harness measuring the
-      // game rather than a strategy it cannot execute.
-      score = 0.2;
-    } else {
-      const node = NODE_BY_ID.get(card.nodeId);
-      if (!node) score = 0;
-      // While rebuilding, completing a firing Program beats everything.
-      else if (node.kind === 'trigger') {
-        score = rebuilding ? 20 : needsTrigger ? 8 : wantMoreRows ? 7 : 4;
-      } else if (node.kind === 'action') {
-        score = rebuilding ? 20 : needsAction ? 8 : wantMoreRows ? 7 : 4;
-        // A Convert occupies an Action slot but deals no damage. This pilot has
-        // no economy strategy, so it treats them as a last resort rather than
-        // filling its Engine with cards that produce nothing.
-        if (node.primitive === 'convert') score = 0.5;
-        // §11.1 — a pilot that never diversifies gets taxed to 60% resistance on
-        // its only hue, which measures the tax rather than the game. Prefer hues
-        // the engine is currently light on.
-        score += (1 - hueShare(world, node.hue)) * 5;
-      } else score = rebuilding ? 1 : headroomTight ? 3 : 6;
-    }
-    if (score > bestScore) {
-      bestScore = score;
-      bestIndex = i;
-    }
-  });
-  return bestIndex;
-}
-
-/** Fraction of the Engine's live Actions that already use this hue. */
-function hueShare(world: World, hue: string): number {
-  let total = 0;
-  let matching = 0;
-  for (const p of world.engine.programs) {
-    if (!p.actionId) continue;
-    const node = NODE_BY_ID.get(p.actionId);
-    if (node?.kind !== 'action') continue;
-    total++;
-    if (node.hue === hue) matching++;
-  }
-  return total === 0 ? 0 : matching / total;
+export function botDraftChoice(
+  world: World,
+  cards: readonly DraftCard[],
+  def: PilotDef = ACTIVE_PILOT,
+): number {
+  return pilotDraftChoice(world, cards, def);
 }
 
 export const BOT_TUNING_NOTE = `dash below 90u; magnet radius ${TUNABLE.collectRadius}u`;

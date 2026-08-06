@@ -14,7 +14,7 @@
  */
 import { replay, type Recording } from './record';
 import type { World } from './world';
-import { rollDraft, type DraftCard } from './draft';
+import { cardId, rollDraft, type DraftCard } from './draft';
 import { SIM_DT } from './tunables';
 
 export interface DraftMoment {
@@ -73,13 +73,6 @@ function rowText(world: World, i: number): string {
   const p = world.engine.programs[i];
   if (!p) return '';
   return [p.triggerId, ...p.modifierIds.filter(Boolean), p.actionId].filter(Boolean).join(' > ');
-}
-
-function cardId(card: DraftCard): string {
-  if (card.kind === 'node') return card.nodeId;
-  if (card.kind === 'stat') return `stat:${card.stat}`;
-  if (card.kind === 'tool') return `tool:${card.tool}`;
-  return card.kind;
 }
 
 /**

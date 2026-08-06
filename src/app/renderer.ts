@@ -19,7 +19,7 @@ import type { EnemyMark, Hue } from '../sim/types';
 import type { Containment, TerminalKind, World } from '../sim/world';
 import { enemy as getEnemy } from '../content/index';
 import { Camera } from './camera';
-import { BAND, PALETTE, SHELL, VIEW, VISUAL, sampleGate } from './visual';
+import { BAND, HUE_COLOR, PALETTE, SHELL, VIEW, VISUAL, sampleGate } from './visual';
 import { PostPass } from './gfx/post';
 import { LightField } from './gfx/lights';
 import { MaskField } from './gfx/mask';
@@ -32,13 +32,8 @@ import {
   type ShellWarp,
 } from './gfx/structure';
 import { ParticleField } from './gfx/particles';
-import { shapeCoreRadius, shapeOutline } from './gfx/shapes';
-
-const HUE_COLOR: Record<Hue, number> = {
-  thermal: PALETTE.thermal,
-  voltaic: PALETTE.voltaic,
-  void: PALETTE.void,
-};
+import { ENEMY_PAINT, drawEnemyBody, drawEnemyMarks } from './gfx/enemy';
+import { arcSegment, polygonPath, shapeCoreRadius, shapeOutline } from './gfx/shapes';
 
 /**
  * The filament colour of a shot: its hue, most of the way to white.
@@ -782,8 +777,17 @@ export class Renderer {
       const trail = Math.min(190, speed * 0.055);
       const hue = HUE_COLOR[proj.hue];
       if (trail < 24) {
-        lights.point(proj.x, proj.y, 95, hue, 0.16);
-        lights.point(proj.x, proj.y, 26, HOT_CORE[proj.hue], 0.85);
+        // Sized to the shot, not to a constant.
+        //
+        // This was a flat radius 95 halo whatever the projectile was, so a slow
+        // one — a Siphon, anything Slugged — became a round blob several times
+        // its own body with a hard bright dot in the middle, while the identical
+        // projectile moving faster took the streak branch and looked like a
+        // shot. Same object, two completely different readings, decided by a
+        // speed threshold the player cannot see.
+        const halo = Math.max(34, proj.radius * 7);
+        lights.point(proj.x, proj.y, halo, hue, 0.13);
+        lights.point(proj.x, proj.y, Math.max(9, proj.radius * 1.9), HOT_CORE[proj.hue], 0.75);
       } else {
         const k = trail / Math.max(1, speed);
         const tx = proj.x - proj.vx * k;
@@ -1770,7 +1774,7 @@ export class Renderer {
         polygonPath(g, outlines[i]!);
         any = true;
       }
-      if (any) g.stroke({ width: 2.2, color, alpha: BAND.entity });
+      if (any) g.stroke({ width: ENEMY_PAINT.outline, color, alpha: BAND.entity });
 
       // Interior fills, one per health step. §17.1 — an enemy sheds its interior
       // as it takes damage, which is the HP bar the game does not draw.
@@ -1785,7 +1789,7 @@ export class Renderer {
           polygonPath(g, outlines[i]!);
           filled = true;
         }
-        if (filled) g.fill({ color, alpha: 0.08 * ((step + 0.5) / STEPS) });
+        if (filled) g.fill({ color, alpha: ENEMY_PAINT.fill * ((step + 0.5) / STEPS) });
       }
 
       // Cores.
@@ -1798,7 +1802,7 @@ export class Renderer {
         g.circle(e.x, e.y, core);
         cored = true;
       }
-      if (cored) g.stroke({ width: 1.5, color, alpha: BAND.inFlight });
+      if (cored) g.stroke({ width: ENEMY_PAINT.core, color, alpha: BAND.inFlight });
     }
 
     // ---- everything else, one at a time ------------------------------------
@@ -1822,25 +1826,13 @@ export class Renderer {
 
       const facing = facingOf(world, e, def);
       if (!ordinary) {
-        const verts = outlines[vi]!;
-        // Draw-in: only trace `born` of the perimeter, so it writes itself on.
-        tracePolyline(g, verts, born);
-        g.stroke({
-          width: flashing ? 3 : 2.2,
-          color,
-          alpha: (flashing ? BAND.player : BAND.entity) * born,
+        drawEnemyBody(g, def, e.x, e.y, r, facing, {
+          colour: color,
+          born,
+          health,
+          flash: flashing,
+          outline: outlines[vi]!,
         });
-
-        if (born >= 1) {
-          g.beginPath();
-          polygonPath(g, verts);
-          g.fill({ color, alpha: 0.08 * health });
-        }
-
-        const core = shapeCoreRadius(def.shape, r);
-        if (core > 0) {
-          g.circle(e.x, e.y, core).stroke({ width: 1.5, color, alpha: BAND.inFlight * born });
-        }
       }
 
       if (e.enriched) {
@@ -1851,30 +1843,19 @@ export class Renderer {
         });
       }
 
-      // §10.2 Bulwark — the shield arc has to be visible, or "flank it" is not
-      // advice, it is a guess.
-      if (def.shieldArc) {
-        arcSegment(g, e.x, e.y, r + 7, facing - def.shieldArc / 2, facing + def.shieldArc / 2);
-        g.stroke({ width: 4, color, alpha: BAND.telegraph * born });
-      }
-
-      // §10.2 Suppressor / §10.3 Anchored — the zone where your triggers die.
+      // §10.2 Bulwark's shield arc, and the §10.2 Suppressor / §10.3 Anchored
+      // field boundary.
       //
       // The field itself is a *signal fault* now, drawn by the post pass — see
       // PostPass.setGlitchFields. What stays here is a thin boundary, because
       // the fault has to have a findable edge and a broken region with no rim is
       // just a broken screen. The filled disc and the rotating dashes are gone:
       // twenty of those on screen at once was the arena whiting out.
-      const zone = e.affixes.includes('anchored')
-        ? TUNABLE.affixAnchoredZone
-        : (def.zoneRadius ?? 0);
-      if (zone > 0) {
-        g.circle(e.x, e.y, zone).stroke({
-          width: 1,
-          color: 0x6d7b8c,
-          alpha: BAND.structure * 1.4 * born,
-        });
-      }
+      drawEnemyMarks(g, def, e.x, e.y, r, facing, {
+        colour: color,
+        born,
+        zone: e.affixes.includes('anchored') ? TUNABLE.affixAnchoredZone : undefined,
+      });
 
       // §10.2 — a Glutton, full. It has stopped eating and is now a bomb: the
       // outline doubles and shivers, and a fuse ring shows the blast radius it
@@ -2662,61 +2643,6 @@ const CORNERS = [
  *  as a single object that ate the others. */
 function pickupScale(value: number): number {
   return Math.min(1.9, 1 + Math.log2(Math.max(1, value)) * 0.26);
-}
-
-function polygonPath(g: Graphics, points: readonly [number, number][]): void {
-  points.forEach(([x, y], i) => (i === 0 ? g.moveTo(x, y) : g.lineTo(x, y)));
-  const first = points[0];
-  if (first) g.lineTo(first[0], first[1]);
-}
-
-/**
- * §17.1 — "entities draw themselves in: stroke traces the outline over 200ms".
- * Walks `progress` of the closed perimeter, cutting the final edge partway.
- */
-function tracePolyline(g: Graphics, points: readonly [number, number][], progress: number): void {
-  if (points.length === 0) return;
-  if (progress >= 1) {
-    polygonPath(g, points);
-    return;
-  }
-  const closed = [...points, points[0]!];
-  let total = 0;
-  for (let i = 0; i + 1 < closed.length; i++) {
-    total += Math.hypot(closed[i + 1]![0] - closed[i]![0], closed[i + 1]![1] - closed[i]![1]);
-  }
-  let remaining = total * progress;
-  g.moveTo(closed[0]![0], closed[0]![1]);
-  for (let i = 0; i + 1 < closed.length && remaining > 0; i++) {
-    const [ax, ay] = closed[i]!;
-    const [bx, by] = closed[i + 1]!;
-    const len = Math.hypot(bx - ax, by - ay);
-    if (len <= remaining) {
-      g.lineTo(bx, by);
-      remaining -= len;
-    } else {
-      const t = remaining / len;
-      g.lineTo(ax + (bx - ax) * t, ay + (by - ay) * t);
-      remaining = 0;
-    }
-  }
-}
-
-/**
- * Pixi v8 follows canvas path semantics: arc() connects from the path's current
- * point, which is (0, 0) on a fresh path — an unguarded arc trails a line back
- * to the world origin. Always seed the subpath.
- */
-function arcSegment(
-  g: Graphics,
-  cx: number,
-  cy: number,
-  r: number,
-  start: number,
-  end: number,
-): void {
-  g.moveTo(cx + Math.cos(start) * r, cy + Math.sin(start) * r);
-  g.arc(cx, cy, r, start, end);
 }
 
 function mix(a: number, b: number, t: number): number {

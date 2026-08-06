@@ -1,0 +1,171 @@
+[
+  {
+    "id": "open",
+    "active": true,
+    "description": "Progression off. Nothing is gated, so every node and every Axiom is available on run one. This is the profile the balance harness measures against, and the one the game ships with while §23.2's tuning pass is open — a draft pool that changes shape per account is a draft pool nobody can tune.",
+    "grants": []
+  },
+  {
+    "id": "default",
+    "active": false,
+    "description": "§15.2 — a fresh account starts with a curated share of the pool: enough for every archetype, thin enough to learn. What is held back is the spicy half, the nodes that reward understanding a system you have not met yet. You cannot appreciate On Overheat before you have overheated. Ignition is the only Axiom that is not gated, because an Axiom is a starting Program and you cannot evaluate one before you know what a Program is.",
+    "grants": [
+      {
+        "discovery": "first_cut",
+        "unlocks": [
+          "convert_bleed"
+        ]
+      },
+      {
+        "discovery": "chain_reaction",
+        "unlocks": [
+          "resonate",
+          "circuit"
+        ]
+      },
+      {
+        "discovery": "depth_six",
+        "unlocks": [
+          "on_convert"
+        ]
+      },
+      {
+        "discovery": "deep_six",
+        "unlocks": [
+          "overdrive",
+          "feedback"
+        ]
+      },
+      {
+        "discovery": "self_sustaining",
+        "unlocks": [
+          "on_overheat"
+        ]
+      },
+      {
+        "discovery": "surfing",
+        "unlocks": [
+          "ground"
+        ]
+      },
+      {
+        "discovery": "deep_water",
+        "unlocks": [
+          "convert_coolant"
+        ]
+      },
+      {
+        "discovery": "arbitrage",
+        "unlocks": [
+          "convert_stim"
+        ]
+      },
+      {
+        "discovery": "full_tanks",
+        "unlocks": [
+          "siphon"
+        ]
+      },
+      {
+        "discovery": "siphoned",
+        "unlocks": [
+          "on_overheat"
+        ]
+      },
+      {
+        "discovery": "blackout",
+        "unlocks": [
+          "mine"
+        ]
+      },
+      {
+        "discovery": "swarmed",
+        "unlocks": [
+          "on_wave"
+        ]
+      },
+      {
+        "discovery": "prestige",
+        "unlocks": [
+          "quantize"
+        ]
+      },
+      {
+        "discovery": "double_or_nothing",
+        "unlocks": [
+          "convert_cashout"
+        ]
+      },
+      {
+        "discovery": "beacon_runner",
+        "unlocks": [
+          "on_dash"
+        ]
+      },
+      {
+        "discovery": "wide_load",
+        "unlocks": [
+          "volatile"
+        ]
+      },
+      {
+        "discovery": "critical_mass",
+        "unlocks": [
+          "orbital"
+        ]
+      },
+      {
+        "discovery": "volatile_thinking",
+        "unlocks": [
+          "rupture"
+        ]
+      },
+      {
+        "discovery": "bloodletting",
+        "unlocks": [
+          "siphon"
+        ]
+      },
+      {
+        "discovery": "magnetised",
+        "unlocks": [
+          "on_sweep"
+        ]
+      },
+      {
+        "discovery": "force_fed",
+        "unlocks": [
+          "on_glutton",
+          "insulate"
+        ]
+      },
+      {
+        "discovery": "trespass",
+        "unlocks": [
+          "on_enter",
+          "stagger"
+        ]
+      },
+      {
+        "discovery": "deep_end",
+        "unlocks": [
+          "on_depth",
+          "grounding_rod"
+        ]
+      },
+      {
+        "discovery": "thermostat",
+        "unlocks": [
+          "on_threshold",
+          "governor"
+        ]
+      },
+      {
+        "discovery": "reflection",
+        "unlocks": [
+          "mirror"
+        ]
+      }
+    ]
+  }
+]

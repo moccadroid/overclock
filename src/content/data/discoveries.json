@@ -4,311 +4,223 @@
     "name": "First Cut",
     "hint": "Scrap a node.",
     "teaches": "Scrapping is not failure. It is the only permanent output bonus in a run.",
-    "score": 200,
-    "unlocks": [
-      "convert_bleed"
-    ]
+    "score": 200
   },
   {
     "id": "sculptor",
     "name": "Sculptor",
     "hint": "Purge 4 cards from the pool in one run.",
     "teaches": "Purging is not throwing a card away — it is deleting it from every draft that follows, so the ones you want come round sooner.",
-    "score": 500,
-    "unlocks": []
+    "score": 500
   },
   {
     "id": "chain_reaction",
     "name": "Chain Reaction",
     "hint": "Reach cascade depth 4.",
     "teaches": "A Trigger that fires on your own output makes a loop. That is the whole game.",
-    "score": 300,
-    "unlocks": [
-      "resonate",
-      "circuit"
-    ]
+    "score": 300
   },
   {
     "id": "depth_six",
     "name": "Depth Six",
     "hint": "Reach cascade depth 6.",
     "teaches": "Depth costs more and pays less each step. Going deeper is a choice you fund.",
-    "score": 600,
-    "unlocks": [
-      "on_convert"
-    ]
+    "score": 600
   },
   {
     "id": "deep_six",
     "name": "Bottomless",
     "hint": "Reach cascade depth 10.",
     "teaches": "The depth cap exists so a loop terminates, not so you never reach it.",
-    "score": 1200,
-    "unlocks": [
-      "overdrive",
-      "feedback"
-    ]
+    "score": 1200
   },
   {
     "id": "self_sustaining",
     "name": "Self-Sustaining",
     "hint": "Keep firing for 10s with no Clock row live.",
     "teaches": "An Engine that feeds itself needs no metronome. It needs a first hit.",
-    "score": 800,
-    "unlocks": [
-      "on_overheat"
-    ]
+    "score": 800
   },
   {
     "id": "surfing",
     "name": "Surfing",
     "hint": "Hold Instability I for 45s without an Overheat.",
     "teaches": "Instability is a place to live, not a doorway. Running hot is a strategy.",
-    "score": 700,
-    "unlocks": [
-      "ground"
-    ]
+    "score": 700
   },
   {
     "id": "deep_water",
     "name": "Deep Water",
     "hint": "Hold Instability II for 20s without an Overheat.",
     "teaches": "Tier II corrupts your own fire. The damage in the post-mortem is yours.",
-    "score": 1000,
-    "unlocks": [
-      "convert_coolant"
-    ]
+    "score": 1000
   },
   {
     "id": "controlled_burn",
     "name": "Controlled Burn",
     "hint": "Fire an Action from an On Overheat trigger.",
     "teaches": "The penalty system is a trigger. Weaponising it is intended.",
-    "score": 900,
-    "unlocks": []
+    "score": 900
   },
   {
     "id": "arbitrage",
     "name": "Arbitrage",
     "hint": "Resolve 20 conversions in one run.",
     "teaches": "Fuel is not only ammunition. It is a currency with three exchange rates.",
-    "score": 700,
-    "unlocks": [
-      "convert_stim"
-    ]
+    "score": 700
   },
   {
     "id": "full_tanks",
     "name": "Cold Depths",
     "hint": "Reach cascade depth 8 without a single Overheat.",
     "teaches": "A full gauge is fuel nothing you own can spend. Diversify or convert.",
-    "score": 400,
-    "unlocks": [
-      "siphon"
-    ]
+    "score": 400
   },
   {
     "id": "siphoned",
     "name": "Red Line",
     "hint": "Sit above 60 Heat while running a chain 6 deep.",
     "teaches": "Overusing one hue taxes it. The world adapts to your build.",
-    "score": 500,
-    "unlocks": [
-      "on_overheat"
-    ]
+    "score": 500
   },
   {
     "id": "flank_it",
     "name": "Flank It",
     "hint": "Kill a Bulwark.",
     "teaches": "The shield arc is drawn for a reason. Positioning beats raw output.",
-    "score": 300,
-    "unlocks": []
+    "score": 300
   },
   {
     "id": "blackout",
     "name": "Blackout",
     "hint": "Kill a Suppressor while standing inside its zone.",
     "teaches": "Inside the zone your Triggers are dead. Actions already in flight are not.",
-    "score": 600,
-    "unlocks": [
-      "mine"
-    ]
+    "score": 600
   },
   {
     "id": "untouchable",
     "name": "Untouchable",
     "hint": "Survive the first 3 minutes without taking damage.",
     "teaches": "Integrity is a resource you spend, not a bar you protect. But you can refuse.",
-    "score": 900,
-    "unlocks": []
+    "score": 900
   },
   {
     "id": "swarmed",
     "name": "Swarmed",
     "hint": "Have 120 enemies alive at once.",
     "teaches": "The director never stops. Clearing the screen is not the win condition.",
-    "score": 500,
-    "unlocks": [
-      "on_wave"
-    ]
+    "score": 500
   },
   {
     "id": "prestige",
     "name": "Prestige",
     "hint": "Complete a Recompile.",
     "teaches": "Burning a working Engine buys a permanent multiplier. Timing is the skill.",
-    "score": 800,
-    "unlocks": [
-      "quantize"
-    ]
+    "score": 800
   },
   {
     "id": "divergence",
     "name": "Divergence",
     "hint": "Reach Meltdown.",
     "teaches": "Past twenty minutes the score multiplier climbs without limit, and so does the pressure.",
-    "score": 1000,
-    "unlocks": []
+    "score": 1000
   },
   {
     "id": "double_or_nothing",
     "name": "Double or Nothing",
     "hint": "Reach a Meltdown multiplier of x2.00.",
     "teaches": "Every 30s of divergence is worth more than the minute before it.",
-    "score": 1500,
-    "unlocks": [
-      "convert_cashout"
-    ]
+    "score": 1500
   },
   {
     "id": "contained",
     "name": "Contained",
     "hint": "End a run inside Meltdown rather than before it.",
     "teaches": "There is no winning. There is only how far you took it.",
-    "score": 1200,
-    "unlocks": []
+    "score": 1200
   },
   {
     "id": "beacon_runner",
     "name": "Beacon Runner",
     "hint": "Channel 3 beacons in one run.",
     "teaches": "Standing still is the price. Everything good in this game costs position.",
-    "score": 400,
-    "unlocks": [
-      "on_dash"
-    ]
+    "score": 400
   },
   {
     "id": "wide_load",
     "name": "Wide Load",
     "hint": "Run 5 live Programs at once.",
     "teaches": "Every live row reserves Cycles forever, whether it fires or not.",
-    "score": 600,
-    "unlocks": [
-      "volatile"
-    ]
+    "score": 600
   },
   {
     "id": "overtuned",
     "name": "Overtuned",
     "hint": "Have one Program produce 90% of your output, with 3 or more live.",
     "teaches": "A carry row is efficient and fragile. Pressure systems attack the build.",
-    "score": 500,
-    "unlocks": []
+    "score": 500
   },
   {
     "id": "critical_mass",
     "name": "Critical Mass",
     "hint": "Land 200 crits in one run.",
     "teaches": "On Crit is a real trigger once you have fed it Precision.",
-    "score": 500,
-    "unlocks": [
-      "orbital"
-    ]
+    "score": 500
   },
   {
     "id": "volatile_thinking",
     "name": "Volatile Thinking",
     "hint": "Reach 400 EPS.",
     "teaches": "Events per second is the score. Everything else is a means to it.",
-    "score": 700,
-    "unlocks": [
-      "rupture"
-    ]
+    "score": 700
   },
   {
     "id": "bloodletting",
     "name": "Bloodletting",
     "hint": "Convert Integrity into fuel while below 40 Integrity.",
     "teaches": "Health is convertible. The engine does not care whether you survive it.",
-    "score": 600,
-    "unlocks": [
-      "siphon"
-    ]
+    "score": 600
   },
   {
     "id": "magnetised",
     "name": "Magnetised",
     "hint": "Collect three Magnets in one run.",
     "teaches": "A Magnet is not loot, it is a decision about where you are standing when you take it.",
-    "score": 300,
-    "unlocks": [
-      "on_sweep"
-    ]
+    "score": 300
   },
   {
     "id": "force_fed",
     "name": "Force Fed",
     "hint": "Let an Interceptor eat its fill, then kill it.",
     "teaches": "Spraying projectiles builds the thing that punishes it — and a Glutton's detonation is yours to aim.",
-    "score": 400,
-    "unlocks": [
-      "on_glutton",
-      "insulate"
-    ]
+    "score": 400
   },
   {
     "id": "trespass",
     "name": "Trespass",
     "hint": "Kill a Suppressor from inside its own field.",
     "teaches": "A suppression field switches your Triggers off. Everything already in flight still lands.",
-    "score": 350,
-    "unlocks": [
-      "on_enter",
-      "stagger"
-    ]
+    "score": 350
   },
   {
     "id": "deep_end",
     "name": "Deep End",
     "hint": "Reach cascade depth 8 without overheating.",
     "teaches": "Depth is what heats you. A build that runs deep and cold has solved the game's central tension.",
-    "score": 600,
-    "unlocks": [
-      "on_depth",
-      "grounding_rod"
-    ]
+    "score": 600
   },
   {
     "id": "thermostat",
     "name": "Thermostat",
     "hint": "Cross into Instability II and come back down without an Overheat.",
     "teaches": "Heat is a dial. Living at the top of it is a strategy, not a mistake.",
-    "score": 450,
-    "unlocks": [
-      "on_threshold",
-      "governor"
-    ]
+    "score": 450
   },
   {
     "id": "reflection",
     "name": "Reflection",
     "hint": "Run five live Programs at once.",
     "teaches": "A full Engine is a shape, not a list — rows that feed each other beat rows that each do their own thing.",
-    "score": 500,
-    "unlocks": [
-      "mirror"
-    ]
+    "score": 500
   }
 ]

@@ -1,0 +1,95 @@
+[
+  {
+    "id": "builder",
+    "active": true,
+    "description": "The reference pilot, unchanged. Completing a dead row beats everything, widening beats deepening, capacity matters only when static load is crowding the cap. It is not meant to play well — it exists so a sweep measures the Engine rather than the operator. Every measurement this repo has ever taken was taken by this pilot, which is the problem the other profiles exist to name.",
+    "recompile": "smart",
+    "burn": "strong",
+    "conditions": {
+      "wantMoreRows": { "liveRowsBelow": 3 },
+      "headroomTight": { "loadShare": 0.45, "heat": 35 }
+    },
+    "scores": {
+      "trigger": [
+        { "when": "rebuilding", "score": 20 },
+        { "when": "needsTrigger", "score": 8 },
+        { "when": "wantMoreRows", "score": 7 },
+        { "score": 4 }
+      ],
+      "action": [
+        { "when": "rebuilding", "score": 20 },
+        { "when": "needsAction", "score": 8 },
+        { "when": "wantMoreRows", "score": 7 },
+        { "score": 4 }
+      ],
+      "modifier": [
+        { "when": "rebuilding", "score": 1 },
+        { "when": "headroomTight", "score": 3 },
+        { "score": 6 }
+      ],
+      "capacity": [{ "when": "headroomTight", "score": 9 }, { "score": 2 }],
+      "program_slot": [{ "when": "headroomTight", "score": 0.5 }, { "score": 3 }],
+      "stat": [{ "when": "rebuilding", "score": 0.5 }, { "score": 2.5 }],
+      "tool": [{ "score": 0.2 }]
+    },
+    "bonuses": [
+      { "op": "convertPenalty", "cards": ["action"], "score": 0.5 },
+      { "op": "hueDiversity", "cards": ["action"], "mult": 5 }
+    ]
+  },
+
+  {
+    "id": "chaser",
+    "active": false,
+    "description": "The player chasing a number. Modifiers and stats first, a second Action only when there is nowhere left to put a modifier, and Triggers last of all. Not a strawman — it is the commonest way a real run goes wrong, and it is the policy that reproduced the trigger famine: measured on the curated library it burned every Trigger out of its own pool by refusal and finished on one live row.",
+    "recompile": "never",
+    "burn": "weak",
+    "conditions": {
+      "wantMoreRows": { "liveRowsBelow": 1 },
+      "headroomTight": { "loadShare": 0.9, "heat": 80 }
+    },
+    "scores": {
+      "trigger": [{ "when": "rebuilding", "score": 20 }, { "score": 3 }],
+      "action": [{ "when": "rebuilding", "score": 20 }, { "score": 6 }],
+      "modifier": [{ "score": 10 }],
+      "capacity": [{ "when": "headroomTight", "score": 9 }, { "score": 4 }],
+      "program_slot": [{ "score": 2 }],
+      "stat": [{ "score": 8 }],
+      "tool": [{ "score": 0.5 }]
+    },
+    "bonuses": []
+  },
+
+  {
+    "id": "wide",
+    "active": false,
+    "description": "The opposite extreme: as many live rows as the Engine will hold, modifiers only once every row fires. Where `chaser` finds the floor of the draft's hunger weighting, this finds its ceiling — and between them is the band a real player moves around in. A reading that holds for all three is a reading about the game.",
+    "recompile": "eager",
+    "burn": "all",
+    "conditions": {
+      "wantMoreRows": { "liveRowsBelow": 8 },
+      "headroomTight": { "loadShare": 0.75, "heat": 55 }
+    },
+    "scores": {
+      "trigger": [
+        { "when": "rebuilding", "score": 20 },
+        { "when": "needsTrigger", "score": 12 },
+        { "score": 5 }
+      ],
+      "action": [
+        { "when": "rebuilding", "score": 20 },
+        { "when": "needsAction", "score": 12 },
+        { "score": 5 }
+      ],
+      "modifier": [{ "when": "wantMoreRows", "score": 2 }, { "score": 6 }],
+      "capacity": [{ "when": "headroomTight", "score": 11 }, { "score": 5 }],
+      "program_slot": [{ "when": "headroomTight", "score": 1 }, { "score": 9 }],
+      "stat": [{ "score": 2 }],
+      "tool": [{ "score": 0.2 }]
+    },
+    "bonuses": [
+      { "op": "convertPenalty", "cards": ["action"], "score": 0.5 },
+      { "op": "hueDiversity", "cards": ["action"], "mult": 5 }
+    ]
+  }
+]

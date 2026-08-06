@@ -56,6 +56,19 @@ export interface Part {
   register: number;
   /** Which chord tone this part favours — spreads rows across the harmony. */
   tone: number;
+  /**
+   * Chord degrees to walk across the bar, added to `tone`.
+   *
+   * Without this a part played **one pitch, every time it fired, for the whole
+   * run** — `tone` is fixed and the chord only moves when the arrangement does.
+   * On a sixteenth-rate row that is the same note sixteen times a bar, which is
+   * what a held Beam sounded like: not a riff, a fault.
+   *
+   * Offsets are chord *degrees*, not semitones, so anything they land on is
+   * already in the harmony — the line can move without being able to go wrong.
+   * Indexed by the step, so it is a figure that repeats rather than noise.
+   */
+  contour: readonly number[];
   gain: number;
   /** 0..1 send into the dub delay. */
   echo: number;
@@ -110,6 +123,43 @@ const ACTION_VOICE: Record<string, { voice: PartVoice; register: number }> = {
   convert: { voice: 'organ', register: 0 },
 };
 
+/**
+ * How a part moves across the bar, by instrument.
+ *
+ * Sustained voices move slowly or not at all — a drone that hops every step is
+ * not a drone — and short ones can afford a figure. Every entry starts on 0 so
+ * the part still *lands* on the chord tone it was assigned; the movement is
+ * ornament around it rather than a different line.
+ */
+const CONTOURS: Record<PartVoice, readonly (readonly number[])[]> = {
+  // Beam and Field. Two long notes a bar: it leans, it does not dance.
+  drone: [
+    [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1],
+    [0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2, 2, 2, 2, 2, 2],
+  ],
+  // Orbital. A bell can arpeggiate; that is what bells are for.
+  bell: [
+    [0, 2, 1, 2],
+    [0, 1, 2, 1],
+  ],
+  pluck: [
+    [0, 0, 1, 0, 2, 0, 1, 0],
+    [0, 2, 0, 1],
+  ],
+  acid: [[0, 0, 1, 0, 0, 2, 1, 0]],
+  stab: [[0, 0, 0, 1]],
+  tick: [[0, 1, 0, 2]],
+  sweep: [[0, 0, 1, 1]],
+  riser: [[0, 1, 2, 1]],
+  organ: [[0, 0, 2, 2]],
+  noise: [[0]],
+};
+
+function contourFor(voice: PartVoice, index: number): readonly number[] {
+  const options = CONTOURS[voice] ?? [[0]];
+  return options[index % options.length] ?? [0];
+}
+
 /** Hue moves a part up or down a register, keeping the three colours apart. */
 const HUE_REGISTER: Record<string, number> = { thermal: -12, voltaic: 12, void: 0 };
 
@@ -139,6 +189,7 @@ export function derivePart(
     // Rows fan out across the chord so two rows never play the same note. This
     // is what turns four parts into harmony rather than four copies.
     tone: index % 3,
+    contour: contourFor(instrument.voice, index),
     gain: 1,
     echo: 0,
     bite: 0,

@@ -41,6 +41,16 @@ function clock(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
+/**
+ * §19.4 — the run timer. Minutes padded, so it does not jump a character wide
+ * at ten minutes and shove the rest of the line along with it.
+ */
+function runClock(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
 export class Hud {
   private readonly tl: HTMLElement;
   private readonly tc: HTMLElement;
@@ -129,12 +139,40 @@ export class Hud {
     const heat = world.budget.heat;
     const tier = world.budget.tier;
     const tierName = ['NOMINAL', 'INSTABILITY I', 'INSTABILITY II', 'OVERHEAT'][tier]!;
-    // §19.4 — at 20:00 the clock is replaced by the Meltdown multiplier.
+    // §12.1 — Threat as a step, and what this room can express of it.
+    //
+    // It read `THREAT 8.4` — a continuous number, to one decimal, that nobody
+    // could plan against and most players never looked at twice. It is a step
+    // now for the same reason Heat has tiers rather than a bare gauge: people
+    // act on beats, not on floats.
+    //
+    // The second half only appears in a capped room, and it is the whole of the
+    // "you are behind" signal. Nothing tells the player they are too slow — the
+    // run's Threat is simply a number this room cannot reach, and the distance
+    // is what is waiting on the other side of the gate. It also previews the
+    // siege: standing at the door at ROOM 3 against THREAT 8 is a very different
+    // decision from standing there at THREAT 4, and that used to be invisible
+    // until it arrived.
+    const behind = world.threatStep - world.roomThreatStep;
+    const threatLine =
+      behind <= 0
+        ? `THREAT ${world.threatStep}`
+        : `THREAT ${world.threatStep}   ` +
+          `<span class="${behind >= 3 ? 'z-crit' : 'cool'}">ROOM ${world.roomThreatStep}</span>`;
+    // §19.4 — how long you have been in it, always.
+    //
+    // The run clock used to be the *first half* of this line and Meltdown
+    // replaced the whole thing, so at the exact point a run becomes worth
+    // measuring — past twenty minutes, chasing a number — total elapsed
+    // disappeared and only the Meltdown timer was left. Two different questions:
+    // one is "how long is this run", the other is "how long have I been diverging
+    // for". It now keeps its own slot and Meltdown takes the space beside it.
+    const elapsed = `<span class="runclock">${runClock(world.time)}</span>`;
     const topLine =
       world.phase === 'meltdown'
-        ? `<span class="meltdown">MELTDOWN ×${world.meltdownMultiplier.toFixed(2)}` +
+        ? `${elapsed}   <span class="meltdown">MELTDOWN ×${world.meltdownMultiplier.toFixed(2)}` +
           `   +${clock(world.meltdownTime)}</span>`
-        : `${clock(world.time)}   THREAT ${world.threat.toFixed(1)}`;
+        : `${elapsed}   ${threatLine}`;
 
     // Heat used to be reported as a bare number that sat at zero and then leapt.
     // Two things fix that: the bar carries its own tier colours (40 / 70 / 100),

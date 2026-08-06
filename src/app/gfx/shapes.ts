@@ -5,7 +5,12 @@
  * A silhouette you learn in play and a picture of it afterwards that differ even
  * slightly teach two different shapes, and the second one is the one you were
  * looking at when you had time to read it.
+ *
+ * Geometry and paths only. What an enemy *looks* like — stroke, interior, core,
+ * shield arc, suppression ring — is `enemy.ts`, because that is a drawing and
+ * this is a set of coordinates.
  */
+import type { Graphics } from 'pixi.js';
 /**
  * §10.1 — the shape table.
  *
@@ -92,6 +97,68 @@ export function shapeIsOpen(shape: string): boolean {
  */
 export function shapeCoreRadius(shape: string, r: number): number {
   return shape === 'circle' ? r * 0.45 : 0;
+}
+
+/**
+ * Vertices to a closed path. The outline of anything, ready to stroke or fill.
+ */
+export function polygonPath(g: Graphics, points: readonly [number, number][]): void {
+  points.forEach(([x, y], i) => (i === 0 ? g.moveTo(x, y) : g.lineTo(x, y)));
+  const first = points[0];
+  if (first) g.lineTo(first[0], first[1]);
+}
+
+/**
+ * §17.1 — "entities draw themselves in: stroke traces the outline over 200ms".
+ * Walks `progress` of the closed perimeter, cutting the final edge partway.
+ */
+export function tracePolyline(
+  g: Graphics,
+  points: readonly [number, number][],
+  progress: number,
+): void {
+  if (points.length === 0) return;
+  if (progress >= 1) {
+    polygonPath(g, points);
+    return;
+  }
+  const closed = [...points, points[0]!];
+  let total = 0;
+  for (let i = 0; i + 1 < closed.length; i++) {
+    total += Math.hypot(closed[i + 1]![0] - closed[i]![0], closed[i + 1]![1] - closed[i]![1]);
+  }
+  let remaining = total * progress;
+  g.moveTo(closed[0]![0], closed[0]![1]);
+  for (let i = 0; i + 1 < closed.length && remaining > 0; i++) {
+    const [ax, ay] = closed[i]!;
+    const [bx, by] = closed[i + 1]!;
+    const len = Math.hypot(bx - ax, by - ay);
+    if (len <= remaining) {
+      g.lineTo(bx, by);
+      remaining -= len;
+    } else {
+      const t = remaining / len;
+      g.lineTo(ax + (bx - ax) * t, ay + (by - ay) * t);
+      remaining = 0;
+    }
+  }
+}
+
+/**
+ * Pixi v8 follows canvas path semantics: arc() connects from the path's current
+ * point, which is (0, 0) on a fresh path — an unguarded arc trails a line back
+ * to the world origin. Always seed the subpath.
+ */
+export function arcSegment(
+  g: Graphics,
+  cx: number,
+  cy: number,
+  r: number,
+  start: number,
+  end: number,
+): void {
+  g.moveTo(cx + Math.cos(start) * r, cy + Math.sin(start) * r);
+  g.arc(cx, cy, r, start, end);
 }
 
 /**

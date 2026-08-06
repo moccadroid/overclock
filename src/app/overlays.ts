@@ -25,7 +25,6 @@ import type { World } from '../sim/world';
 import { LOADBEARING, TUNABLE } from '../sim/tunables';
 import { ACTION_BY_ID } from '../content/index';
 import { inertFields, slotAccepts, TAG_GLYPH, type NodeSlot } from '../sim/engine';
-import { renderResults } from './results';
 import { renderRunBody } from './pause';
 import type { Library } from '../meta/profile';
 import { renderPrimer } from './primer';
@@ -87,6 +86,20 @@ export class DraftOverlay extends Overlay {
    * taken. It also means every replay is a standing test of that purity.
    */
   onCommand: ((c: Command) => void) | null = null;
+
+  /**
+   * The offer currently on the table, for anything watching a decision.
+   *
+   * Read-only and already rolled, which is the entire point. `rollDraft` draws
+   * from the run's Rng, so an observer that re-rolls to see what was offered
+   * *consumes a draw and changes the run* — the bug record.ts documents and that
+   * took a bisect to find. `onCommand` fires while this is still the presented
+   * offer and before `applyDraft` runs, so a watcher gets the cards and the
+   * pre-decision world for free.
+   */
+  get currentOffer(): DraftOffer | null {
+    return this.offer;
+  }
 
   /** Keyboard 1/2/3 pick, R rerolls (§19.5 bottom rail). */
   handleKey(index: number): void {
@@ -931,27 +944,6 @@ export class MessageOverlay extends Overlay {
     const panel = document.createElement('div');
     panel.className = 'panel primer-panel';
     panel.innerHTML = renderPrimer();
-    this.el.appendChild(panel);
-    this.setOpen(true);
-  }
-
-  /**
-   * §14 — the Results screen, with the run-trace chart as its hero element.
-   *
-   * `onAction` runs the same commands the keyboard sends. Anything that looks
-   * like a control has to *be* one: an affordance drawn as a button and wired to
-   * nothing is worse than no affordance, because the player concludes the game
-   * is broken rather than that they used the wrong input.
-   */
-  showResults(world: World, library: Library, onAction: (cmd: string) => void): void {
-    this.el.replaceChildren();
-    const panel = document.createElement('div');
-    panel.className = 'panel results-panel';
-    panel.innerHTML = renderResults(world, library);
-    panel.addEventListener('click', (ev) => {
-      const hit = (ev.target as HTMLElement | null)?.closest<HTMLElement>('[data-action]');
-      if (hit?.dataset.action) onAction(hit.dataset.action);
-    });
     this.el.appendChild(panel);
     this.setOpen(true);
   }

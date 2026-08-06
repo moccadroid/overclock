@@ -49,6 +49,7 @@ import {
   sub,
   summons,
   ui as uiVoice,
+  dialup as dialupVoice,
   type UiSound,
   type VoiceCtx,
 } from './voices';
@@ -296,6 +297,9 @@ export class Audio {
   private limiterDrive!: GainNode;
   private limiterTrim!: GainNode;
   private lowShelf!: BiquadFilterNode;
+  /** §8 — the intrusion's grip on the track. Nothing else touches these two. */
+  private interfereGain!: GainNode;
+  private interfereFilter!: BiquadFilterNode;
   /** Automated across each 16-bar phrase - the genre's build and release. */
   private musicFilter!: BiquadFilterNode;
   /**
@@ -470,9 +474,28 @@ export class Audio {
     // that nothing downstream can raise the level, and a group gain that could
     // push into it would be a volume control that makes things louder by making
     // them quieter somewhere else. These only ever attenuate.
+    // §8 — the intrusion's own pair, between the music and the master, written
+    // by nothing but `interfere()`.
+    //
+    // The first attempt ducked `scoreTrim` and closed `musicFilter`, and neither
+    // survived: the sequencer rewrites the filter corner every sixteenth
+    // (`voiceSixteenth`) and the siege mix rewrites the trim every frame, so a
+    // ramp on either was gone inside a beat. A parameter with a per-frame driver
+    // is not a parameter you can hold, and the answer is a node that has no
+    // driver rather than a fight over one that does.
+    this.interfereGain = ctx.createGain();
+    this.interfereGain.gain.value = 1;
+    this.interfereGain.connect(this.lowShelf);
+
+    this.interfereFilter = ctx.createBiquadFilter();
+    this.interfereFilter.type = 'lowpass';
+    this.interfereFilter.frequency.value = 20000;
+    this.interfereFilter.Q.value = 0.7;
+    this.interfereFilter.connect(this.interfereGain);
+
     this.musicGroup = ctx.createGain();
     this.musicGroup.gain.value = this.musicVolume;
-    this.musicGroup.connect(this.lowShelf);
+    this.musicGroup.connect(this.interfereFilter);
 
     this.sfxGroup = ctx.createGain();
     this.sfxGroup.gain.value = this.sfxVolume;
@@ -990,6 +1013,48 @@ export class Audio {
     uiVoice(this.voice(this.uiBus), now, sound);
   }
 
+  /**
+   * §8 — the handshake at the top of an intrusion. Once, then it is gone.
+   *
+   * Held carriers were wrong: a modem negotiates and stops, and a drone under
+   * six lines of dialogue is a hum the player stops hearing by the third line.
+   * The screech is over inside the banner, which leaves the message itself in
+   * something much more uncomfortable — the typing, and nothing else.
+   */
+  dialup(): void {
+    this.start();
+    if (!this.ctx) return;
+    dialupVoice(this.voice(this.uiBus), this.ctx.currentTime);
+  }
+
+  /**
+   * §8 — what the intrusion does to the track while it is up.
+   *
+   * GDD §18.4 bans silence everywhere, and this is the one surface allowed to
+   * come close to it: the music does not stop, it is *taken away* — shut behind
+   * a low corner and pulled down to almost nothing, so the room the player has
+   * been sitting in audibly stops working. Restored on the way out, so the
+   * absence reads as an event rather than as a setting.
+   */
+  interfere(on: boolean): void {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const corner = on ? 200 : 20000;
+    const level = on ? 0.06 : 1;
+    // Fast in, slow out. The room stops working in a quarter of a second and
+    // takes the best part of a second to come back, so it reads as something
+    // being done to it rather than as a setting changing.
+    const over = on ? 0.2 : 0.9;
+    for (const [param, target] of [
+      [this.interfereFilter.frequency, corner],
+      [this.interfereGain.gain, level],
+    ] as const) {
+      param.cancelScheduledValues(now);
+      param.setValueAtTime(Math.max(0.0002, param.value), now);
+      param.exponentialRampToValueAtTime(target, now + over);
+    }
+  }
+
   /** For the occasions the sim does not model as cues — Discovery, Recompile. */
   celebrate(): void {
     if (!this.ctx) return;
@@ -1291,7 +1356,11 @@ export class Audio {
         if (part) this.lastPartHz[p] = 0;
         continue;
       }
-      const hz = semiHz(tones[part.tone % tones.length]! + 24 + part.register);
+      // Walk the contour, not the same note every time. `tone` places the row
+      // in the chord; the contour moves it around inside that chord across the
+      // bar. Both are chord degrees, so a part cannot step onto a wrong note.
+      const degree = part.tone + (part.contour[index % part.contour.length] ?? 0);
+      const hz = semiHz(tones[degree % tones.length]! + 24 + part.register);
       playPart(
         music,
         part.voice,
