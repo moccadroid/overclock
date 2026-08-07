@@ -48,7 +48,7 @@ export const R1: string[] = [
 export const RUN_SHEET = {
   head: 'OPERATIONS ORDER',
   ref: 'OC-1147-A',
-  stamp: 'STANDING',
+  stamp: 'CONFIDENTIAL',
   stampInk: C.dim,
 };
 
@@ -156,7 +156,7 @@ export function fileBody(index: number): Line[] {
       head('ITEM FILE — OC-001'),
       blank(),
       field('ITEM', 'OC-001 — "THE ENGINE"', { col: 15, colour: C.bright }),
-      field('DISPOSITION', 'STANDING', { col: 15, colour: C.bright }),
+      field('DISPOSITION', 'INDEFINITE', { col: 15, colour: C.bright }),
       blank(),
       [['OC-001 is suppressed continuously. An episode begins when', C.ink]],
       [['OC-001 initiates cascade and ends at collection.', C.ink]],

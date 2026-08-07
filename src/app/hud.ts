@@ -66,6 +66,8 @@ export class Hud {
   /** Smoothed, because a per-frame number is unreadable and always looks worse. */
   private fpsAverage = 60;
   private gpuMs = 0;
+  /** CPU cost of the frame callback, smoothed like the fps. See Game.busyMs. */
+  private cpuMs = 0;
 
   constructor(root: HTMLElement) {
     const make = (id: string): HTMLElement => {
@@ -110,10 +112,11 @@ export class Hud {
   }
 
   /** Called every frame; the display only refreshes with the rest of the HUD. */
-  sample(frameDt: number, gpuMs = 0): void {
+  sample(frameDt: number, gpuMs = 0, cpuBusyMs = 0): void {
     if (frameDt <= 0) return;
     this.fpsAverage += (1 / frameDt - this.fpsAverage) * 0.08;
     this.gpuMs = gpuMs;
+    if (cpuBusyMs > 0) this.cpuMs += (cpuBusyMs - this.cpuMs) * 0.08;
   }
 
   update(world: World): void {
@@ -121,10 +124,23 @@ export class Hud {
     // GPU milliseconds beside the frame rate, when the driver will tell us.
     // Frame rate alone hides a GPU that is working far too hard for what is on
     // screen — which is exactly the failure that made this readout necessary.
-    this.fps.textContent =
-      this.gpuMs > 0
-        ? `${Math.round(this.fpsAverage)} fps · ${this.gpuMs.toFixed(1)}ms gpu`
-        : `${Math.round(this.fpsAverage)} fps`;
+    //
+    // Headroom is the fps line's real job now that rendering is capped at 60:
+    // the rate can only ever confirm the cap, so the readout says what the
+    // frame *cost* and how far the machine sits above the budget. The bound is
+    // whichever side is slower — cpu and gpu run concurrently — and where the
+    // timer extension is missing the estimate is labelled cpu-only rather than
+    // silently reporting half the picture.
+    let line = `${Math.round(this.fpsAverage)} fps`;
+    if (this.cpuMs > 0) line += ` · ${this.cpuMs.toFixed(1)}ms cpu`;
+    if (this.gpuMs > 0) line += ` · ${this.gpuMs.toFixed(1)}ms gpu`;
+    const bound = Math.max(this.cpuMs, this.gpuMs);
+    if (bound > 0) {
+      const head = 1000 / 60 / bound;
+      line += ` · ~${head >= 10 ? Math.round(head) : head.toFixed(1)}× headroom`;
+      if (this.gpuMs <= 0) line += ' (cpu only)';
+    }
+    this.fps.textContent = line;
 
     this.xpbar.style.width = `${(world.xp / world.xpToNext) * 100}%`;
 

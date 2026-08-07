@@ -299,7 +299,16 @@ export interface Zone extends SpatialItem {
  * and one colour in the renderer's table — no new timer field, no new branch in
  * the spawner, no new branch in the completion path.
  */
-export type TerminalKind = 'beacon' | 'recompile' | 'extract' | 'cache' | 'gate' | 'cooler';
+export type TerminalKind =
+  | 'beacon'
+  | 'recompile'
+  | 'extract'
+  | 'cache'
+  | 'gate'
+  | 'cooler'
+  /** LEVELS §6 — authored, one-shot, placed at run start like gates. */
+  | 'station'
+  | 'fragment';
 
 export interface PoiDef {
   kind: TerminalKind;
@@ -346,6 +355,19 @@ export interface Terminal extends SpatialItem {
    * let the siege and the thing it is supposed to be describing disagree.
    */
   siegePulse?: number;
+  /**
+   * STORY-AND-TONE §7.2 — a dead gate: placed, visible, and unresponsive.
+   * Standing in it does nothing until something with `revives` clears this.
+   */
+  dead?: boolean;
+  /** LEVELS §6 — the authored spot this terminal is, if it is one. */
+  poiId?: string;
+  /** The beat a station opens, or the document a fragment recovers. */
+  doc?: string;
+  /** Which section of `doc` a fragment recovers. */
+  section?: number;
+  /** Far-off label override for authored POIs. */
+  label?: string;
 }
 
 /**
@@ -414,6 +436,28 @@ export const POIS: readonly PoiDef[] = [
     fromTime: TUNABLE.extractFromTime,
     ring: [0, 0],
     atLandmark: true,
+  },
+  {
+    // LEVELS §6 — a station: an authored Bureau sheet, read in place. Placed by
+    // placeAuthoredPois at run start; maxAlive 0 keeps the scheduler off it.
+    kind: 'station',
+    channelTime: TUNABLE.stationChannelTime,
+    requiresStillness: false,
+    maxAlive: 0,
+    interval: 0,
+    fromTime: 0,
+    ring: [0, 0],
+  },
+  {
+    // LEVELS §6 — a fragment: one section of a document, recovered where it
+    // lies. Placed by placeAuthoredPois at run start, like the station.
+    kind: 'fragment',
+    channelTime: TUNABLE.stationChannelTime,
+    requiresStillness: false,
+    maxAlive: 0,
+    interval: 0,
+    fromTime: 0,
+    ring: [0, 0],
   },
 ];
 
@@ -548,6 +592,22 @@ const POI_EFFECTS: Record<TerminalKind, (w: World, t: Terminal) => void> = {
     w.ending = 'extracted';
     w.player.alive = false;
     w.mark('extract', 'extracted');
+  },
+  // LEVELS §6 — the sheet is the app's to show; the sim only says which one.
+  // Time freezes while it is read, so this is a flag, not a branch.
+  station: (w, t) => {
+    w.pendingSheet = { doc: t.doc ?? '', station: true };
+    w.mark('station', t.doc ?? 'station');
+  },
+  // LEVELS §6 — one section of one document, recovered where it lies. The
+  // sheet opens on the spot — recovering a confidential file and seeing
+  // nothing reads as a bug, not as discretion — and the arc ingests
+  // `stats.recovered` at run-end; the sim never learns what it held.
+  fragment: (w, t) => {
+    w.stats.recovered.push({ doc: t.doc ?? '', section: t.section ?? 0 });
+    w.pendingSheet = { doc: t.doc ?? '', section: t.section ?? 0 };
+    w.cueNow('level', 'void');
+    w.mark('fragment', `${t.doc ?? 'document'} recovered`);
   },
 };
 
@@ -761,6 +821,49 @@ export interface RunConfig {
   draftPoolId?: string;
   /** Discoveries already in the Library, so a repeat does not re-announce. */
   knownDiscoveries?: ReadonlySet<string>;
+  /**
+   * LEVELS §6 — authored POI ids already read or recovered. They are simply
+   * never placed. Computed by the story's `configure()`; part of the config so
+   * a replay reproduces exactly the map the player saw.
+   */
+  recoveredPois?: readonly string[];
+  /**
+   * LEVELS §4 — level ids whose gates start open: barrier gone, gate terminal
+   * never placed, room camera-visible from the first frame. The endgame state
+   * where the site has stopped resealing itself.
+   */
+  openLevels?: readonly string[];
+  /**
+   * LEVELS §2.3 — the tutorial contract: opening the gate into this level
+   * *concludes* the run, banked like an extraction. The orientation shift is
+   * over when the operator proves they can open a partition, and it repeats
+   * until they do. Set by the story while the tutorial is unbeaten.
+   */
+  concludeOnOpen?: string;
+  /**
+   * LEVELS §2.3 — density multiplier, 0..1. Scales the director's live target,
+   * which also sizes cache menageries and siege parcels. The tutorial runs
+   * gentler than the game it is teaching. Omitted means 1.
+   */
+  pressure?: number;
+  /**
+   * STORY-AND-TONE §7.2 — gate ids that are placed dead: present, visible,
+   * and unresponsive to a hold. A dead gate is revived by a gate whose
+   * `revives` names it. The wall stays up either way.
+   */
+  deadGates?: readonly string[];
+  /** No extraction terminal this run. The last frontier has a lock instead. */
+  noExtract?: boolean;
+  /** Where the extraction terminal stands, overriding the arena's landmark. */
+  extractAt?: { x: number; y: number };
+  /**
+   * STORY-AND-TONE §7.1 — the growing starter. Rows installed after the
+   * Axiom's own, filling empty program slots in order. The story hands these
+   * out between runs; the sim only installs what it is given.
+   */
+  bonusRows?: readonly { trigger: string; modifiers: readonly string[]; action: string }[];
+  /** Extra Cycle capacity to carry the bonus rows. */
+  bonusCapacity?: number;
   /** Testing hook: bring Meltdown forward. Never set in a scored run. */
   meltdownAt?: number;
 }
@@ -785,6 +888,9 @@ export type TraceMarkerKind =
   | 'beacon'
   | 'cache'
   | 'gate'
+  /** LEVELS §6 — an onboarding station read, a document section recovered. */
+  | 'station'
+  | 'fragment'
   /** §12.1 — the run's difficulty crossing a step. See `threatStep`. */
   | 'threat';
 
@@ -846,6 +952,11 @@ export interface RunStats {
   firstLevelTime: number;
   /** Times a runtime safety valve fired. Non-zero means investigate, not tune. */
   safetyTrips: number;
+  /**
+   * LEVELS §6 — document sections recovered from fragment POIs this run. The
+   * arc folds these into `story.held` at run-end; nothing in the sim reads it.
+   */
+  recovered: { doc: string; section: number }[];
 }
 
 export class World {
@@ -1052,6 +1163,7 @@ export class World {
     peakHeat: 0,
     firstLevelTime: 0,
     safetyTrips: 0,
+    recovered: [],
   };
 
   /** Rolling window of per-tick event counts for the 5s EPS smoothing (§13.1). */
@@ -1172,19 +1284,31 @@ export class World {
     this.rng = new Rng(config.seed);
     this.arena = getArena(config.arenaId ?? 'heap');
     this.grid = new SpatialGrid<Enemy>(this.arena.width, this.arena.height);
+    // LEVELS §4 — levels the story says start open: no barrier, no gate, the
+    // camera sees them from frame one. The site has stopped resealing itself.
+    const preOpened = new Set(config.openLevels ?? []);
+    for (const id of preOpened) this.openBiomes.add(id);
     // §21b.5 — barriers are ruins, so the live list is the arena's plus every
-    // gate's wall, and the field is baked from the live list.
-    this.ruins = [...this.arena.ruins, ...(this.arena.gates ?? []).map((g) => g.barrier)];
+    // *closed* gate's wall, and the field is baked from the live list. A relay
+    // has no wall; a pre-opened room's wall was never baked.
+    this.ruins = [
+      ...this.arena.ruins,
+      ...(this.arena.gates ?? [])
+        .filter((g) => g.barrier && !(g.opens && preOpened.has(g.opens)))
+        .map((g) => g.barrier!),
+    ];
     this.flow = new FlowField(this.arena);
     this.flow.rebuild(this.ruins);
 
     this.engine = new Engine();
     this.installAxiomStarter();
 
-    this.baseCapacity = TUNABLE.cycleCapacityBase + getAxiom(config.axiomId).capacityDelta;
+    this.baseCapacity =
+      TUNABLE.cycleCapacityBase + getAxiom(config.axiomId).capacityDelta + (config.bonusCapacity ?? 0);
     this.budget = new CycleBudget(this.baseCapacity);
     this.budget.setStaticLoad(this.engine.staticLoad);
     this.placeGates();
+    this.placeAuthoredPois();
 
     this.player = {
       x: this.arena.spawnX,
@@ -1267,6 +1391,15 @@ export class World {
       install(1, ax.starter);
     } else {
       install(0, ax.starter);
+    }
+
+    // STORY-AND-TONE §7.1 — the growing starter. Filled into empty rows after
+    // the Axiom's own; anything past the last empty row is dropped silently,
+    // because the story hands these out and the sim only installs.
+    for (const row of this.config.bonusRows ?? []) {
+      const slot = this.engine.programs.findIndex((p) => !p.triggerId && !p.actionId);
+      if (slot < 0) break;
+      install(slot, { trigger: row.trigger, modifiers: [...row.modifiers], action: row.action });
     }
     this.engine.recompile();
   }
@@ -2349,6 +2482,10 @@ export class World {
       if (!t.alive) continue;
       t.age += dt;
 
+      // A dead gate ages and draws, and that is all it does. No fill, no
+      // siege, no drain — the circle is furniture until something revives it.
+      if (t.dead) continue;
+
       const d = hypot(this.player.x - t.x, this.player.y - t.y);
       const inside = t.holdRadius ? d < t.holdRadius : d < TUNABLE.beaconRadius + TUNABLE.playerRadius;
       // §21b.5 — ground you hold needs no keypress. Standing there *is* the
@@ -2477,10 +2614,54 @@ export class World {
    * unlocks instead of being explored is that the player can see where it goes.
    */
   private placeGates(): void {
+    const preOpened = new Set(this.config.openLevels ?? []);
+    const dead = new Set(this.config.deadGates ?? []);
     for (const gate of this.arena.gates ?? []) {
+      // LEVELS §4 — a gate whose room starts open was opened in a previous run;
+      // its barrier was never baked and there is nothing left to hold.
+      if (gate.opens && preOpened.has(gate.opens)) continue;
       const t = this.pushTerminal('gate', gate.x, gate.y, gate.holdSeconds, false);
       t.holdRadius = gate.radius;
       t.gateId = gate.id;
+      // STORY-AND-TONE §7.2 — placed dead: present, visible, unresponsive.
+      if (dead.has(gate.id)) t.dead = true;
+    }
+  }
+
+  /**
+   * LEVELS §6 — put every authored POI in *unlocked* rooms on the map at run
+   * start.
+   *
+   * Placed once and left standing, like gates and for the same reason: a
+   * station or a file is a place, and a place that appears on a timer is a
+   * service. Ids the config lists as already read or recovered are never
+   * placed — the suppression *is* the persistence, and it keeps the sim from
+   * ever touching storage.
+   *
+   * Sealed rooms get theirs from `openGate`, not here: a terminal that exists
+   * behind a wall is a terminal the off-screen indicators point at, and an
+   * arrow toward a room you cannot enter is a promise the map cannot keep.
+   * The gate is the only thing allowed to point through a wall.
+   */
+  private placeAuthoredPois(): void {
+    const levels = this.arena.levels ?? [];
+    for (const [i, level] of levels.entries()) {
+      if (i !== 0 && !this.openBiomes.has(level.id)) continue;
+      this.placePoisFor(level);
+    }
+  }
+
+  /** LEVELS §6 — one room's authored POIs, minus the ones already recovered. */
+  private placePoisFor(level: LevelDef): void {
+    const done = new Set(this.config.recoveredPois ?? []);
+    for (const spot of level.pois ?? []) {
+      if (done.has(spot.id)) continue;
+      const def = POIS.find((p) => p.kind === spot.kind);
+      const t = this.pushTerminal(spot.kind, spot.x, spot.y, def?.channelTime ?? 1.2, false);
+      t.poiId = spot.id;
+      t.doc = spot.doc;
+      t.section = spot.section ?? 0;
+      if (spot.label) t.label = spot.label;
     }
   }
 
@@ -2488,14 +2669,33 @@ export class World {
   private openGate(t: Terminal): void {
     const gate = (this.arena.gates ?? []).find((g) => g.id === t.gateId);
     if (!gate) return;
+
+    // STORY-AND-TONE §7.2 — the relay: it opens nothing. It puts a dead gate
+    // back on the board, and the wall that gate guards is still somebody's to
+    // hold.
+    if (gate.revives) {
+      const target = this.terminals.find((x) => x.alive && x.gateId === gate.revives);
+      if (target) target.dead = false;
+      this.pushFx('rupture', 'voltaic', t.x, t.y, 420, [], 0.8);
+      this.cue('gate', 'voltaic', 0, 1);
+      this.mark('gate', `${gate.name} — power restored`);
+      return;
+    }
+    if (!gate.opens) return;
     this.openBiomes.add(gate.opens);
+    // LEVELS §6 — the room's stations and files exist from the moment the room
+    // does. Deferred from run start so the indicators never point through a
+    // wall; see placeAuthoredPois.
+    const opened = (this.arena.levels ?? []).find((l) => l.id === gate.opens);
+    if (opened) this.placePoisFor(opened);
     // The wall was a ruin; remove it and tell the field, or every enemy keeps
     // walking around something that is not there.
-    this.ruins = this.ruins.filter(
-      (r) => !(r.x === gate.barrier.x && r.y === gate.barrier.y && r.w === gate.barrier.w),
-    );
-    this.flow.rebuild(this.ruins);
-    this.flow.update(this.player.x, this.player.y, true);
+    const wall = gate.barrier;
+    if (wall) {
+      this.ruins = this.ruins.filter((r) => !(r.x === wall.x && r.y === wall.y && r.w === wall.w));
+      this.flow.rebuild(this.ruins);
+      this.flow.update(this.player.x, this.player.y, true);
+    }
 
     // Whatever the biome guarantees, placed now that it can be reached.
     const biome = (this.arena.biomes ?? []).find((b) => b.id === gate.opens);
@@ -2516,7 +2716,7 @@ export class World {
     // In the doorway, not on the terminal. The circle you hold and the wall that
     // opens are different places — dropping the reward on the circle puts it
     // behind you the moment you walk through.
-    const b = gate.barrier;
+    const b = gate.barrier ?? { x: gate.x - 12, y: gate.y - 12, w: 24, h: 24 };
     this.dropPickup('magnet', b.x + b.w / 2, b.y + b.h / 2, 'voltaic', 1);
 
     // §21b.7 — the siege ends with the hold that summoned it.
@@ -2533,6 +2733,16 @@ export class World {
     this.cue('gate', 'voltaic', 0, 1);
     this.mark('gate', `${gate.name} open`);
     this.stats.gatesOpened++;
+
+    // LEVELS §2.3 — the tutorial contract: this gate opening IS the shift's
+    // goal, and the run concludes on it, banked like an extraction. The stamp
+    // reads CONCLUDED — the one disposition the Bureau approves of — and the
+    // orientation repeats every shift until the operator earns it.
+    if (this.config.concludeOnOpen === gate.opens) {
+      this.ending = 'extracted';
+      this.player.alive = false;
+      this.mark('extract', 'orientation complete');
+    }
   }
 
   /**
@@ -2601,6 +2811,8 @@ export class World {
 
   private spawnTerminals(dt: number): void {
     for (const poi of POIS) {
+      // STORY-AND-TONE §7.2 — the last frontier has a lock instead.
+      if (poi.kind === 'extract' && this.config.noExtract) continue;
       if (this.time < poi.fromTime) continue;
       let alive = 0;
       for (const t of this.terminals) if (t.alive && t.kind === poi.kind) alive++;
@@ -2618,7 +2830,7 @@ export class World {
       }
 
       const spot = poi.atLandmark
-        ? { x: this.arena.extractX, y: this.arena.extractY }
+        ? (this.config.extractAt ?? { x: this.arena.extractX, y: this.arena.extractY })
         : this.findOpenSpot(poi.ring[0], poi.ring[1]);
       // §12.4 — Extract stands at a fixed landmark, and that landmark is in the
       // last level. It must not appear before the room it stands in is open, or
@@ -2813,6 +3025,14 @@ export class World {
   lastRecompileTime = -Infinity;
   /** A channelled Recompile terminal is waiting for the player's selection. */
   pendingRecompileChoice = false;
+  /**
+   * LEVELS §6 — a channelled station or recovered fragment waiting for the app
+   * to show its sheet. Set by POI_EFFECTS, cleared by the app, like
+   * `pendingRecompileChoice` — the sim says which document; showing it is not
+   * its job. `station` marks the ones whose reading is remembered forever;
+   * `section` narrows a fragment to the part that was actually recovered.
+   */
+  pendingSheet: { doc: string; section?: number; station?: boolean } | null = null;
   pendingCeremony: { rows: string[]; percent: number; kernel: number } | null = null;
 
   /**
@@ -3073,6 +3293,20 @@ export class World {
    * So: reject anything outside the current room, and when the ring cannot find
    * a spot, fall back inside that room rather than to the other end of the map.
    */
+  /**
+   * A POI must never sit inside a gate's hold circle: standing there fills the
+   * gate whether or not the gate was the errand, so a Beacon in the circle
+   * sells a boss wave as a wave call. The circle plus the interact reach is the
+   * exclusion — close enough to touch one from the other is overlap too.
+   */
+  private insideGateCircle(x: number, y: number): boolean {
+    const pad = TUNABLE.beaconRadius + TUNABLE.playerRadius;
+    for (const gate of this.arena.gates ?? []) {
+      if (hypot(x - gate.x, y - gate.y) < gate.radius + pad) return true;
+    }
+    return false;
+  }
+
   private findOpenSpot(minDist: number, maxDist: number): { x: number; y: number } {
     const room = this.currentLevel;
     for (let attempt = 0; attempt < 24; attempt++) {
@@ -3081,6 +3315,7 @@ export class World {
       const x = clamp(this.player.x + pcos(angle) * dist, 60, this.arena.width - 60);
       const y = clamp(this.player.y + psin(angle) * dist, 60, this.arena.height - 60);
       if (this.insideRuin(x, y, 40)) continue;
+      if (this.insideGateCircle(x, y)) continue;
       if (room && this.levelAt(x, y) !== room) continue;
       return { x, y };
     }
@@ -3091,7 +3326,7 @@ export class World {
       for (let attempt = 0; attempt < 24; attempt++) {
         const x = room.x + this.rng.range(room.w * 0.15, room.w * 0.85);
         const y = room.y + this.rng.range(room.h * 0.15, room.h * 0.85);
-        if (!this.insideRuin(x, y, 40)) return { x, y };
+        if (!this.insideRuin(x, y, 40) && !this.insideGateCircle(x, y)) return { x, y };
       }
       return { x: room.x + room.w / 2, y: room.y + room.h / 2 };
     }
@@ -3560,7 +3795,7 @@ export class World {
       //
       // Replacing it with "COLLECTED" was the second mistake and a worse one.
       // This is a containment facility — the procedure section of every document
-      // in §9 is a containment procedure, the disposition is STANDING, and what
+      // in §9 is a containment procedure, the disposition is INDEFINITE, and what
       // happens when the Engine is stopped is that it is *contained*. Splitting
       // the label by when the player died invents a distinction the Bureau does
       // not make and puts two words on the chart and the stamp for one event.
@@ -4302,7 +4537,11 @@ export class World {
       TUNABLE.maxAliveHard,
       TUNABLE.targetAliveBase + this.roomThreat * TUNABLE.targetAlivePerThreat,
     );
-    return this.sandbox ? Math.max(1, Math.round(target * 0.06)) : target;
+    // LEVELS §2.3 — the tutorial's easing. Applied here so everything sized
+    // off the target — ambient refill, cache menageries, siege parcels —
+    // eases together. Guarded so an unset knob leaves the number bit-identical.
+    const eased = this.config.pressure !== undefined ? target * this.config.pressure : target;
+    return this.sandbox ? Math.max(1, Math.round(eased * 0.06)) : eased;
   }
 
   /**

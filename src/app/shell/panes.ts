@@ -24,6 +24,7 @@ import {
   TRIGGER_BY_ID,
 } from '../../content/index';
 import { TAG_GLYPH, tagRequiredBy, tagsOf, type Tag } from '../../sim/engine';
+import { TUNABLE } from '../../sim/tunables';
 import { loadRuns } from '../../meta/runstore';
 import type { Library } from '../../meta/profile';
 import type { AxiomDef, EnemyDef, NodeDef } from '../../sim/types';
@@ -49,7 +50,7 @@ export function axiomChain(a: AxiomDef): string[] {
 export const RUN_SHEET = {
   head: 'OPERATIONS ORDER',
   ref: 'OC-1147-A',
-  stamp: 'STANDING',
+  stamp: 'IN FORCE',
   stampInk: C.dim,
 };
 
@@ -63,11 +64,15 @@ export const RUN_SHEET = {
  * fault and is really a number that stopped being true when a line was added.
  */
 function runPreamble(shift: number): Line[] {
+  // §13.1 — the Bureau never lies, so this clock is derived, not quoted. It
+  // said 15:00 for one build after the LEVELS §1 re-cut moved it to 9:30.
+  const opens = TUNABLE.extractFromTime;
+  const clock = `${Math.floor(opens / 60)}:${String(Math.floor(opens % 60)).padStart(2, '0')}`;
   return [
     field('SHIFT', String(shift), { col: 14, colour: C.bright }),
     field('OPERATOR', '████████', { col: 14 }),
     blank(),
-    [['Extraction opens at 15:00. Leaving at one closes the record', C.ink]],
+    [[`Extraction opens at ${clock}. Leaving at one closes the record`, C.ink]],
     [['for the shift. Output is recorded against the operator.', C.ink]],
     blank(),
     head('AXIOM — the first row of the build, issued before the episode'),
@@ -350,9 +355,16 @@ export function fileBody(
     // Procedure and description are separate paragraphs now, and the procedure
     // is stated once, flatly, with what happens when it is not followed.
     return [
-      head('OPERATOR ONBOARDING — NOTES'),
+      head('OPERATOR ONBOARDING — NOTES FOR FIRST SHIFT'),
       blank(),
-      [['Duties per shift: observe the episode and record output.', C.ink]],
+      [['Duties per shift are as follows. Observe the episode.', C.ink]],
+      [['Decide build requests as they arise; the standing decision', C.ink]],
+      [['is denial per OC-0061 clause 3. Conclude the episode at', C.ink]],
+      [['the earliest collection point.', C.ink]],
+      blank(),
+      [['Output is recorded against the operator and reviewed.', C.ink]],
+      [['Extraction concludes an episode correctly and is commended', C.ink]],
+      [['in the shift log.', C.ink]],
       blank(),
       [['The engine assembles itself in rows. A row reads left to', C.ink]],
       [['right: ', C.ink], ...chain(['when', 'changed how', 'do what'])],
@@ -411,7 +423,7 @@ export function fileBody(
 
     const mm = Math.floor(s.bestTime / 60);
     const ss = String(Math.floor(s.bestTime % 60)).padStart(2, '0');
-    out.push([['  STANDING FIGURES', C.faint]]);
+    out.push([['  FIGURES ON FILE', C.faint]]);
     out.push(field('peak output', s.bestScore.toLocaleString(), { indent: 2, col: 18, colour: C.bright }));
     out.push(field('deepest', String(s.bestDepth), { indent: 2, col: 18, colour: C.bright }));
     out.push(field('longest', `${mm}:${ss}`, { indent: 2, col: 18, colour: C.bright }));

@@ -238,9 +238,9 @@ describe('RunTelemetry', () => {
     const telemetry = tel(world);
     run(world, telemetry, 3);
     // 16.6ms is a 60Hz frame, 8.3 a 120Hz one, 250 is the clamp ceiling.
-    for (let i = 0; i < 100; i++) telemetry.frame(16.6, 1.2);
+    for (let i = 0; i < 100; i++) telemetry.frame(16.6, 1.2, 3);
     for (let i = 0; i < 10; i++) telemetry.frame(8.3);
-    telemetry.frame(250, 40);
+    telemetry.frame(250, 40, 30);
 
     const p = telemetry.snapshot(world).perf;
     expect(p.frames).toBe(111);
@@ -252,6 +252,10 @@ describe('RunTelemetry', () => {
     expect(p.hist.at(-1)).toBe(1);
     expect(p.gpuSamples).toBe(101);
     expect(p.gpuWorstMs).toBe(40);
+    // Busy time only counts frames that reported one — the first frame sends 0
+    // because the cost arrives a frame late — so the mean is over 101, not 111.
+    expect(p.cpuWorstMs).toBe(30);
+    expect(p.cpuMeanMs).toBeCloseTo((100 * 3 + 30) / 101, 1);
   });
 
   it('counts deleted sim time separately from slow frames', () => {

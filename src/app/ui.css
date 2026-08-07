@@ -564,6 +564,9 @@ textarea {
   white-space: normal !important;
   line-height: 1.65 !important;
 }
+/* In-run documents render on the Pixi Sheet (shell/document.ts), not in DOM —
+   the shape of the page is the voice (NARRATIVE §13.5), and the Sheet is the
+   Bureau's shape. */
 .primer-cols {
   columns: 2;
   column-gap: 40px;

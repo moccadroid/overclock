@@ -41,6 +41,7 @@ import {
 import { VIEW_EFFECTS, VIEW_PRESETS, applyEffects } from '../visual';
 import type { StoryStore } from '../../story/store';
 import { BEAT_BY_ID } from '../../story/script';
+import { DocumentSheet } from './document';
 import { drawEnemy } from '../gfx/enemy';
 import { HUE_COLOR } from '../visual';
 
@@ -136,6 +137,9 @@ export class TitleScreen {
   /** §8 — the resistance, typing over the terminal. Null when the channel is quiet. */
   private intrusion: Transmission | null = null;
   private intrusionId: string | null = null;
+  /** The Bureau, on paper, at the same commitment point. Lazily mounted. */
+  private noticeSheet: DocumentSheet | null = null;
+  private noticeId: string | null = null;
   /** True while a run is waiting on the channel to finish. */
   private holdingRun = false;
   private docId = '';
@@ -175,7 +179,7 @@ export class TitleScreen {
     });
   }
 
-  async present(defaults?: Partial<SetupResult>): Promise<SetupResult> {
+  async present(defaults?: Partial<SetupResult> & { open?: 'run' }): Promise<SetupResult> {
     if (defaults?.seed) this.seed = defaults.seed;
     const available = this.library.availableAxioms;
     this.axioms = available.map((id) => AXIOM_BY_ID.get(id)).filter((a): a is AxiomDef => !!a);
@@ -230,6 +234,15 @@ export class TitleScreen {
     this.layout();
     this.last = performance.now() / 1000;
     this.raf = requestAnimationFrame(() => this.frame());
+
+    // LEVELS §2.3 — CONTINUE from a results screen lands on the operations
+    // order, one keystroke from BEGIN RUN. The session is already logged in;
+    // making somebody re-LOGIN between shifts would be the frame breaking
+    // character to slow them down.
+    if (defaults?.open === 'run') {
+      this.enter();
+      this.open('run');
+    }
 
     return new Promise((resolve) => {
       this.resolve = resolve;
@@ -311,11 +324,24 @@ export class TitleScreen {
    * reload is still queued next session.
    */
   private showTransmission(): void {
-    if (!this.story || this.intrusion) return;
+    if (!this.story || this.intrusion || this.notice.open) return;
     const beatId = this.story.state.queue[0];
     if (!beatId) return;
     const beat = BEAT_BY_ID.get(beatId);
     if (!beat) return;
+
+    // §13.5 — the shape of the page is the voice. A Bureau beat arrives as a
+    // document: typeset, whole, on paper, through the proper channel. The
+    // typed process window belongs to the channel and to nobody else.
+    if (beat.voice === 'bureau') {
+      this.noticeId = beatId;
+      this.notice.show(
+        { beat, hint: 'ANY KEY — ACKNOWLEDGE AND PROCEED' },
+        () => this.closeNotice(),
+      );
+      this.audio.chrome('confirm');
+      return;
+    }
 
     this.intrusionId = beatId;
     this.intrusion = new Transmission(
@@ -346,6 +372,25 @@ export class TitleScreen {
     );
   }
 
+
+  /** The notice surface, mounted the first time the Bureau has one to serve. */
+  private get notice(): DocumentSheet {
+    if (!this.noticeSheet) this.noticeSheet = new DocumentSheet(this.intrusionLayer);
+    return this.noticeSheet;
+  }
+
+  /** Acknowledge the Bureau's notice. Documents arrive whole; one key files it. */
+  private closeNotice(): void {
+    if (!this.notice.open) return;
+    if (this.story && this.noticeId) this.story.delivered(this.noticeId);
+    this.notice.close();
+    this.noticeId = null;
+    this.audio.chrome('click');
+    // One per run, and then the run — same contract as the channel below.
+    if (!this.holdingRun) return;
+    this.holdingRun = false;
+    this.finish();
+  }
 
   /** Dismiss the intrusion. Acknowledged only if it finished typing. */
   private closeTransmission(): void {
@@ -863,6 +908,12 @@ export class TitleScreen {
     // thing you can do with a transmission is finish reading it.
     if (this.intrusion) {
       this.closeTransmission();
+      e.preventDefault();
+      return;
+    }
+    // And a served notice owns it the same way: one key acknowledges.
+    if (this.noticeSheet?.open) {
+      this.closeNotice();
       e.preventDefault();
       return;
     }

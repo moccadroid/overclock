@@ -45,7 +45,7 @@ export {
 } from './tokens';
 export { Grid } from './grid';
 export { List } from './list';
-export { VALUE_COL, blank, chain, field, head, meter, redact, row } from './emit';
+export { VALUE_COL, blank, chain, field, head, meter, redact, row, wrap } from './emit';
 export { Sheet, type SheetSpec } from './sheet';
 export { Button, Rows, horizontal, vertical, type ButtonOpts, type RowsOpts } from './widgets';
 export { Focus, type KeyHandler } from './focus';

@@ -90,6 +90,23 @@ import { Filter, GlProgram, Texture } from 'pixi.js';
  */
 const MAX_WALLS = 48;
 const MAX_WARP = 6;
+/**
+ * How many rooms can declare their own material at once. Keep in step with the
+ * `#define` in the fragment shader.
+ *
+ * One per room in the arena, and arenas have five. Eight is headroom.
+ */
+const MAX_ZONES = 8;
+
+/** A room's material, as a world-space region the shader resolves per pixel. */
+export interface MaterialZone {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  oil: number;
+  fray: number;
+}
 
 export interface ShellWall {
   x: number;
@@ -153,6 +170,8 @@ export interface ShellStyle {
   insetPulse: number;
   jitter: number;
   edge: number;
+  oil: number;
+  fray: number;
   shadow: number;
   shadowOffset: readonly [number, number];
   backing: number;
@@ -250,6 +269,7 @@ uniform vec4 uOutputFrame;
 
 #define MAX_WALLS 48
 #define MAX_WARP 6
+#define MAX_ZONES 8
 #define TAU 6.2831853
 
 /** Screen pixel of world origin, and pixels per world unit. */
@@ -295,6 +315,61 @@ uniform float uInset;
 uniform float uInsetPulse;
 uniform float uJitter;
 uniform float uEdge;
+/**
+ * §8.3 — the sheen, and it is on the **floor**, not on the mass.
+ *
+ * Painting a film across the block bodies was the first attempt and it was the
+ * wrong surface: the blocks are hard-edged flat value, so anything laid over
+ * them reads as a stain on a shape rather than as a property of a material —
+ * and no amount of tuning the noise changes what it is sitting on. The floor is
+ * the layer the mass has seams into, so an iridescence down there comes *up*
+ * through the gaps between slabs and around every silhouette, which is the
+ * shimmer that was wanted, and the blocks stay exactly as sharp as they were.
+ */
+uniform float uOil;
+/**
+ * §8.3 — how far the block edges fray, as a fraction of a block's own size.
+ *
+ * The one thing that *should* touch the mass: not a texture on the face but a
+ * perturbation of the outline, in blocky steps, so a slab's border crumbles
+ * instead of ending. The steps re-roll on the beat, which is what makes it read
+ * as coming apart rather than as a rough edge.
+ *
+ * Safe against the "dilate, never erode" rule for one reason: the backing pass
+ * covers the collider whatever the layers do, so fraying can eat into a drawn
+ * silhouette without ever opening a hole in cover.
+ */
+uniform float uFray;
+/**
+ * Which rooms wear which material, as world-space rectangles.
+ *
+ * uOil and uFray above are the arena's *base* — what a room that declares
+ * nothing looks like — and these override it region by region. That is the whole
+ * fix for a real problem: the two were room style, switched wholesale the
+ * instant the player crossed a boundary, so stepping through a gate repainted
+ * every floor on screen at once. The room you had just left went oily behind
+ * you, which is both wrong and the most visible thing in the frame.
+ *
+ * A material is a property of a place. Resolved per pixel, the Sink's floor is
+ * the only oily floor even while you stand in the doorway looking at both rooms,
+ * and there is no transition to smooth because nothing ever transitions — you
+ * walk into it, and it comes up around you over uZoneBlend.
+ *
+ * (centre x, centre y, half w, half h) and (oil, fray, spare, spare).
+ */
+uniform vec4 uZoneRect[MAX_ZONES];
+uniform vec4 uZoneMat[MAX_ZONES];
+uniform int uZoneCount;
+/**
+ * How far a zone's material bleeds *out* through its walls, and how far *in* it
+ * takes to reach full strength. World units.
+ *
+ * The outward bleed is small and deliberate: a little of the room leaking
+ * through its own doorway is what makes the door read as a way into somewhere
+ * rather than a hole in a wall. The inward ramp has to stay under half the
+ * shortest room's short side, or that room never reaches its own material.
+ */
+uniform vec2 uZoneBlend;
 uniform float uShadow;
 uniform vec2 uShadowOffset;
 uniform float uBacking;
@@ -323,6 +398,61 @@ float hash21(vec2 p) {
 float sdBox(vec2 p, vec2 b) {
   vec2 d = abs(p) - b;
   return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
+}
+
+/**
+ * The material at a world point: (oil, fray).
+ *
+ * Rooms are disjoint, so the mix collapses to "the room's value inside, the
+ * base outside" everywhere except the few hundred units either side of a wall,
+ * which is exactly where a blend is wanted. Written as a fold rather than a
+ * search so a nested or overlapping region — an arena that ever wants one — is
+ * simply the last one to speak.
+ */
+vec2 materialAt(vec2 p) {
+  vec2 m = vec2(uOil, uFray);
+  for (int i = 0; i < MAX_ZONES; i++) {
+    if (i >= uZoneCount) break;
+    vec4 r = uZoneRect[i];
+    // Positive inside the room, negative outside.
+    float depth = -sdBox(p - r.xy, r.zw);
+    float k = smoothstep(-uZoneBlend.x, uZoneBlend.y, depth);
+    if (k <= 0.0) continue;
+    m = mix(m, uZoneMat[i].xy, k);
+  }
+  return m;
+}
+
+/**
+ * The fray: a signed, blocky perturbation of a block's outline, −0.5..0.5.
+ *
+ * Quantised, not smooth. Smooth noise on an outline gives a wavy border, and a
+ * wavy border in a vocabulary with no curves in it reads as a mistake — this
+ * bins world space into crumbs a fifth of a block across, so the edge breaks
+ * into square nibbles that belong to the same grammar as the blocks.
+ *
+ * Interpolated across the turn between two rolls, exactly like the amplitude:
+ * a hash that changes on the beat is a popping edge, and the whole file's rule
+ * is that shape changes are continuous.
+ */
+float frayAt(vec2 p, float size, float t) {
+  vec2 q = floor(p / max(1.0, size * 0.2));
+  float turn = floor(t);
+  float a = hash21(q + turn * 37.1);
+  float b = hash21(q + (turn + 1.0) * 37.1);
+  return mix(a, b, smoothstep(0.0, 1.0, fract(t))) - 0.5;
+}
+
+/** Smooth value noise. Only the floor's sheen samples it; the mass never does. */
+float vnoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float a = hash21(i);
+  float b = hash21(i + vec2(1.0, 0.0));
+  float c = hash21(i + vec2(0.0, 1.0));
+  float d = hash21(i + vec2(1.0, 1.0));
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
 }
 
 /** Distance to the nearest line of a world-space grid, in world units. */
@@ -408,7 +538,7 @@ float capAt(vec2 p) {
  * it, so consecutive cycles hand off at exactly the value they finished on.
  * Nothing in here is ever discontinuous.
  */
-float blockAt(vec2 p, float size, float seed, float bias, float layerExt, float grid, float cap) {
+float blockAt(vec2 p, float size, float seed, float bias, float layerExt, float grid, float cap, float fray) {
   // The grid is staggered per layer. Aligned, a column that misses on one layer
   // tends to miss on the next as well — and across a ruin only one or two cells
   // wide that reads as the grey bunching to one side and leaving the rest bare,
@@ -478,12 +608,25 @@ float blockAt(vec2 p, float size, float seed, float bias, float layerExt, float 
   halfExt += vec2(1.0 - vertical, vertical) * ext;
   off += vec2(vertical, 1.0 - vertical) * drag;
 
+  float d = sdBox(p - c - off, halfExt);
+
+  // §8.3 — the edges fray. Perturbing the distance *is* perturbing the
+  // silhouette, and it only shows where the distance is near zero, so no window
+  // term is needed: the interior is covered by the layers over it and the
+  // exterior is transparent.
+  //
+  // The amount arrives as an argument rather than being read from the zone table
+  // here: this function runs six times a pixel and the material does not vary
+  // between a pixel's own layers, so resolving it once in main is the same
+  // picture for a sixth of the work.
+  if (fray > 0.0) d += frayAt(p, size, uQuarter * 0.5) * fray * size;
+
   // Clipped to the mass at full dilation.
   //
   // Without this a block is only ever as accurate as its own size: a 340-unit
   // ruin under 230-unit cells becomes a cluster twice the collider, and cover
   // that looks like cover but is not is the one lie this system must never tell.
-  return max(sdBox(p - c - off, halfExt), cap);
+  return max(d, cap);
 }
 
 /**
@@ -540,6 +683,37 @@ void main(void) {
     float lines = 1.0 - smoothstep(0.0, 1.3 * aa, gridDist(fp, 120.0));
     col += uStructure * lines * 0.26 * (0.75 + uLoad * 0.9) * pulse;
 
+    // §8.3 — the sheen, on the ground the mass stands on.
+    //
+    // Thin-film interference: a drifting thickness field, and a colour read off
+    // its contours the way oil on water reads its own depth. Two scales so the
+    // bands break up rather than reading as contour lines, both advected — the
+    // sheet *moves*, which is the whole effect. A slow travelling swell decides
+    // where it is thick, so the room glistens in passing rather than wearing a
+    // permanent pattern.
+    //
+    // Red is damped: on this palette a red fringe reads as rust, and the film
+    // wants to sit violet-teal-green, like oil over dark water.
+    //
+    // Sampled at the *unwarped* position, unlike the grid: a vortex should bend
+    // the lines drawn on the floor, not drag which room the floor belongs to.
+    float oil = materialAt(p).x;
+    if (oil > 0.0) {
+      float film = vnoise(fp * 0.0042 + vec2(uTime * 0.028, uTime * -0.020))
+                 + 0.45 * vnoise(fp * 0.013 + vec2(uTime * -0.019, uTime * 0.014));
+      vec3 irid = 0.5 + 0.5 * cos(TAU * film * 2.2 + vec3(0.0, 2.1, 4.2));
+      // Weighted cold. Green is what a blue-black floor lifts most readily, and
+      // at equal weight the room went swamp; the brightness hierarchy is not
+      // negotiable, so the film stays violet-teal and leaves the greens to
+      // whatever is actually alive on the floor.
+      irid *= vec3(0.45, 0.62, 1.0);
+      float swell = 0.45 + 0.55 * sin(fp.x * 0.0016 + fp.y * 0.0011 - uTime * 0.45);
+      // Lifted along the grid lines as well as across the field: the lines are
+      // already the floor's structure, and a film catching on them ties the
+      // shimmer to the room instead of floating over it.
+      col += irid * oil * swell * (0.55 + 0.9 * lines) * pulse;
+    }
+
     // A tint over the ground, luminance-preserving, so a biome changes the
     // colour of the room without changing how bright anything in it is.
     if (uTintAmount > 0.0) {
@@ -590,6 +764,9 @@ void main(void) {
   float cap = capAt(p);
   if (cap < 48.0) {
     vec2 eye = p - uEye;
+    // Which room's edges these blocks wear, resolved once for every layer and
+    // every shadow below.
+    float fray = materialAt(p).y;
 
     // Shadows first, all three, and taken as a max rather than multiplied.
     //
@@ -613,7 +790,7 @@ void main(void) {
       vec2 lp = p + eye * uDepth[layer];
       // Deliberately not clipped: a shadow falls on the floor beyond the block,
       // which is exactly where the cap is not.
-      float sd = blockAt(lp - uShadowOffset * size, size, seed, uBiases[layer], uLayerExtend[layer], uGridOffset[layer], -1e5);
+      float sd = blockAt(lp - uShadowOffset * size, size, seed, uBiases[layer], uLayerExtend[layer], uGridOffset[layer], -1e5, fray);
       shade = max(shade, 1.0 - smoothstep(-aa, aa, sd));
     }
     put(acc, vec3(0.0), uShadow * shade);
@@ -632,7 +809,7 @@ void main(void) {
       float seed = float(layer) * 21.0 + 11.0;
       vec2 lp = p + eye * uDepth[layer];
 
-      float bd = blockAt(lp, size, seed, uBiases[layer], uLayerExtend[layer], uGridOffset[layer], cap);
+      float bd = blockAt(lp, size, seed, uBiases[layer], uLayerExtend[layer], uGridOffset[layer], cap, fray);
       float cover = 1.0 - smoothstep(-aa, aa, bd);
       if (cover > 0.001) {
         vec3 body = uMass * uShades[layer];
@@ -826,6 +1003,12 @@ export class StructurePass {
           uInsetPulse: { value: 0.032, type: 'f32' },
           uJitter: { value: 0.12, type: 'f32' },
           uEdge: { value: 0.3, type: 'f32' },
+          uOil: { value: 0, type: 'f32' },
+          uFray: { value: 0, type: 'f32' },
+          uZoneRect: { value: new Float32Array(MAX_ZONES * 4), type: 'vec4<f32>', size: MAX_ZONES },
+          uZoneMat: { value: new Float32Array(MAX_ZONES * 4), type: 'vec4<f32>', size: MAX_ZONES },
+          uZoneCount: { value: 0, type: 'i32' },
+          uZoneBlend: { value: new Float32Array([140, 420]), type: 'vec2<f32>' },
           uShadow: { value: 0.5, type: 'f32' },
           uShadowOffset: { value: new Float32Array([0.1, 0.14]), type: 'vec2<f32>' },
           uBacking: { value: 0.5, type: 'f32' },
@@ -904,6 +1087,13 @@ export class StructurePass {
     n.uVeilRadius = s.veilRadius;
     n.uInsetPulse = s.insetPulse;
     n.uJitter = s.jitter;
+    // `oil` and `fray` are deliberately NOT written here, and the omission is
+    // load-bearing. Everything else in a style is geometry the whole arena
+    // shares — block sizes, churn tempo — and switching it on a room change is
+    // invisible because the picture off screen was never different. Those two
+    // are *material*, they are dramatic, and switching them globally repainted
+    // the room behind the player the moment they stepped through a gate. They
+    // come from `setMaterialZones` instead, which places them.
     n.uEdge = s.edge;
     n.uShadow = s.shadow;
     n.uBacking = s.backing;
@@ -1001,6 +1191,34 @@ export class StructurePass {
   /** §21b.5 — the colour a gate's cut burns, taken from the level it opens. */
   setCutColor(color: number): void {
     writeColor(this.u.uCutColor as Float32Array, color);
+  }
+
+  /**
+   * §8.3 — where the materials are, in world space.
+   *
+   * Set once per arena, not per room change: the whole point is that a room's
+   * oil and fray belong to its floor and its blocks rather than to the camera,
+   * so walking through a doorway resolves them per pixel instead of repainting
+   * the screen. `base` is what a room that declares neither looks like.
+   */
+  setMaterialZones(base: { oil: number; fray: number }, zones: readonly MaterialZone[]): void {
+    const u = this.u;
+    const n = u as Record<string, number>;
+    n.uOil = base.oil;
+    n.uFray = base.fray;
+    const rect = u.uZoneRect as Float32Array;
+    const mat = u.uZoneMat as Float32Array;
+    const count = Math.min(MAX_ZONES, zones.length);
+    for (let i = 0; i < count; i++) {
+      const z = zones[i]!;
+      rect[i * 4] = z.x + z.w / 2;
+      rect[i * 4 + 1] = z.y + z.h / 2;
+      rect[i * 4 + 2] = z.w / 2;
+      rect[i * 4 + 3] = z.h / 2;
+      mat[i * 4] = z.oil;
+      mat[i * 4 + 1] = z.fray;
+    }
+    n.uZoneCount = count;
   }
 
   /** Biome colour and how much of it. Zero amount is the plain Core. */

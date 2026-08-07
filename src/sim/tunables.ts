@@ -347,6 +347,11 @@ export const TUNABLE = {
   cacheInterval: 75,
   cacheFromTime: 45,
   /**
+   * LEVELS §6 — stations and fragments. Short, because the price of a document
+   * is walking to it, not standing still next to it while the room closes in.
+   */
+  stationChannelTime: 1.2,
+  /**
    * How big the menagerie is, as a share of the director's density target.
    *
    * Came down from 1.15 once the gate siege existed to be the hard thing. A
@@ -457,8 +462,12 @@ export const TUNABLE = {
   doorMouth: 60,
 
   // ---- §12 director ----
-  /** Threat reaches ~24 by the 20:00 Meltdown line — the scale wave bands use. */
-  threatPerSecond: 0.02,
+  /**
+   * LEVELS §1 — Threat reaches ~24 by the 13:00 Meltdown line, the scale the
+   * wave bands use. Was 0.02 against a 20:00 line; the run was re-cut to
+   * ~15 minutes total and the slope moved so the endgame bands still arrive.
+   */
+  threatPerSecond: 0.031,
   /**
    * §12.1 — how much Threat one *step* is, for the player's benefit only.
    *
@@ -565,8 +574,9 @@ export const TUNABLE = {
   maxBeacons: 2,
 
   // ---- §9 Recompile ----
-  /** Terminals begin appearing at minute 8. */
-  recompileFromTime: 8 * 60,
+  /** LEVELS §1 — terminals from ~5:20, the same share of a 13:00 build phase
+   * that minute 8 was of a 20:00 one. */
+  recompileFromTime: 320,
   recompileInterval: 70,
   recompileChannelTime: 3,
   recompileCapacityGain: 20,
@@ -612,19 +622,37 @@ export const TUNABLE = {
   rebuildSurgeCards: 4,
 
   // ---- §12.4 Extraction ----
-  extractFromTime: 15 * 60,
+  /**
+   * LEVELS §1 — there is always a way out from 5:00. The terminal stands at
+   * the arena's far landmark (in the Sink), so in practice it appears at 5:00
+   * or the moment the Sink opens, whichever is later. The operations order
+   * derives its clock from this number; onboarding notice 4 defers to the
+   * operations order rather than quoting a time that can rot.
+   */
+  extractFromTime: 300,
   extractChannelTime: 5,
 
   // ---- §13.2 Meltdown ----
-  meltdownAt: 20 * 60,
+  /**
+   * LEVELS §1 — the run is ~15 minutes total: 13:00 of build, then a Meltdown
+   * the player should not survive past ~2:00 of. The multiplier steps twice as
+   * fast as it did against the 20:00 line, because ×2-at-death was never a
+   * third act — in a two-minute Meltdown the number has to move while it lasts.
+   */
+  meltdownAt: 780,
   meltdownMultiplierStep: 0.25,
-  meltdownStepSeconds: 30,
+  meltdownStepSeconds: 15,
 
   // ---- §11.4 Containment ----
+  /**
+   * LEVELS §1 — tightened for the two-minute Meltdown: overlap should become
+   * unsurvivable around +2:00. Unmeasured until real runs reach it — no harness
+   * run ever has (BALANCE.md) — so these are the first guess, not the last.
+   */
   containmentFirstDelay: 8,
-  containmentIntervalBase: 16,
-  containmentIntervalMin: 3.5,
-  containmentIntervalPerMinute: 1.6,
+  containmentIntervalBase: 12,
+  containmentIntervalMin: 3,
+  containmentIntervalPerMinute: 2.4,
   sweeperSpeed: 210,
   sweeperGapWidth: 260,
   sweeperDamage: 26,

@@ -10,10 +10,32 @@
  * functions in `arc.ts`, and saves what comes back. All the behaviour is there,
  * where it can be tested without storage.
  */
-import { STORY, type Context, type Moment, advance, delivered } from './arc';
+import {
+  CHECKPOINTS,
+  STORY,
+  type Context,
+  type Moment,
+  advance,
+  delivered,
+  stationRead,
+} from './arc';
 import { START, type Story, nextCycle } from './state';
 
-const STORAGE_KEY = 'overclock.story.v1';
+/**
+ * Bumped when a saved arc stops meaning what it says.
+ *
+ * `load` merges field by field over `START`, which handles a story that gained
+ * *fields* — but not one whose contents changed meaning. STORY-AND-TONE §7
+ * rewrote the beats and the rungs, so a v1 save carries `fired` ids for rules
+ * that no longer exist and a `tutorial.done` set by a tutorial that no longer
+ * works that way. Read as v2 it is not an old campaign, it is a corrupt one:
+ * the account starts on rung 2 with the Bureau's welcome already "read", which
+ * is precisely the state it was found in.
+ *
+ * A retired key is discarded rather than migrated. The arc is an hour long and
+ * the alternative is migration code for a shape nobody will ever hold again.
+ */
+const STORAGE_KEY = 'overclock.story.v2';
 
 export class StoryStore {
   private story: Story = START;
@@ -36,6 +58,12 @@ export class StoryStore {
   /** The operator read it to the end. Anything less and it stays queued. */
   delivered(beatId: string): void {
     this.story = delivered(this.story, beatId);
+    this.save();
+  }
+
+  /** LEVELS §2.1 — a station read in-run. Read once is read forever. */
+  stationRead(beatId: string): void {
+    this.story = stationRead(this.story, beatId);
     this.save();
   }
 
@@ -64,6 +92,19 @@ export class StoryStore {
   }
 
   /**
+   * Land at a named story position. The proper shortcut: a checkpoint is a
+   * complete state, holds and all, where `forceTo` can only replay effects.
+   * Returns false for a name that is not a checkpoint.
+   */
+  jumpTo(name: string): boolean {
+    const checkpoint = CHECKPOINTS[name];
+    if (!checkpoint) return false;
+    this.story = structuredClone(checkpoint);
+    this.save();
+    return true;
+  }
+
+  /**
    * Every rule up to and including `id`, forced.
    *
    * For getting to a point by hand. It runs the effects without their
@@ -72,9 +113,13 @@ export class StoryStore {
    * when the state you want is off it.
    */
   forceTo(ruleId: string): void {
+    // Effects run without their conditions, so the context is the empty one —
+    // a rule whose effect *reads* the context (ingest) does nothing here, which
+    // is right: there is no run to ingest from.
+    const nothing = { runsCompleted: 0, levelsOpened: [] as string[] };
     let next = START;
     for (const rule of STORY) {
-      next = { ...rule.does(next), fired: [...next.fired, rule.id] };
+      next = { ...rule.does(next, nothing), fired: [...next.fired, rule.id] };
       if (rule.id === ruleId) break;
     }
     this.story = next;

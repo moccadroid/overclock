@@ -48,6 +48,9 @@ const MARKER_INK: Record<TraceMarkerKind, number> = {
   meltdown: 0xffb000,
   extract: 0xffb000,
   death: 0xff2a3c,
+  // LEVELS §6 — Bureau furniture on the trace: the paper-blues the map uses.
+  station: 0x7f9cbf,
+  fragment: 0xa8c2de,
   // Dim on purpose: a threat step is the backdrop the rest of the trace happens
   // against, and a run has a dozen of them against one Recompile.
   threat: 0x4a4358,
@@ -117,7 +120,7 @@ export function reportLines(world: World): Line[] {
     out.push(
       [['  Banked safe at ×1.0. Meltdown was still ahead of you —', C.ink]],
       [
-        ['  every 30s past ', C.faint],
+        [`  every ${TUNABLE.meltdownStepSeconds}s past `, C.faint],
         [clock(world.config.meltdownAt ?? TUNABLE.meltdownAt), C.ink],
         [` would have added ×${TUNABLE.meltdownMultiplierStep}.`, C.faint],
       ],
@@ -220,7 +223,12 @@ export class EpisodeReport {
     return this.view.visible;
   }
 
-  show(world: World, library: Library, onAction: (cmd: string) => void): void {
+  show(
+    world: World,
+    library: Library,
+    onAction: (cmd: string) => void,
+    storyMode = false,
+  ): void {
     this.close();
     this.onAction = onAction;
     this.world = world;
@@ -237,11 +245,18 @@ export class EpisodeReport {
     this.view.addChild(this.sheet.view);
     this.sheet.controls.addChild(this.chart, this.chartLabels, this.glyph, this.scrollbar);
 
-    const labels: [string, string][] = [
-      ['AGAIN', 'confirm'],
-      ['MENU', 'library'],
-      ['SAVE RUN', 'save-run'],
-    ];
+    // LEVELS §2.3 — in the campaign there is one way forward: back to the
+    // terminal, one keystroke from the next shift. AGAIN skips the terminal,
+    // and the terminal is where the story happens — a shortcut around it is a
+    // shortcut around the game. The wider set returns with the post-campaign
+    // modes, where a rematch is a rematch and nothing is waiting to be said.
+    const labels: [string, string][] = storyMode
+      ? [['CONTINUE', 'continue']]
+      : [
+          ['AGAIN', 'confirm'],
+          ['MENU', 'library'],
+          ['SAVE RUN', 'save-run'],
+        ];
     let col = 2;
     this.buttons = labels.map(([text, cmd]) => {
       const at = col;

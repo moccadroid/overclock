@@ -44,22 +44,21 @@ describe('§13.5 — three voices, firewalled', () => {
   });
 
   it('the Bureau never speaks to the reader as "you"', () => {
-    // §13.5 — it addresses the operator only as a role. Exactly two beats break
-    // this, both on purpose, and naming them here is the point of the test:
+    // §13.5 — it addresses the operator only as a role. Exactly three beats
+    // break this, all on purpose, and naming them here is the point:
     //
-    //   B-notice   §10, the one direct address in the game. "Your terminal has
-    //              recorded unsolicited text on 9 occasions." The whole beat is
-    //              the Bureau finally speaking to the operator.
-    //   B6         "Assume it has noticed you." §9 calls it "one line in the
-    //              file that is an instruction and not a procedure, preserved
-    //              on purpose" — it survives at the director's request, and the
-    //              register break is *why* it lands.
-    //   B9         A transcript. The "you" is the interviewer speaking to
-    //              operator 46, which is a record of what a third party said
-    //              and not the file addressing its reader.
+    //   N1        The notices are the one direct address in the game — "Your
+    //             terminal has recorded unsolicited text" — the Bureau finally
+    //             speaking to the operator, and only because procedure makes it.
+    //   OC0061    "Assume it has noticed you." One line that is an instruction
+    //             and not a procedure, preserved at the director's direction;
+    //             the register break is why it lands.
+    //   OC0046X   A transcript. The "you" is the interviewer speaking to
+    //             operator 46 — a record of what a third party said, not the
+    //             file addressing its reader.
     //
     // A fourth would be a mistake. This test exists to make the fourth loud.
-    const ADDRESSES_THE_READER = new Set(['B-notice', 'B6', 'B9']);
+    const ADDRESSES_THE_READER = new Set(['N1', 'OC0061', 'OC0046X']);
     for (const beat of BUREAU) {
       if (ADDRESSES_THE_READER.has(beat.id)) continue;
       const text = beat.body
@@ -70,11 +69,12 @@ describe('§13.5 — three voices, firewalled', () => {
     }
   });
 
-  it('B6 breaks register exactly once', () => {
-    // If the advisory ever grows a second "you", the one that matters stops
-    // being the one that matters.
-    const b6 = BUREAU.find((b) => b.id === 'B6')!;
-    const hits = JSON.stringify(b6.body).toLowerCase().match(/\byou\b|\byour\b/g) ?? [];
+  it('the advisory breaks register exactly once', () => {
+    // "Assume it has noticed you" — clause 7.1 of OC-0061. If the advisory
+    // ever grows a second "you", the one that matters stops being the one
+    // that matters.
+    const advisory = BUREAU.find((b) => b.id === 'OC0061')!;
+    const hits = JSON.stringify(advisory.body).toLowerCase().match(/\byou\b|\byour\b/g) ?? [];
     expect(hits).toHaveLength(1);
   });
 
@@ -99,12 +99,13 @@ describe('§13.3/§13.4 — redaction', () => {
 
   it('a bar is exactly as wide as what is under it', () => {
     // People will measure. The width is never written down — it comes from the
-    // text — so this asserts the property that makes that safe.
-    const notice = BUREAU.find((b) => b.id === 'B-notice')!;
-    const lines = beatLines(notice.body, 60);
+    // text — so this asserts the property that makes that safe: the segment
+    // under the bar IS the hidden text, verbatim.
+    const onboard = BUREAU.find((b) => b.id === 'B-onboard')!;
+    const lines = beatLines(onboard.body, 60);
     const bars = lines.flat().filter((s) => isRedaction(s[1]));
     expect(bars.length).toBeGreaterThan(0);
-    for (const [text] of bars) expect(text.trim()).toBe('04');
+    for (const [text] of bars) expect(text.trim()).toBe('two');
   });
 });
 
@@ -138,14 +139,32 @@ describe('layout', () => {
       const width = line.reduce((n, s) => n + s[0].length, 0);
       expect(width).toBeLessThanOrEqual(40);
     }
-    // The clearance reference survives the wrap as one bar, not two halves.
-    expect(lines.flat().filter((s) => isRedaction(s[1]))).toHaveLength(1);
+    // The invariant, stated as itself rather than as a bar count: **no hidden
+    // word is ever rendered as ink.** A censored phrase that straddles a line
+    // break correctly becomes *two bars* — see layout.ts, which wraps word by
+    // word precisely so the alternative (one bar and a leak) cannot happen —
+    // so counting bars measures where the copy happens to break, not whether
+    // the censoring holds.
+    const bars = lines.flat().filter((s) => isRedaction(s[1]));
+    expect(bars.length).toBeGreaterThan(0);
+    // Per line, so a phrase broken across two lines is still checked against
+    // the ink on each of them. A common word appearing elsewhere in the
+    // document is not a leak; the censored *run* surfacing as ink is.
+    for (const line of lines) {
+      const visible = line
+        .filter((s) => !isRedaction(s[1]))
+        .map((s) => s[0])
+        .join('');
+      for (const hidden of hiddenWords(b1.body)) {
+        expect(visible, `"${hidden}" leaked out from under a bar`).not.toContain(hidden);
+      }
+    }
   });
 
   it('leaves a preformatted block exactly as typed', () => {
-    const b4 = BUREAU.find((b) => b.id === 'B4')!;
-    const lines = beatLines(b4.body, 30);
+    const schedule = BUREAU.find((b) => b.id === 'OC0044')!;
+    const lines = beatLines(schedule.body, 30);
     const asset = lines.find((l) => l[0]?.[0]?.startsWith('operator (1)'));
-    expect(asset?.[0]?.[0]).toContain('consumable, replaced per §H-4');
+    expect(asset?.[0]?.[0]).toContain('consumable, per H-4');
   });
 });

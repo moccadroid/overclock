@@ -25,6 +25,17 @@ function wrap(para: Para, width: number, ink: number): Line[] {
   const lines: Line[] = [];
   let line: Seg[] = [];
   let used = 0;
+  /**
+   * Whether the next word is preceded by a space *in the source*.
+   *
+   * Load-bearing across the seam between spans. Every word used to be joined
+   * with a space whenever the line was non-empty, which is right inside a span
+   * and wrong at its edges: a sentence written as `'…item as '`, `bar('company')`,
+   * `'. It is…'` rendered as "item as ███ . It is" — the full stop, which
+   * continues the censored word, arrived as its own word and got a space in
+   * front of it. Every bar followed by punctuation in every file had it.
+   */
+  let spaced = false;
 
   const push = (): void => {
     if (line.length) lines.push(line);
@@ -36,11 +47,12 @@ function wrap(para: Para, width: number, ink: number): Line[] {
     const hidden = typeof span === 'string' ? null : span.clearance;
     const text = typeof span === 'string' ? span : span.hidden;
     const colour = hidden === null ? ink : REDACT - hidden;
+    if (/^\s/.test(text)) spaced = true;
 
     for (const word of text.split(' ')) {
       if (!word) continue;
-      const space = used > 0;
-      if (used > 0 && used + 1 + word.length > width) push();
+      const space = used > 0 && spaced;
+      if (used > 0 && used + (space ? 1 : 0) + word.length > width) push();
       const piece = used > 0 && space ? ` ${word}` : word;
       const last = line[line.length - 1];
       // Merge runs set the same way, so a sentence is one Text object and not
@@ -48,17 +60,37 @@ function wrap(para: Para, width: number, ink: number): Line[] {
       if (last && last[1] === colour) last[0] += piece;
       else line.push([piece, colour]);
       used += piece.length;
+      // Words within a span are space-separated; the next one always is.
+      spaced = true;
     }
+
+    // …and a span that does not end in whitespace runs straight into the next.
+    spaced = /\s$/.test(text);
   }
 
   push();
   return lines;
 }
 
-/** One block. `pre` is typed as a shape and is laid out exactly as written. */
+/**
+ * One block. `pre` is typed as a shape and is laid out exactly as written.
+ *
+ * "Exactly as written" means the runs of spaces that make the shape a shape.
+ * `wrap` normalises whitespace — correctly, for prose — so routing a `pre` row
+ * through it collapsed every column gap to one space and a register turned into
+ * a sentence. A `pre` row is one segment, verbatim; only a censored one has to
+ * be walked, and its spacing is preserved span by span.
+ */
 export function blockLines(block: Block, width: number, ink: number = C.ink): Line[] {
   if (typeof block === 'object' && !Array.isArray(block) && 'pre' in block) {
-    return block.pre.map((row) => wrap(row, Number.MAX_SAFE_INTEGER, ink)[0] ?? []);
+    return block.pre.map((row): Line => {
+      if (typeof row === 'string') return row ? [[row, ink]] : [];
+      return row.map((span) =>
+        typeof span === 'string'
+          ? ([span, ink] as Seg)
+          : ([span.hidden, REDACT - span.clearance] as Seg),
+      );
+    });
   }
   return wrap(block as Para, width, ink);
 }

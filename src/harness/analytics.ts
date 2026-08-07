@@ -64,6 +64,9 @@ interface Perf {
   gpuWorstMs: number;
   gpuMeanMs: number;
   gpuSamples: number;
+  /** Absent on runs recorded before the 60fps cap made busy time the headroom number. */
+  cpuWorstMs?: number;
+  cpuMeanMs?: number;
   fx: string[];
 }
 
@@ -545,6 +548,25 @@ function main(): void {
         `    gpu           mean ${mean(gpuRuns.map((r) => r.perf!.gpuMeanMs)).toFixed(2)}ms   ` +
           `worst ${Math.max(...gpuRuns.map((r) => r.perf!.gpuWorstMs)).toFixed(2)}ms   ` +
           `n=${gpuRuns.length} run(s) with the timer extension`,
+      );
+    }
+    // Busy time, not interval — rendering is capped at 60fps, so the histogram
+    // above can only catch missed frames and this is where throughput lives.
+    // The ceiling is an approximation from cost at the capped workload; see
+    // the field's doc in telemetry.ts for what it cannot see.
+    const cpuRuns = withPerf.filter((r) => (r.perf!.cpuMeanMs ?? 0) > 0);
+    if (cpuRuns.length > 0) {
+      const cpuMean = mean(cpuRuns.map((r) => r.perf!.cpuMeanMs!));
+      const gpuMean = gpuRuns.length > 0 ? mean(gpuRuns.map((r) => r.perf!.gpuMeanMs)) : 0;
+      const bound = Math.max(cpuMean, gpuMean);
+      L.push(
+        `    cpu busy      mean ${cpuMean.toFixed(2)}ms   ` +
+          `worst ${Math.max(...cpuRuns.map((r) => r.perf!.cpuWorstMs ?? 0)).toFixed(2)}ms   ` +
+          `n=${cpuRuns.length} run(s)`,
+      );
+      L.push(
+        `    headroom      ~${(1000 / 60 / bound).toFixed(1)}x over the 60fps cap ` +
+          `(≈${Math.round(1000 / bound)}fps possible${gpuRuns.length === 0 ? ', cpu only' : ''})`,
       );
     }
     if (starved > 0) {

@@ -450,8 +450,9 @@ describe('Meltdown and Containment (GDD §11.4, §13.2)', () => {
     expect(w.meltdownMultiplier).toBeCloseTo(1, 6);
 
     survive(61);
-    // +0.25 per 30s survived, uncapped.
-    expect(w.meltdownMultiplier).toBeCloseTo(1.5, 6);
+    // +0.25 per 15s survived, uncapped — LEVELS §1: in a two-minute Meltdown
+    // the number has to move while it lasts.
+    expect(w.meltdownMultiplier).toBeCloseTo(2, 6);
     expect(w.markers.some((m) => m.kind === 'meltdown')).toBe(true);
   });
 
@@ -1791,11 +1792,38 @@ describe('behaviour is pinned while it is being refactored', () => {
   // run. Spawn placement now refuses candidates in a neighbouring room, and The
   // Heap declares no Suppressor. Placement is upstream of everything — every
   // arrival lands somewhere else, so every seed moves.
+  //
+  // MOVED, all four, deliberately, by the LEVELS pass: the 15-minute re-cut
+  // (threatPerSecond 0.02 → 0.031, so density and eligibility climb faster on
+  // every seed), the Heap re-laid as Dock/Stacks/Spill/Forecourt (every ruin
+  // moved, so every collision, path and spawn rejection moves), the room's
+  // threat cap 6 → 5, and authored POIs placed at run start (two entries in
+  // `terminals` shift every later id). Placement and pacing are upstream of
+  // everything, so every seed moves. Recorded after the change, re-verified
+  // across repeat runs.
+  //
+  // ...and again, by sealed-room POIs deferring to `openGate`. A fragment
+  // behind a wall no longer exists at run start, so every id issued after the
+  // authored placements shifts, and the indicators stop pointing at rooms the
+  // player cannot enter.
+  //
+  // ...and again, by POIs refusing gate circles. A spot inside the hold ring
+  // sells a boss wave as a wave call, so `findOpenSpot` rejects it — and every
+  // rejection is an extra pair of Rng draws, so every seed moves.
+  //
+  // ...and again, by the files moving behind the first partition. The Heap
+  // authors four stations and no fragments now, so the terminal id sequence —
+  // and everything issued after it — shifts on every seed.
   const PINNED = {
-    piloted: 'a34871f5',
-    scripted: 'cd69a800',
-    menagerie: '718dfa4d',
-    calledWaves: '82ca2b89',
+    piloted: '789691d8',
+    scripted: '6dd31cf2',
+    menagerie: '0442958c',
+    // `calledWaves` alone MOVED again, deliberately: the campaign re-authored
+    // the Sink's files (three now, under the STORY-AND-TONE doc ids), and the
+    // gate-hold scenario opens the Sink — so `openGate` places them and the
+    // terminal ids after that point shift. Nothing else walks that path,
+    // which is why it is the only pin that moved.
+    calledWaves: 'ec8d59f3',
   };
   //
   // ...and once more, by the siege arriving *in* the doorway instead of in front
@@ -2181,7 +2209,7 @@ describe("affixes and a variant's own ideas are one mechanism (GDD §10.3)", () 
     const w = new World({ seed: 'siege-door', axiomId: 'ignition' });
     const gate = w.terminals.find((t) => t.gateId)!;
     const arena = w.arena;
-    const barrier = (arena.gates ?? []).find((g) => g.id === gate.gateId)!.barrier;
+    const barrier = (arena.gates ?? []).find((g) => g.id === gate.gateId)!.barrier!;
     const doorX = barrier.x + barrier.w / 2;
     const doorY = barrier.y + barrier.h / 2;
 

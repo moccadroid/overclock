@@ -14,7 +14,7 @@ import { SIM_DT } from './tunables';
 function play(
   seed: string,
   seconds: number,
-  opts: { reroll?: boolean; scrap?: boolean; input?: () => InputState } = {},
+  opts: { reroll?: boolean; scrap?: boolean; input?: () => InputState; immortal?: boolean } = {},
 ): { recording: ReturnType<Recorder['finish']>; world: World; hash: string } {
   const config = { seed, axiomId: 'ignition' };
   const world = new World(config);
@@ -23,6 +23,13 @@ function play(
   let scrapped = false;
 
   for (let tick = 0; tick < Math.round(seconds / SIM_DT); tick++) {
+    // The size test measures encoding, not survival: a random walker has no
+    // survival instinct, and the run has to last long enough to be worth
+    // weighing. Same trick the Meltdown clock test uses.
+    if (opts.immortal) {
+      world.player.alive = true;
+      world.player.integrity = world.player.maxIntegrity;
+    }
     if (!world.player.alive) break;
 
     if (world.pendingRecompileChoice) {
@@ -142,7 +149,10 @@ describe('run recording (GDD §14)', () => {
       return { moveX: dir[0], moveY: dir[1], dash: false, interact: false };
     };
 
-    const live = play('replay-size', 300, { input: keyboard });
+    // Immortal, because a random walker has no survival instinct and the
+    // LEVELS §1 re-cut killed it seconds short of the minute this measurement
+    // needs. Size is the claim under test; survival never was.
+    const live = play('replay-size', 300, { input: keyboard, immortal: true });
     const bytes = JSON.stringify(live.recording).length;
     expect(live.recording.ticks).toBeGreaterThan(60 * 60);
     expect(bytes).toBeLessThan(60_000);

@@ -15,7 +15,7 @@
  */
 import { Application, Container, Graphics, Sprite, Text, Texture } from 'pixi.js';
 import { TUNABLE } from '../sim/tunables';
-import type { EnemyMark, Hue } from '../sim/types';
+import type { EnemyMark, Hue, LevelDef } from '../sim/types';
 import type { Containment, TerminalKind, World } from '../sim/world';
 import { enemy as getEnemy } from '../content/index';
 import { Camera } from './camera';
@@ -27,6 +27,7 @@ import { BloomPipeline } from './gfx/bloom';
 import { GpuTimer } from './gfx/gputimer';
 import {
   StructurePass,
+  type MaterialZone,
   type ShellSeal,
   type ShellWall,
   type ShellWarp,
@@ -254,8 +255,6 @@ export class Renderer {
   /** Monotonic quarter-notes, and the last in-bar reading it came from. */
   private quarter = 0;
   private lastQuarterInBar = -1;
-  private fieldKind = 0;
-  private fieldAmount = 0;
   /** §16.6 — how far the camera has pulled back. See updateZoom. */
   private zoom = 1;
   /** Shared phase for the loot pulse — see drawPickups. Presentation only. */
@@ -331,6 +330,7 @@ export class Renderer {
       shell.setPalette(PALETTE.structure, PALETTE.background, PALETTE.mass);
       shell.setStyle(SHELL);
       shell.setArena(world.arena.width, world.arena.height);
+      shell.setMaterialZones({ oil: SHELL.oil, fray: SHELL.fray }, materialZonesFor(world));
     }
     this.shellFloor.setMode(0);
     this.shellMass.setMode(1);
@@ -609,42 +609,29 @@ export class Renderer {
     // level when you are standing in one, so a Freezer inside a level still
     // reads as the Freezer.
     const biome = world.biome;
-    const biomeTint = biome?.tint ?? world.currentLevel?.tint ?? PALETTE.background;
+    const level = world.currentLevel;
+    const biomeTint = biome?.tint ?? level?.tint ?? PALETTE.background;
     this.tint = mix(this.tint, biomeTint, Math.min(1, frameDt * 1.5));
     // The shell takes the biome as a colour over the whole surface, so a biome
     // is the room being a different room rather than a slightly different black
     // showing through the gaps in the grid.
+    //
+    // LEVELS §3.2 — the ramp keys on the *level's* tint as well as the biome's.
+    // It used to key on biomes alone, and no shipped arena has ever authored a
+    // biome, so every per-level tint in arenas.json was validated, loaded, and
+    // then mixed at amount zero: authored, and visually inert. Levels ramp to a
+    // gentler amount than biomes — a room is a place, a biome is a rule.
     this.shellTint = mix(this.shellTint, biomeTint, Math.min(1, frameDt * 1.5));
-    this.shellTintAmount += ((biome ? 0.5 : 0) - this.shellTintAmount) * Math.min(1, frameDt * 1.5);
+    const tintAmount = biome ? 0.5 : level?.tint !== undefined ? 0.35 : 0;
+    this.shellTintAmount += (tintAmount - this.shellTintAmount) * Math.min(1, frameDt * 1.5);
     for (const shell of this.shells) shell.setTint(this.shellTint, this.shellTintAmount);
+    this.applyRoomStyle(level);
 
-    // §21b.4 — the biome's screen-space field, ramped by how far in the player
-    // stands rather than switched at the boundary. Four hundred units of ramp
-    // is about half a screen, so walking into the Freezer is a thing you watch
-    // arrive; stepping one pixel over the line barely registers, which is what
-    // stops a boundary you are pacing along from strobing.
-    if (biome?.field) this.fieldKind = FIELD_KIND[biome.field.kind] ?? 0;
-    const inset = biome
-      ? Math.min(
-          Math.min(world.player.x - biome.x, biome.x + biome.w - world.player.x),
-          Math.min(world.player.y - biome.y, biome.y + biome.h - world.player.y),
-        )
-      : 0;
-    const wanted = biome?.field
-      ? Math.min(1, Math.max(0, inset) / 400) * (biome.field.amount ?? 1)
-      : 0;
-    this.fieldAmount += (wanted - this.fieldAmount) * Math.min(1, frameDt * 2.5);
-    if (this.fieldAmount < 0.002) this.fieldKind = 0;
-    // The kind picks the program; these pick what it looks like. Defaults are
-    // the numbers that used to be baked into the shader, so a biome that says
-    // nothing gets exactly what it got before.
-    const f = biome?.field;
-    this.post.setField(this.fieldKind, this.fieldAmount, {
-      scale: f?.scale ?? FIELD_DEFAULTS[this.fieldKind]!.scale,
-      intensity: f?.intensity ?? FIELD_DEFAULTS[this.fieldKind]!.intensity,
-      reach: f?.reach ?? FIELD_DEFAULTS[this.fieldKind]!.reach,
-      tint: f?.tint ?? FIELD_DEFAULTS[this.fieldKind]!.tint,
-    });
+    // The screen-space "biome field" programs (frost, ember, static) were
+    // removed per STORY-AND-TONE §8.1 — they read as a cartoon, and authored
+    // set-dressing does not belong on the lens. The descent lives ON the ruins
+    // (structure shader), and screen space gets exactly one honest category:
+    // weather, built in the effects pass that replaced this block.
     const background = mix(this.tint, 0x243044, Math.min(0.85, melt * 0.55));
     this.app.renderer.background.color = background;
     this.backdrop.tint = background;
@@ -669,8 +656,7 @@ export class Renderer {
       heat < 0.02 &&
       melt < 0.02 &&
       this.glitchFields.length === 0 &&
-      this.masks.empty &&
-      this.fieldAmount < 0.002;
+      this.masks.empty;
     this.worldGroup.filters = off ? [] : [this.post.filter];
 
     this.bloom.compose();
@@ -862,9 +848,12 @@ export class Renderer {
     }
 
     // §21b.5 — the lock in a sealed gate lights its own doorway, so the red is
-    // in the air of the passage rather than a decal on the floor.
+    // in the air of the passage rather than a decal on the floor. A dead gate
+    // has no lock and lights nothing.
     for (const gate of world.arena.gates ?? []) {
+      if (!gate.opens || !gate.barrier) continue;
       if (world.openBiomes.has(gate.opens)) continue;
+      if (world.terminals.some((t) => t.alive && t.gateId === gate.id && t.dead)) continue;
       const bar = gate.barrier;
       const cx = bar.x + bar.w / 2;
       const cy = bar.y + bar.h / 2;
@@ -1143,7 +1132,12 @@ export class Renderer {
     const seals: ShellSeal[] = [];
     const beat = this.beat ? this.beat.pulse : 0;
     for (const gate of world.arena.gates ?? []) {
+      if (!gate.opens || !gate.barrier) continue;
       if (world.openBiomes.has(gate.opens)) continue;
+      // STORY-AND-TONE §7.2 — a dead gate has no light. The seal burning above
+      // a door is the door being powered; the wall over a dead one is just wall.
+      const terminal = world.terminals.find((t) => t.alive && t.gateId === gate.id);
+      if (terminal?.dead) continue;
       const b = gate.barrier;
       const cx = b.x + b.w / 2;
       const cy = b.y + b.h / 2;
@@ -1190,6 +1184,7 @@ export class Renderer {
     // in, which buys exactly enough travel to centre it and no more.
     for (const gate of world.arena.gates ?? []) {
       const b = gate.barrier;
+      if (!b) continue;
       x0 = Math.min(x0, b.x);
       y0 = Math.min(y0, b.y);
       x1 = Math.max(x1, b.x + b.w);
@@ -1261,6 +1256,7 @@ export class Renderer {
     // GATE_SEQUENCE plays out over it. The renderer only advances a clock and
     // reads the score — what the beats *are* lives in visual.ts.
     for (const gate of world.arena.gates ?? []) {
+      if (!gate.opens || !gate.barrier) continue;
       if (!world.openBiomes.has(gate.opens)) continue;
       const t = (this.gateOpen.get(gate.id) ?? 0) + dt;
       this.gateOpen.set(gate.id, t);
@@ -1295,6 +1291,28 @@ export class Renderer {
     }
   }
 
+  /** Which room's shell style the uniforms currently hold. */
+  private roomStyleId: string | null = null;
+
+  /**
+   * LEVELS §3.2 — a room may re-style the mass shader: block sizes, churn
+   * tempo, amplitude. The Archive is nearly still; the deep rooms churn hard.
+   * Numeric overrides only — the arrays (sizes, shades…) always come from
+   * SHELL, because `LevelDef.shell` is a plain number record so the sim never
+   * has to know a rendering type. Uniforms are rewritten only on room change.
+   *
+   * `oil` and `fray` ride in the same `shell` block but are *not* applied here —
+   * see `setMaterialZones`. They are placed in the world, because switching them
+   * on a room change repaints the room the player just left.
+   */
+  private applyRoomStyle(level: LevelDef | null): void {
+    const id = level?.shell ? level.id : null;
+    if (id === this.roomStyleId) return;
+    this.roomStyleId = id;
+    const style = level?.shell ? ({ ...SHELL, ...level.shell } as typeof SHELL) : SHELL;
+    for (const shell of this.shells) shell.setStyle(style);
+  }
+
   // ---------------------------------------------------------------- entities
 
   /** §16.4 — terminals are blueprint-annotated structures: ticks, label, sweep. */
@@ -1305,7 +1323,8 @@ export class Renderer {
 
     for (const t of world.terminals) {
       const r = TUNABLE.beaconRadius;
-      const color = TERMINAL_COLOR[t.kind];
+      // Dead gates draw in structure grey: furniture, not invitation.
+      const color = t.dead ? 0x2a3a52 : TERMINAL_COLOR[t.kind];
 
       g.rect(t.x - r, t.y - r, r * 2, r * 2).stroke({ width: 2, color, alpha: BAND.entity });
       // Recompile gets a second, inset frame; Extract a heavier outer bracket —
@@ -1390,6 +1409,21 @@ export class Renderer {
           g.lineTo(t.x + sx * (r + 2), t.y + sy * (r + 10));
         }
         g.stroke({ width: 2, color, alpha: BAND.entity });
+      } else if (t.kind === 'station') {
+        // LEVELS §6 — a station is a sheet on a post: three ruled lines inside
+        // the frame, the glyph for "there is text here".
+        for (let i = 0; i < 3; i++) {
+          const y = t.y - 8 + i * 8;
+          g.moveTo(t.x - r + 8, y).lineTo(t.x + r - 8 - (i === 2 ? 10 : 0), y);
+        }
+        g.stroke({ width: 1.5, color, alpha: BAND.inFlight });
+      } else if (t.kind === 'fragment') {
+        // LEVELS §6 — a fragment is a dog-eared page: inner rect, folded corner.
+        g.rect(t.x - r + 9, t.y - r + 9, (r - 9) * 2, (r - 9) * 2)
+          .stroke({ width: 1.5, color, alpha: BAND.inFlight });
+        g.moveTo(t.x + r - 18, t.y - r + 9)
+          .lineTo(t.x + r - 9, t.y - r + 18)
+          .stroke({ width: 1.5, color, alpha: BAND.entity });
       }
 
       const sweep = (t.age * 1.6) % (Math.PI * 2);
@@ -1435,12 +1469,15 @@ export class Renderer {
       if (t.kind === 'gate') {
         const gate = world.terminals[i] ? world.arena.gates?.find((x) => x.id === t.gateId) : null;
         label.visible = true;
-        label.text =
-          t.progress > 0
+        // STORY-AND-TONE §7.2 — a dead gate says so, in the site's own dull
+        // grey, and nothing about it invites standing in the circle.
+        label.text = t.dead
+          ? `${(gate?.name ?? 'GATE').toUpperCase()}  —  NO POWER`
+          : t.progress > 0
             ? `${(gate?.name ?? 'GATE').toUpperCase()}  ${Math.round(t.progress * 100)}%`
             : `${(gate?.name ?? 'GATE').toUpperCase()}  —  STAND HERE`;
-        label.alpha = BAND.telegraph;
-        label.style.fill = TERMINAL_COLOR.gate;
+        label.alpha = t.dead ? BAND.inFlight : BAND.telegraph;
+        label.style.fill = t.dead ? 0x44546a : TERMINAL_COLOR.gate;
         label.position.set(t.x, t.y + (gate?.radius ?? 240) + 18);
         continue;
       }
@@ -1455,11 +1492,10 @@ export class Renderer {
       // §12.4 — a POI whose price is a fight has to say so *before* it is paid.
       // "HOLD E" on a Cache would be a trap, and §17.1 does not allow traps.
       const prompt = t.kind === 'cache' ? 'HOLD  E  —  THEY WAKE UP' : 'HOLD  E';
-      label.text = near
-        ? moving
-          ? 'HOLD STILL'
-          : prompt
-        : `${t.kind.toUpperCase()}_${String(t.id).padStart(2, '0')}`;
+      // LEVELS §6 — authored POIs name themselves; the far label is authored
+      // too. A station says STATION, a file says FILE, not FRAGMENT_07.
+      const far = t.label ?? `${t.kind.toUpperCase()}_${String(t.id).padStart(2, '0')}`;
+      label.text = near ? (moving ? 'HOLD STILL' : prompt) : far;
       label.alpha = near ? BAND.telegraph : BAND.inFlight;
       label.style.fill = moving && near ? PALETTE.signal : TERMINAL_COLOR[t.kind];
       label.position.set(t.x, t.y + TUNABLE.beaconRadius + 20);
@@ -2484,22 +2520,23 @@ function reachFor(w: number, h: number): number {
   return Math.min(SHELL.ruinReachMax, Math.min(w, h) * SHELL.ruinReach);
 }
 
-/** §21b.4 — biome field names, as the post shader's selector. */
-const FIELD_KIND: Record<string, number> = { frost: 1, ember: 2, static: 3 };
-
 /**
- * §21b.4 — what each field looked like when its numbers were literals.
+ * STORY-AND-TONE §8.3 — every room that declares a material, as a region.
  *
- * A biome that specifies nothing gets exactly what it got before this was
- * configurable, which is what makes the change safe to make at all. Index 0 is
- * "no field" and is never read, but exists so the lookup needs no guard.
+ * Read straight off the arena, so a room says what it is made of in the same
+ * `shell` block where it says how fast it churns, and nothing else has to know.
+ * Built once per run: rooms do not move.
  */
-const FIELD_DEFAULTS: Record<number, { scale: number; intensity: number; reach: number; tint: readonly [number, number, number] }> = {
-  0: { scale: 52, intensity: 0, reach: 1, tint: [1, 1, 1] },
-  1: { scale: 52, intensity: 0.85, reach: 1, tint: [0.42, 0.6, 0.86] },
-  2: { scale: 34, intensity: 0.7, reach: 1, tint: [1, 0.5, 0.1] },
-  3: { scale: 3, intensity: 1, reach: 1, tint: [1, 1, 1] },
-};
+function materialZonesFor(world: World): MaterialZone[] {
+  const zones: MaterialZone[] = [];
+  for (const level of world.arena.levels ?? []) {
+    const oil = (level.shell?.['oil'] as number | undefined) ?? SHELL.oil;
+    const fray = (level.shell?.['fray'] as number | undefined) ?? SHELL.fray;
+    if (oil === SHELL.oil && fray === SHELL.fray) continue;
+    zones.push({ x: level.x, y: level.y, w: level.w, h: level.h, oil, fray });
+  }
+  return zones;
+}
 
 /** Terminals are told apart by colour as well as by frame (§16.4). */
 const TERMINAL_COLOR: Record<TerminalKind, number> = {
@@ -2514,6 +2551,11 @@ const TERMINAL_COLOR: Record<TerminalKind, number> = {
   gate: 0x9fd0ff,
   // §21b.4 — the Cooler is the one POI that is a place rather than a button.
   cooler: PALETTE.voltaic,
+  // LEVELS §6 — Bureau furniture, not services: a desaturated paper-blue that
+  // sits below every service POI in urgency. Stations and files are the two
+  // things on the map that will still be there in a minute.
+  station: 0x7f9cbf,
+  fragment: 0xa8c2de,
 };
 
 /**

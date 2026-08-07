@@ -153,7 +153,6 @@ const arenaSchema: Schema = {
         w: { type: 'number', required: true, min: 1 },
         h: { type: 'number', required: true, min: 1 },
         tint: { type: 'number', min: 0 },
-        field: { type: 'string', oneOf: ['frost', 'ember', 'static'] },
         ventMultiplier: { type: 'number', min: 0 },
         xpMultiplier: { type: 'number', min: 0 },
         poi: { type: 'array', items: { type: 'string' } },
@@ -175,6 +174,26 @@ const arenaSchema: Schema = {
         tint: { type: 'number', min: 0 },
         light: { type: 'number', min: 0 },
         extract: { type: 'boolean' },
+        // LEVELS §6 — stations and fragments authored into the room.
+        pois: {
+          type: 'array',
+          items: {
+            type: 'object',
+            fields: {
+              id: { type: 'string', required: true },
+              kind: { type: 'string', required: true, oneOf: ['station', 'fragment'] },
+              x: { type: 'number', required: true, min: 0 },
+              y: { type: 'number', required: true, min: 0 },
+              doc: { type: 'string', required: true },
+              section: { type: 'number', min: 0 },
+              label: { type: 'string' },
+            },
+          },
+        },
+        // LEVELS §3.2 — per-room overrides for the mass shader's style. Free-
+        // form numbers; the renderer merges them over its defaults and ignores
+        // keys it does not know.
+        shell: { type: 'object' },
         roster: {
           type: 'object',
           required: true,
@@ -210,10 +229,13 @@ const arenaSchema: Schema = {
         y: { type: 'number', required: true, min: 0 },
         radius: { type: 'number', required: true, min: 40 },
         holdSeconds: { type: 'number', required: true, min: 1 },
-        opens: { type: 'string', required: true },
+        // A gate either opens a level (and has the wall that falls with it) or
+        // revives a dead gate — the relay, STORY-AND-TONE §7.2. The code
+        // guards the either/or; the schema allows both shapes.
+        opens: { type: 'string' },
+        revives: { type: 'string' },
         barrier: {
           type: 'object',
-          required: true,
           fields: {
             x: { type: 'number', required: true, min: 0 },
             y: { type: 'number', required: true, min: 0 },
@@ -662,24 +684,42 @@ interface ArenaVariant {
   [field: string]: unknown;
 }
 
+/**
+ * Variants may extend variants — the campaign is a chain (`heap` →
+ * `heap_archive` → `heap_store` → `heap_cell`), each link adding one room and
+ * one door, and restating three rooms to add a fourth is how two copies drift.
+ * Resolution iterates to a fixpoint; a cycle or a missing base still throws.
+ */
 function resolveArenas(raw: readonly ArenaVariant[]): unknown[] {
-  const bases = new Map(raw.filter((a) => !a.extends).map((a) => [a.id, a]));
-  return raw.map((arena) => {
-    if (!arena.extends) return arena;
-    const base = bases.get(arena.extends);
-    if (!base) {
-      throw new ContentError('arenas.json', arena.id, `extends unknown arena "${arena.extends}"`);
+  const resolved = new Map<string, ArenaVariant>(
+    raw.filter((a) => !a.extends).map((a) => [a.id, a]),
+  );
+  let pending = raw.filter((a) => a.extends);
+  while (pending.length > 0) {
+    const ready = pending.filter((a) => resolved.has(a.extends!));
+    if (ready.length === 0) {
+      const a = pending[0]!;
+      throw new ContentError(
+        'arenas.json',
+        a.id,
+        `extends "${a.extends}", which is unknown or part of a cycle`,
+      );
     }
-    const { extends: _base, addLevels = [], addGates = [], addRuins = [], ...own } = arena;
-    return {
-      ...base,
-      ...own,
-      levels: [...((base.levels as unknown[]) ?? []), ...addLevels],
-      gates: [...((base.gates as unknown[]) ?? []), ...addGates],
-      // A new room needs the wall it is behind as much as the door through it.
-      ruins: [...((base.ruins as unknown[]) ?? []), ...addRuins],
-    };
-  });
+    for (const arena of ready) {
+      const base = resolved.get(arena.extends!)!;
+      const { extends: _base, addLevels = [], addGates = [], addRuins = [], ...own } = arena;
+      resolved.set(arena.id, {
+        ...base,
+        ...own,
+        levels: [...((base.levels as unknown[]) ?? []), ...addLevels],
+        gates: [...((base.gates as unknown[]) ?? []), ...addGates],
+        // A new room needs the wall it is behind as much as the door through it.
+        ruins: [...((base.ruins as unknown[]) ?? []), ...addRuins],
+      } as ArenaVariant);
+    }
+    pending = pending.filter((a) => !ready.includes(a));
+  }
+  return raw.map((a) => resolved.get(a.id)!);
 }
 
 export const ARENAS = validateCollection<ArenaDef>(

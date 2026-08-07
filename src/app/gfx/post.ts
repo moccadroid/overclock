@@ -69,28 +69,12 @@ uniform float uState;
 /**
  * §21b.4 — the biome, as a property of the picture.
  *
- * A tint told you the floor was a different colour. This tells you the room is
- * a different room: the Freezer takes the colour out of everything and grows
- * crystal in from the edges, the Foundry burns, the Static breaks up. One
- * integer selects which, one float says how much, and crossing a boundary is
- * that float moving — so a biome edge becomes something you watch happen
- * instead of something you notice afterwards.
- *
- * 0 none - 1 frost - 2 ember - 3 static.
+ * The screen-space "biome field" programs (frost, ember, static) that used to
+ * live here were removed per STORY-AND-TONE §8.1. Authored set-dressing does
+ * not belong on the lens; the descent is drawn on the ruins by the structure
+ * shader, and the one screen-space category still permitted — weather — is its
+ * own small pass, not a branch in this one.
  */
-uniform int uField;
-uniform float uFieldAmount;
-/**
- * §21b.4 — the field's own numbers: (scale, intensity, reach, unused).
- *
- * The kind still picks a branch below, because a Voronoi fracture, rising motes
- * and signal static are three different programs and no amount of uniforms turns
- * one into another. What these buy is every *variant* of those three for free: a
- * second ice room at half the cell size and a green tint is a JSON edit rather
- * than a fourth branch.
- */
-uniform vec4 uFieldParams;
-uniform vec3 uFieldTint;
 
 /**
  * §11.2 — Suppressor fields, as a signal fault rather than a drawn ring.
@@ -363,71 +347,7 @@ void main(void) {
     colour.rgb += (n - 0.5) * uGrain * 0.25;
   }
 
-  // ---- the biome field --------------------------------------------------
-  //
-  // After the lens, before the vignette: this is the room, not the camera, so
-  // it sits under the frame's own artefacts rather than on top of them.
-  if (uField > 0 && uFieldAmount > 0.002) {
-    float k = uFieldAmount;
-    float edge = smoothstep(0.38, 1.10, length(centred) * 1.414);
-
-    if (uField == 1) {
-      // Frost. The colour drains everywhere, and crystal grows in from the
-      // edges of the frame.
-      //
-      // The crystal is a Voronoi *fracture*, not a quantisation. That
-      // distinction is the whole effect: a grid of cells with different
-      // brightnesses is indistinguishable from compression artefacts, whereas
-      // the bright seams where two cells meet read immediately as something
-      // that grew and cracked. Same cost, entirely different thing.
-      float lum = dot(colour.rgb, vec3(0.299, 0.587, 0.114));
-      colour.rgb = mix(colour.rgb, vec3(lum * 0.78, lum * 0.92, lum * 1.06), k * 0.55);
-
-      float growth = edge * k;
-      // Skipped over the middle of the screen, which is both free — the branch
-      // is coherent across a large region — and the reason the fight stays
-      // legible (§16.2): the frame ices over, the arena in front of you does
-      // not.
-      if (growth > 0.02) {
-        vec2 fu = spx / uFieldParams.x;
-        vec2 fi = floor(fu);
-        vec2 ff = fract(fu);
-        float d1 = 8.0;
-        float d2 = 8.0;
-        for (int y = -1; y <= 1; y++) {
-          for (int x = -1; x <= 1; x++) {
-            vec2 g = vec2(float(x), float(y));
-            vec2 seed = fi + g;
-            vec2 o = vec2(hash(seed), hash(seed + 11.7));
-            float dd = length(g + o - ff);
-            if (dd < d1) { d2 = d1; d1 = dd; }
-            else if (dd < d2) { d2 = dd; }
-          }
-        }
-        // The seam between two cells, and a faint body inside each facet.
-        float fracture = 1.0 - smoothstep(0.0, 0.10, d2 - d1);
-        colour.rgb += uFieldTint * fracture * growth * uFieldParams.y;
-        colour.rgb += vec3(0.10, 0.16, 0.26) * growth * (1.0 - d1) * 0.5;
-        // A slow glint on the vertices, so it reads as live cold rather than
-        // as a blue filter.
-        float glint = step(0.992, hash(fi + floor(uTime * 2.0)));
-        colour.rgb += vec3(0.7, 0.85, 1.0) * glint * fracture * growth;
-      }
-    } else if (uField == 2) {
-      // Ember. Warm bias, and motes rising out of the floor.
-      colour.rgb *= vec3(1.0 + k * 0.16, 1.0, 1.0 - k * 0.12);
-      vec2 mote = spx / uFieldParams.x + vec2(0.0, uTime * 0.9);
-      float spark = step(0.995, hash(floor(mote)));
-      colour.rgb += uFieldTint * spark * k * uFieldParams.y;
-      colour.rgb += vec3(0.35, 0.12, 0.0) * edge * k * 0.5;
-    } else if (uField == 3) {
-      // Static. The signal is bad everywhere, mildly, all the time.
-      float band = floor(spx.y / 5.0);
-      float slip = (hash(vec2(band, floor(uTime * 9.0))) - 0.5) * k * 0.35;
-      colour.rgb += vec3(slip, -slip * 0.6, slip * 0.4) * 0.5;
-      colour.rgb *= 1.0 - step(0.7, fract(spx.y * 0.5)) * k * 0.18;
-    }
-  }
+  // The biome-field programs that lived here are gone — STORY-AND-TONE §8.1.
 
   if (uVignette > 0.0) {
     float d = length(centred) * 1.414;
@@ -504,10 +424,6 @@ export class PostPass {
           uHaze: { value: 0, type: 'f32' },
           uTime: { value: 0, type: 'f32' },
           uState: { value: 0, type: 'f32' },
-          uField: { value: 0, type: 'i32' },
-          uFieldAmount: { value: 0, type: 'f32' },
-          uFieldParams: { value: new Float32Array([52, 0.85, 1, 0]), type: 'vec4<f32>' },
-          uFieldTint: { value: new Float32Array([0.42, 0.6, 0.86]), type: 'vec3<f32>' },
           uScreen: { value: new Float32Array([1, 1]), type: 'vec2<f32>' },
           uGlitchCount: { value: 0, type: 'i32' },
           uGlitch: { value: new Float32Array(MAX_GLITCH * 4), type: 'vec4<f32>', size: MAX_GLITCH },
@@ -553,25 +469,6 @@ export class PostPass {
   /** How much of the state field to apply. Zero skips the sample entirely. */
   setState(amount: number): void {
     (this.filter.resources.postUniforms.uniforms as Record<string, number>).uState = amount;
-  }
-
-  /** §21b.4 — which biome field is running, and how far in the player is. */
-  setField(
-    kind: number,
-    amount: number,
-    look: { scale: number; intensity: number; reach: number; tint: readonly [number, number, number] },
-  ): void {
-    const u = this.filter.resources.postUniforms.uniforms as Record<string, unknown>;
-    u.uField = kind;
-    u.uFieldAmount = amount;
-    const params = u.uFieldParams as Float32Array;
-    params[0] = look.scale;
-    params[1] = look.intensity;
-    params[2] = look.reach;
-    const tint = u.uFieldTint as Float32Array;
-    tint[0] = look.tint[0];
-    tint[1] = look.tint[1];
-    tint[2] = look.tint[2];
   }
 
   /** True when every effect is off — the pass can then be skipped entirely. */

@@ -262,6 +262,30 @@ export const SHELL = {
   /** The lit top-left hairline. Near zero on purpose. */
   edge: 0.3,
   /**
+   * STORY-AND-TONE §8.3 — the sheen, on the **floor**, in absolute colour units
+   * over a ground that sits around 0.02–0.07.
+   *
+   * On the floor rather than on the mass, and that was learned on screen. A film
+   * painted over the block bodies is a stain on a hard-edged shape however it is
+   * tuned — the blocks are flat value with sharp borders and they want to stay
+   * that way. Down here it shimmers up through every seam and around every
+   * silhouette instead, and the mass is untouched.
+   *
+   * Zero here on purpose: the Heap is the only room that gets to be normal, so
+   * the default ground is dry. Rooms opt in through `LevelDef.shell`.
+   */
+  oil: 0,
+  /**
+   * STORY-AND-TONE §8.3 — how far block edges fray, as a fraction of a block's
+   * own size.
+   *
+   * The mass's share of the descent, and the only thing that touches it: the
+   * silhouettes crumble in blocky steps that re-roll on the beat. Zero is a
+   * clean edge; around 0.1 is "no longer perfectly sharp"; past about 0.3 the
+   * slabs stop reading as slabs, which is what the Cell is for.
+   */
+  fray: 0,
+  /**
    * Hard drop shadow: strength, and offset as a fraction of block size.
    *
    * The three layers each cast one, and the shader takes the deepest rather

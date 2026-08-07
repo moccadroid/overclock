@@ -8,6 +8,7 @@
  */
 import { TUNABLE } from '../sim/tunables';
 import { BRANDING } from '../branding';
+import { C, blank, head, wrap, type Line } from './ui';
 
 interface Section {
   title: string;
@@ -96,6 +97,40 @@ const SECTIONS: Section[] = [
     ],
   },
 ];
+
+/**
+ * The primer as sheet lines, for the in-run reference (H). The title screen's
+ * codex tab still renders the HTML form below; same SECTIONS, two dialects,
+ * one source of copy.
+ */
+export function primerLines(width = 60): Line[] {
+  const out: Line[] = [];
+  for (const s of SECTIONS) {
+    if (out.length) out.push(blank());
+    out.push(head(s.title));
+    for (const para of s.body.split('\n\n')) {
+      out.push(blank());
+      // The emphasis asterisks are markup for the HTML dialect; a sheet is
+      // already monospace and they would read as typos.
+      for (const line of wrap(para.replace(/\*/g, ''), width - 1)) {
+        out.push([[` ${line}`, C.ink]]);
+      }
+    }
+    if (s.rows) {
+      out.push(blank());
+      for (const [k, v] of s.rows) {
+        const lines = wrap(v, width - 12);
+        out.push([[` ${k.padEnd(10)}`, C.bright], [lines[0] ?? '', C.ink]]);
+        for (const rest of lines.slice(1)) out.push([[`${' '.repeat(11)}${rest}`, C.ink]]);
+      }
+    }
+  }
+  out.push(
+    blank(),
+    [[`capacity starts at ${TUNABLE.cycleCapacityBase} Cycles/sec`, C.faint]],
+  );
+  return out;
+}
 
 export function renderPrimer(chrome = true): string {
   const sections = SECTIONS.map((s) => {

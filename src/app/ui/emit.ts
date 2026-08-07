@@ -91,3 +91,26 @@ export function row(cells: readonly [string, number][], widths: readonly number[
     return [text.length >= w ? `${text.slice(0, w - 1)} ` : text.padEnd(w), colour] as Seg;
   });
 }
+
+/**
+ * Prose, wrapped to the column grid.
+ *
+ * Word-by-word and greedy, which is all a monospace sheet ever needs. Lives
+ * here rather than beside any one consumer because a paragraph wrapped two
+ * different ways on two sheets reads as two different documents.
+ */
+export function wrap(text: string, width: number): string[] {
+  const out: string[] = [];
+  let line = '';
+  for (const word of text.split(/\s+/)) {
+    if (!word) continue;
+    if (line && line.length + 1 + word.length > width) {
+      out.push(line);
+      line = word;
+    } else {
+      line = line ? `${line} ${word}` : word;
+    }
+  }
+  if (line) out.push(line);
+  return out;
+}

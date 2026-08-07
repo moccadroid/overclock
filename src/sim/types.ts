@@ -268,14 +268,6 @@ export interface BiomeDef {
   h: number;
   /** Background tint while inside. The cheapest "where am I" there is. */
   tint?: number;
-  /**
-   * §21b.4 — the screen-space field this biome runs, if any.
-   *
-   * A tint says the floor is a different colour; a field says the room is a
-   * different room. Adding one is a JSON edit plus a branch in the post shader,
-   * which is the whole reason it is a name rather than a pile of numbers.
-   */
-  field?: BiomeField;
   /** The one rule. Multiplies base Heat venting while the player is inside. */
   ventMultiplier?: number;
   /** Multiplies XP from shards collected inside. */
@@ -283,35 +275,6 @@ export interface BiomeDef {
   /** POIs this biome guarantees, placed inside it when it opens. */
   poi?: readonly string[];
   description: string;
-}
-
-/**
- * §21b.4 — a screen-space field, as a kind plus its numbers.
- *
- * The kind still resolves to a branch in the post shader and always will: a
- * Voronoi fracture, rising motes and signal static are three genuinely different
- * programs, and a data language expressive enough to describe all three would be
- * a worse language than GLSL. Pretending otherwise is how you get an uber-shader
- * nobody can read.
- *
- * What *was* wrong is that every number inside those programs was a literal — the
- * frost cell size, the ember mote density, the tint each one pushes — so the only
- * biome that could ever look like frost was the one called frost. Now the shape
- * is code and the palette is data, which is the same split the hazards took: a
- * second ice room at half the cell size and a green tint is a JSON edit.
- */
-export interface BiomeField {
-  kind: 'frost' | 'ember' | 'static';
-  /** 0..1 overall strength, before the biome's own fade-in. */
-  amount?: number;
-  /** Feature size in screen pixels — frost cells, ember spacing, static bands. */
-  scale?: number;
-  /** How hard the field's own marks are drawn over the picture. */
-  intensity?: number;
-  /** How much of the screen it reaches, 0 edges-only to 1 everywhere. */
-  reach?: number;
-  /** The colour it pushes, as 0..1 RGB. */
-  tint?: readonly [number, number, number];
 }
 
 /**
@@ -331,10 +294,38 @@ export interface GateDef {
   radius: number;
   /** Seconds of standing, and how fast it drains when you step out. */
   holdSeconds: number;
-  /** The biome this opens. */
-  opens: string;
+  /** The level this opens. Absent on a relay, which opens nothing. */
+  opens?: string;
+  /**
+   * STORY-AND-TONE §7.2 — the relay: completing this gate restores a dead one
+   * instead of opening a room. Her one physical act in the game, and it is
+   * still a door, and she still cannot hold it herself.
+   */
+  revives?: string;
   /** The wall that falls with it. A ruin, so collision and pathing are free. */
-  barrier: RuinRect;
+  barrier?: RuinRect;
+}
+
+/**
+ * LEVELS §6 — an authored point of interest: a thing placed *here*, by hand.
+ *
+ * The scheduler's POIs are placed in a ring around the player because they are
+ * services; these are places. A station opens a Bureau sheet in-run; a fragment
+ * recovers one section of a document onto the terminal. Both are one-shot: a
+ * run is configured with the ids already read or recovered, and those are
+ * simply never placed again.
+ */
+export interface PoiSpot {
+  id: string;
+  kind: 'station' | 'fragment';
+  x: number;
+  y: number;
+  /** The beat this opens (station), or the document it recovers (fragment). */
+  doc: string;
+  /** Which section of the document a fragment recovers. Defaults to 0. */
+  section?: number;
+  /** What the label says from across the room. Defaults to the kind. */
+  label?: string;
 }
 
 /**
@@ -366,6 +357,15 @@ export interface LevelDef {
   light?: number;
   /** §12.4 — the Extract terminal lives in exactly one level. */
   extract?: boolean;
+  /** LEVELS §6 — stations and fragments authored into this room. */
+  pois?: readonly PoiSpot[];
+  /**
+   * LEVELS §3.2 — numeric overrides for the mass shader's style while the
+   * player is in this room. Keys are `ShellStyle` fields (visual.ts); kept as a
+   * plain record here because the sim never reads it — it rides through to the
+   * renderer, and the sim depending on a rendering type would be backwards.
+   */
+  shell?: Readonly<Record<string, number>>;
   roster: RosterDef;
   description: string;
 }

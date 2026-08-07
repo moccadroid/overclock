@@ -8,13 +8,12 @@
 import './ui.css';
 import { Renderer } from './renderer';
 import { Hud } from './hud';
-import {
-  CeremonyOverlay,
-  DraftOverlay,
-  EditorOverlay,
-  MessageOverlay,
-  RecompileOverlay,
-} from './overlays';
+import { RecompileOverlay } from './overlays';
+import { DraftSheet } from './shell/draftsheet';
+import { PauseSheet } from './shell/pausesheet';
+import { PipeSheet } from './shell/pipesheet';
+import { CeremonySheet } from './shell/ceremonysheet';
+import { primerLines } from './primer';
 import { Input } from './input';
 import { NO_INPUT, World, type RunConfig } from '../sim/world';
 import { Recorder, type Command, type Recording } from '../sim/record';
@@ -30,11 +29,24 @@ import { VISUAL } from './visual';
 import type { Library } from '../meta/profile';
 import { Stinger } from './stinger';
 import { EpisodeReport } from './shell/report';
+import { DocumentSheet } from './shell/document';
 import type { StoryStore } from '../story/store';
+import { BEAT_BY_ID, sectionBlocks } from '../story/script';
 import type { Audio } from '../audio/audio';
 import { derivePart } from '../audio/parts';
 import type { EngineRow } from '../audio/arrange';
 import { ACTION_BY_ID } from '../content/index';
+
+/**
+ * Rendering is capped at 60fps. rAF fires at display rate — 144Hz and up on a
+ * fast monitor — and this is a browser game with nothing to say at 144 that it
+ * cannot say at 60. The sim is untouched by the cap: it advances in whole
+ * SIM_DT steps off wall-clock time either way, and the beat grid lives on the
+ * audio clock. On high-refresh displays the cap can only land on refresh
+ * boundaries, so frames pace as alternating 2- and 3-refresh gaps that average
+ * to 60 — inherent to any rAF gate, and invisible next to what it saves.
+ */
+const RENDER_INTERVAL_MS = 1000 / 60;
 
 type Mode =
   | 'running'
@@ -44,25 +56,39 @@ type Mode =
   | 'dead'
   | 'ceremony'
   | 'recompile'
-  | 'primer';
+  | 'primer'
+  /** LEVELS §6 — a station's Bureau sheet is open. Time frozen, like a draft. */
+  | 'station';
 
 export class Game {
   private world: World;
   private readonly renderer = new Renderer();
   private readonly input = new Input();
   private hud!: Hud;
-  private draft!: DraftOverlay;
-  private editor!: EditorOverlay;
-  private message!: MessageOverlay;
-  private ceremony!: CeremonyOverlay;
+  private draft!: DraftSheet;
+  private editor!: PipeSheet;
+  private pauseSheet!: PauseSheet;
+  private ceremony!: CeremonySheet;
   private recompileChoice!: RecompileOverlay;
   private stinger!: Stinger;
   /** §14 — the end-of-episode report, on a Sheet like every other document. */
   private report!: EpisodeReport;
+  /** LEVELS §6 — stations and recovered files, on the same stationery. */
+  private document!: DocumentSheet;
 
   private mode: Mode = 'running';
   private accumulator = 0;
   private lastFrame = 0;
+  /** Next rAF timestamp allowed to render — the 60fps gate. See RENDER_INTERVAL_MS. */
+  private nextRender = 0;
+  /**
+   * CPU milliseconds the previous frame callback actually cost, top of `step()`
+   * through the end. Under the cap the frame *interval* pins at ~16.7ms no
+   * matter how hard the machine works, so busy time is the number headroom is
+   * read from — one frame late, because a frame cannot know its own cost while
+   * it is still inside it.
+   */
+  private busyMs = 0;
   private uiTimer = 0;
   /** §17.2 — hitstop, and the per-second budget that keeps it a stutter, not a freeze. */
   private hitstop = 0;
@@ -71,6 +97,8 @@ export class Game {
   private lastKills = 0;
   /** ESC out of a draft returns to that same draft, not to the fight. */
   private pausedFromDraft = false;
+  /** LEVELS §6 — the open sheet: station beats are marked read on close. */
+  private openSheet: { doc: string; station?: boolean } | null = null;
   /** Quitting a run is two clicks — a misclick throws away twenty minutes. */
   private confirmQuit = false;
   private muted = false;
@@ -172,14 +200,16 @@ export class Game {
     mount.appendChild(ui);
 
     this.hud = new Hud(ui);
-    this.draft = new DraftOverlay(ui);
-    this.editor = new EditorOverlay(ui);
-    this.message = new MessageOverlay(ui, 'results');
-    this.ceremony = new CeremonyOverlay(ui);
     this.recompileChoice = new RecompileOverlay(ui);
     this.stinger = new Stinger(ui);
+    // Everything that reads as a filed document lives on the Sheet framework,
+    // drawn into the run's own renderer (one WebGL context, like the report).
+    this.editor = new PipeSheet(this.renderer.app.stage);
+    this.draft = new DraftSheet(this.renderer.app.stage);
+    this.pauseSheet = new PauseSheet(this.renderer.app.stage);
+    this.ceremony = new CeremonySheet(this.renderer.app.stage);
     this.report = new EpisodeReport(this.renderer.app.stage);
-    this.editor.attach(this.library, (cmd) => this.onCommand(cmd));
+    this.document = new DocumentSheet(this.renderer.app.stage);
     // §14 — the two places a run changes by hand rather than by time passing.
     // Both feed the recorder and the corpus; the recorder needs the index, the
     // corpus needs what was on the table beside it.
@@ -248,7 +278,16 @@ export class Game {
       // place, and inventing one to save a page load would be a lot of surface
       // area for a guarantee the browser already gives us for free. The Library
       // is in storage, so nothing is lost across it.
-      if (cmd === 'confirm') {
+      //
+      // LEVELS §2.3 — in the campaign, every exit is CONTINUE: back to the
+      // terminal, landing on the operations order, one keystroke from BEGIN
+      // RUN. The story fires at that commitment; a path that skips the
+      // terminal (AGAIN's `start=1`) skips whatever it queued. Enter means
+      // CONTINUE too — the primary action is the primary key.
+      const storyMode = !!this.story;
+      if (cmd === 'continue' || (storyMode && cmd === 'confirm')) {
+        location.href = `${location.pathname}?open=run`;
+      } else if (cmd === 'confirm') {
         const url = new URL(location.href);
         url.searchParams.set('seed', `run-${Math.floor(Math.random() * 1e9).toString(36)}`);
         // RUN AGAIN means again, not "back to the menu" — this is the one path
@@ -261,11 +300,32 @@ export class Game {
       return;
     }
 
+    if (this.mode === 'station') {
+      if (cmd === 'confirm' || cmd === 'pause' || cmd === 'close' || cmd === 'help') {
+        this.dismissDocument();
+      }
+      return;
+    }
+
     if (cmd === 'mute') {
       this.muted = !this.muted;
       this.audio.setMuted(this.muted);
       this.library.setAudio({ muted: this.muted });
       this.hud.flash(this.muted ? 'AUDIO MUTED  [M]' : 'AUDIO ON  [M]');
+      return;
+    }
+
+    // The held shift. RESUME (or Enter, or a second ESC — handled below)
+    // resumes; TAB steps sideways into the pipeline; quit falls through to the
+    // global two-press handler.
+    if (this.mode === 'paused' && cmd !== 'pause' && cmd !== 'quit' && cmd !== 'help') {
+      if (cmd === 'close' || cmd === 'confirm') {
+        this.resumeFromPause();
+      } else if (cmd === 'editor') {
+        this.pauseSheet.close();
+        this.openConsole('pipeline');
+        this.input.clear();
+      }
       return;
     }
 
@@ -283,18 +343,25 @@ export class Game {
         this.input.clear();
         return;
       }
-      let open = false;
-      if (cmd === 'close') {
-        this.editor.close();
-      } else {
-        open = this.editor.toggle(this.world, 'pipeline');
+      // TAB while a node is held puts it down rather than closing the sheet:
+      // the pick-place interaction owns the key while something is in hand.
+      if (this.mode === 'editor' && cmd === 'editor' && this.editor.clearHeld()) {
+        this.audio.chrome('click');
+        this.input.clear();
+        return;
       }
-      this.audio.chrome('click');
-      this.mode = open ? 'editor' : 'running';
-      this.confirmQuit = false;
-      if (!open && this.pausedFromDraft) {
-        this.pausedFromDraft = false;
-        this.openDraft();
+      const open = this.mode !== 'editor' && cmd !== 'close';
+      if (open) this.openConsole('pipeline');
+      else {
+        this.editor.close();
+        this.audio.chrome('click');
+        this.confirmQuit = false;
+        if (this.pausedFromDraft) {
+          this.pausedFromDraft = false;
+          this.openDraft();
+        } else {
+          this.mode = 'running';
+        }
       }
       this.input.clear();
       return;
@@ -302,11 +369,9 @@ export class Game {
 
     if (cmd === 'help') {
       if (this.mode === 'primer') {
-        this.message.hide();
-        this.mode = 'running';
+        this.closePrimer();
       } else if (this.mode === 'running' || this.mode === 'paused') {
-        this.message.showPrimer();
-        this.mode = 'primer';
+        this.openPrimer();
       }
       this.input.clear();
       return;
@@ -332,6 +397,7 @@ export class Game {
       this.confirmQuit = true;
       this.audio.chrome('click');
       this.editor.setQuitConfirm(true);
+      this.pauseSheet.setQuitConfirm(true);
       return;
     }
 
@@ -341,27 +407,22 @@ export class Game {
       // silently rerolled it, which made escaping any offer you disliked the
       // strongest play in the game.
       if (this.mode === 'primer') {
-        this.message.hide();
-        this.mode = 'running';
-        this.audio.chrome('click');
+        this.closePrimer();
       } else if (this.mode === 'draft') {
         // The offer is kept, so resuming returns to the same three cards.
         this.draft.defer();
         this.pausedFromDraft = true;
-        this.openConsole('run');
+        this.openPause();
       } else if (this.mode === 'editor') {
-        // ESC out of the pipeline shows the run rather than dumping you back
-        // into the fight; a second ESC closes.
-        const open = this.editor.toggle(this.world, 'run');
+        // ESC out of the pipeline shows the shift status rather than dumping
+        // you back into the fight; a second ESC resumes.
+        this.editor.close();
         this.audio.chrome('click');
-        this.mode = open ? 'editor' : 'running';
-        this.confirmQuit = false;
-        if (!open && this.pausedFromDraft) {
-          this.pausedFromDraft = false;
-          this.openDraft();
-        }
+        this.openPause();
+      } else if (this.mode === 'paused') {
+        this.resumeFromPause();
       } else {
-        this.openConsole('run');
+        this.openPause();
       }
       this.input.clear();
       return;
@@ -381,10 +442,68 @@ export class Game {
     }
   }
 
-  private openConsole(pane: 'pipeline' | 'run'): void {
-    this.editor.toggle(this.world, pane);
+  /**
+   * File the open document. A station is marked read — read once is read
+   * forever, so it is gone next run and the nag never repeats (LEVELS §2.1).
+   * A fragment needs no marking: the recovery already rode out in
+   * `stats.recovered`.
+   */
+  private dismissDocument(): void {
+    if (this.mode !== 'station') return;
+    this.document.close();
+    if (this.openSheet?.station) this.story?.stationRead(this.openSheet.doc);
+    this.openSheet = null;
+    this.mode = 'running';
+    this.audio.chrome('click');
+    this.input.clear();
+  }
+
+  /** TAB — the Engine, editable. §19.6's page is its own sheet now. */
+  private openConsole(_pane: 'pipeline' | 'run' = 'pipeline'): void {
+    this.editor.show(this.world, (cmd) => this.onCommand(cmd));
     this.mode = 'editor';
     this.audio.chrome('click');
+  }
+
+  /** ESC — the shift held, on paper. */
+  private openPause(): void {
+    this.confirmQuit = false;
+    this.pauseSheet.show(this.world, this.library, (cmd) => this.onCommand(cmd));
+    this.mode = 'paused';
+    this.audio.chrome('click');
+  }
+
+  private resumeFromPause(): void {
+    this.pauseSheet.close();
+    this.confirmQuit = false;
+    this.audio.chrome('click');
+    if (this.pausedFromDraft) {
+      this.pausedFromDraft = false;
+      this.openDraft();
+    } else {
+      this.mode = 'running';
+    }
+    this.input.clear();
+  }
+
+  /** H — the reference, on the same stationery as everything else. */
+  private openPrimer(): void {
+    if (this.mode === 'paused') this.pauseSheet.close();
+    this.document.showLines(
+      { head: 'OPERATOR REFERENCE', ref: 'OC-0001-H' },
+      primerLines(),
+      () => this.closePrimer(),
+      'RESUME  [H]',
+    );
+    this.mode = 'primer';
+    this.audio.chrome('click');
+  }
+
+  private closePrimer(): void {
+    this.document.close();
+    this.mode = 'running';
+    this.audio.chrome('click');
+    this.input.clear();
   }
 
   private openDraft(): void {
@@ -472,6 +591,18 @@ export class Game {
    * shrug — it is a reproduction, replayable at a breakpoint.
    */
   private frame(now: number): void {
+    if (now < this.nextRender) {
+      requestAnimationFrame((t) => this.frame(t));
+      return;
+    }
+    // Advance by one interval so the fractional overshoot carries — snapping to
+    // `now` instead would quantize to whole refreshes and pin a 144Hz display
+    // at 48fps. Resync when more than an interval behind (a long frame, a
+    // sleeping tab): a cap that owes frames is not a cap.
+    this.nextRender =
+      now - this.nextRender < RENDER_INTERVAL_MS
+        ? this.nextRender + RENDER_INTERVAL_MS
+        : now + RENDER_INTERVAL_MS;
     try {
       this.step(now);
     } catch (err) {
@@ -491,6 +622,7 @@ export class Game {
   }
 
   private step(now: number): void {
+    const busyStart = performance.now();
     const elapsed = Math.min(0.25, (now - this.lastFrame) / 1000);
     this.lastFrame = now;
 
@@ -590,6 +722,33 @@ export class Game {
           });
           break;
         }
+        // LEVELS §6 — a channelled station or recovered fragment opens its
+        // document, time frozen. Before the draft check: reading what you
+        // walked to beats resolving a queue. On the Sheet, like every other
+        // Bureau paper — the shape of the page is the voice (§13.5).
+        if (this.world.pendingSheet) {
+          const sheet = this.world.pendingSheet;
+          this.world.pendingSheet = null;
+          const beat = BEAT_BY_ID.get(sheet.doc);
+          if (beat) {
+            this.openSheet = sheet;
+            this.mode = 'station';
+            this.audio.chrome('click');
+            this.document.show(
+              sheet.station
+                ? { beat, hint: 'RESUME  [ESC]' }
+                : {
+                    beat,
+                    blocks: sectionBlocks(beat, sheet.section ?? 0),
+                    note: 'RECOVERED — FILED TO TERMINAL.',
+                    hint: 'RESUME  [ESC]',
+                  },
+              () => this.dismissDocument(),
+            );
+            this.input.clear();
+            break;
+          }
+        }
         if (this.world.pendingDrafts > 0) {
           this.openDraft();
           break;
@@ -631,7 +790,7 @@ export class Game {
     const gpuMs = this.renderer.gpu?.lastMs ?? 0;
     const freshGpu = gpuMs !== this.lastGpuMs ? gpuMs : 0;
     this.lastGpuMs = gpuMs;
-    this.telemetry.frame(elapsed * 1000, freshGpu);
+    this.telemetry.frame(elapsed * 1000, freshGpu, this.busyMs);
 
     // §18.2 read backwards: the picture is told where the beat is. Read every
     // frame from the audio clock rather than accumulated here, because the audio
@@ -656,13 +815,14 @@ export class Game {
     this.stinger.update(elapsed);
 
     // The HUD is text-heavy; 20Hz is plenty and keeps DOM work off the frame.
-    this.hud.sample(elapsed, this.renderer.gpu.lastMs);
+    this.hud.sample(elapsed, this.renderer.gpu.lastMs, this.busyMs);
     this.uiTimer += elapsed;
     if (this.uiTimer > 0.05) {
       this.uiTimer = 0;
       this.hud.update(this.world);
     }
 
+    this.busyMs = performance.now() - busyStart;
     requestAnimationFrame((t) => this.frame(t));
   }
 
@@ -829,6 +989,8 @@ export class Game {
     this.editor.close();
     this.draft.setOpen(false);
     this.ceremony.setOpen(false);
+    this.pauseSheet.close();
+    this.document.close();
 
     // Anything earned on the killing tick still counts — bank it before the run
     // is read, or the Results screen reports a Discovery the Library never got.
@@ -859,10 +1021,13 @@ export class Game {
       levelsOpened: [...this.world.openBiomes],
       ending: this.world.ending,
       peakEps: this.world.stats.peakEps,
+      // LEVELS §6 — what the fragments brought back. The arc folds these into
+      // `story.held`; the sim never learns the documents meant anything.
+      recovered: this.world.stats.recovered,
     });
 
     // §14 — on the site's own stationery, not a DOM panel. See `report.ts`.
-    this.report.show(this.world, this.library, (cmd) => this.onCommand(cmd));
+    this.report.show(this.world, this.library, (cmd) => this.onCommand(cmd), !!this.story);
   }
 
   /**

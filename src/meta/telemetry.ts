@@ -172,6 +172,18 @@ export interface TelemetryDoc {
     gpuWorstMs: number;
     gpuMeanMs: number;
     gpuSamples: number;
+    /**
+     * CPU milliseconds the frame callback cost — sim ticks, scene update, draw
+     * submission, HUD. Rendering is capped at 60fps, which pins the frame
+     * *interval* at ~16.7ms no matter how hard the machine is working; the
+     * histogram above stopped describing throughput the day the cap landed and
+     * now only catches missed frames. Busy time is what headroom is read from:
+     * a machine at cpu 3ms / gpu 2ms has a ~5× ceiling over the cap. An
+     * approximation — the compositor is invisible from here — and biased
+     * conservative, since an uncapped frame would carry fewer sim ticks.
+     */
+    cpuWorstMs: number;
+    cpuMeanMs: number;
     /** §20.1 — which visual effects were on, so a preset can be judged by it. */
     fx: string[];
   };
@@ -280,6 +292,9 @@ export class RunTelemetry {
   private gpuWorstMs = 0;
   private gpuTotalMs = 0;
   private gpuSamples = 0;
+  private cpuWorstMs = 0;
+  private cpuTotalMs = 0;
+  private cpuSamples = 0;
 
   constructor(
     private readonly seed: string,
@@ -321,7 +336,7 @@ export class RunTelemetry {
    * how long it took to *queue* the work and once reported a twelve-fold speedup
    * while sending a real player's GPU into overdrive.
    */
-  frame(ms: number, gpuMs = 0): void {
+  frame(ms: number, gpuMs = 0, cpuBusyMs = 0): void {
     this.frames++;
     if (ms > this.worstMs) this.worstMs = ms;
     let i = 0;
@@ -331,6 +346,13 @@ export class RunTelemetry {
       this.gpuSamples++;
       this.gpuTotalMs += gpuMs;
       if (gpuMs > this.gpuWorstMs) this.gpuWorstMs = gpuMs;
+    }
+    // `cpuBusyMs` arrives one frame late — a frame cannot know its own cost
+    // while it is still inside it — so the first frame legitimately sends 0.
+    if (cpuBusyMs > 0) {
+      this.cpuSamples++;
+      this.cpuTotalMs += cpuBusyMs;
+      if (cpuBusyMs > this.cpuWorstMs) this.cpuWorstMs = cpuBusyMs;
     }
   }
 
@@ -486,6 +508,9 @@ export class RunTelemetry {
         gpuMeanMs:
           this.gpuSamples > 0 ? Math.round((this.gpuTotalMs / this.gpuSamples) * 100) / 100 : 0,
         gpuSamples: this.gpuSamples,
+        cpuWorstMs: Math.round(this.cpuWorstMs * 100) / 100,
+        cpuMeanMs:
+          this.cpuSamples > 0 ? Math.round((this.cpuTotalMs / this.cpuSamples) * 100) / 100 : 0,
         fx: [...this.meta.fx],
       },
       truncated: this.truncated,

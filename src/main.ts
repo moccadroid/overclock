@@ -84,13 +84,16 @@ void loadTelemetryConfig().then(() => flushOutbox());
  *
  *   ?story=wipe          back to shift one, keeping nothing
  *   ?story=cycle         §12 — RESET: keeps the scars, increments the revision
- *   ?story=<rule id>     force every rule up to and including that one
+ *   ?story=<checkpoint>  land at a named position, holds and all — the proper
+ *                        shortcut. Names: fresh, contact, found, archive,
+ *                        acquired (see CHECKPOINTS in story/arc.ts)
+ *   ?story=<rule id>     force every rule's effect up to and including that one
  */
 const storyParam = params.get('story');
 if (storyParam) {
   if (storyParam === 'wipe') story.wipe();
   else if (storyParam === 'cycle') story.cycle();
-  else story.forceTo(storyParam);
+  else if (!story.jumpTo(storyParam)) story.forceTo(storyParam);
 
   // And out of the URL immediately.
   //
@@ -124,6 +127,9 @@ if (import.meta.env.DEV) {
   (window as unknown as { __oc: Record<string, unknown> }).__oc = {
     library,
     audio,
+    // The arc, pokeable: `__oc.story.forceTo('R2')`, `__oc.story.wipe()`,
+    // `__oc.story.set({ chapter: 'III' })`. Same functions `?story=` drives.
+    story,
     runs: loadRuns,
     /**
      * Replay and analyse a recording *in the browser it was recorded in*.
@@ -203,11 +209,17 @@ const autoStart =
   library.availableAxioms.includes(linkedAxiom);
 
 async function boot(): Promise<void> {
+  // LEVELS §2.3 — `?open=run` lands the menu on the operations order, one
+  // keystroke from BEGIN RUN. The results screen's CONTINUE uses it: back to
+  // the terminal, nudged straight at the next shift. Stripped from the URL
+  // below with `start`, so a copied link opens the menu normally.
+  const openRun = params.get('open') === 'run';
   const setup = autoStart
     ? { seed: linkedSeed!, axiomId: linkedAxiom! }
     : await new TitleScreen(menuUi, library, audio, story).present({
         ...(linkedSeed ? { seed: linkedSeed } : {}),
         ...(linkedAxiom ? { axiomId: linkedAxiom } : {}),
+        ...(openRun ? { open: 'run' as const } : {}),
       });
 
   document.title = `${BRANDING.title} — ${setup.axiomId} — ${setup.seed}`;
@@ -218,11 +230,18 @@ async function boot(): Promise<void> {
   url.searchParams.set('seed', setup.seed);
   url.searchParams.set('axiom', setup.axiomId);
   url.searchParams.delete('start');
+  url.searchParams.delete('open');
   history.replaceState(null, '', url);
 
-  // §6.2 — the story's whole influence on a run: which arena it is built from.
-  // Without a story this is the identity function and the run is what it was.
-  story.advance('run-start', { runsCompleted: library.snapshot.runs, levelsOpened: [] });
+  // §6.2 — the story's run-start pass. The title screen already ran it at
+  // BEGIN RUN (and held the run for whatever it queued), so advancing here too
+  // was a second pass per commitment — a rule whose condition came true while
+  // the first pass's message was being read fired one commitment early, and a
+  // veteran account was greeted and contacted on the same press. Only the
+  // path that skips the title needs it.
+  if (autoStart) {
+    story.advance('run-start', { runsCompleted: library.snapshot.runs, levelsOpened: [] });
+  }
   const game = new Game(
     configure(story.state, {
       seed: setup.seed,
