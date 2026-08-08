@@ -120,7 +120,8 @@ function drawGlyph(g: Graphics, kind: Glyph, x: number, y: number): void {
   }
 }
 
-/** Window ids. Stable, because the saved layout is keyed on them. */
+/** Window ids. Stable, so a saved layout could key on them — see PARTIAL.md;
+ *  the layout is not persisted yet, and this comment used to claim it was. */
 const W_FILES = 'files';
 const W_SHIFT = 'shift';
 const W_CONFIG = 'config';
