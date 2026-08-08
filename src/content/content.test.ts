@@ -16,11 +16,11 @@ import { World } from '../sim/world';
 import { rollDraft, STAT_CARDS, STAT_KINDS } from '../sim/draft';
 import { AFFIX_IDS, AFFIX_TRAITS, TRAIT_RUNNERS, deriveTraits } from '../sim/traits';
 import { HAZARDS, HAZARD_KINDS } from '../sim/hazards';
-import { HAZARD_DRAW } from '../app/renderer';
+import { HAZARD_DRAW, decompositionDials } from '../app/renderer';
 import { SHAPE_NAMES, shapeOutline } from '../app/gfx/shapes';
 import { ACTION_PRIMITIVES } from '../sim/world';
 import { PRIMITIVE_FIELDS } from '../sim/engine';
-import { ARENA_BY_ID } from './index';
+import { ARENAS } from './index';
 import { SHELL } from '../app/visual';
 import { CHECKPOINTS, configure } from '../story/arc';
 
@@ -388,85 +388,116 @@ describe('every vocabulary has an implementation (GDD §10, §11.4, §16.4)', ()
   });
 });
 
-describe('LEVELS 3.2b — the decomposition ladder', () => {
+describe('LEVELS 3.2b — decomposition belongs to the campaign, not to the rooms', () => {
   /**
-   * The global SHELL is the campaign's **floor**, and rooms escalate upward from
-   * it. It was left at TERMINAL after look development, which does not read as a
-   * wrong default: it means every room including the Heap is fully decomposed, so
-   * run 1 looks like the ending and the descent has nowhere to go. LEVELS 3.2b
-   * warns about it in prose; this is the same warning that fails a build.
+   * The global SHELL is *sound*. A baseline left at full flow after look
+   * development would not read as a wrong default: it would mean every room
+   * including the Heap is fully decomposed, so run 1 looks like the ending and
+   * the descent has nowhere to go.
    */
-  it('keeps the baseline at sound, so rooms have somewhere to climb from', () => {
-    expect(SHELL.dissolve).toBe(0);
-    expect(SHELL.decay).toBe(0);
-    expect(SHELL.shred).toBe(0);
-  });
-
-  it('gives the Heap nothing, because it is the one room allowed to be normal', () => {
-    const heap = ARENA_BY_ID.get('heap')!.levels!.find((l: { id: string }) => l.id === 'heap')!;
-    expect(heap.shell?.['dissolve'] ?? 0).toBe(0);
+  it('keeps the baseline at sound, so the campaign has somewhere to climb from', () => {
+    expect(SHELL.flow).toBe(0);
   });
 
   /**
-   * The Archive sits *below* the Sink deliberately — stillness is its texture and
-   * wear that moves would spend it — so this asserts the authored shape rather
-   * than a naive "deeper is always worse".
+   * **The invariant, and the reason this file has a test about rendering at all.**
+   *
+   * `flow` is what the site coming apart looks like, and the site comes apart
+   * *over six shifts*. It is therefore a fact about when the player is there and
+   * never about which room they are standing in. A per-room ladder was authored
+   * here once — Sink 0.35 climbing to a terminal Cell — and it is wrong in a way
+   * that is hard to see from the data and obvious on screen: it makes the deep
+   * rooms permanently rotted and the shallow ones permanently sound, so
+   * "terminal" comes to mean *the Cell* instead of *the end*, and the player
+   * learns a map rather than a decline. The Heap has to be clean on shift one
+   * and gone by shift six, and it has to be the same Heap.
+   *
+   * The removed predecessors stay on the forbidden list: a room resurrecting
+   * `dissolve` from an old branch must fail here, not silently author a dial
+   * the shader no longer reads.
+   *
+   * Rooms have plenty to differentiate on, and the next test asserts they use it.
    */
-  it('climbs Sink → Store → Cell, with the Archive held back', () => {
-    const dissolveOf = (arena: string, level: string): number => {
-      const lv = ARENA_BY_ID.get(arena)!.levels!.find((l: { id: string }) => l.id === level);
-      return (lv?.shell?.['dissolve'] as number | undefined) ?? 0;
-    };
-    const sink = dissolveOf('heap', 'sink');
-    const archive = dissolveOf('heap_archive', 'archive');
-    const store = dissolveOf('heap_store', 'store');
-    const cell = dissolveOf('heap_cell', 'cell');
-    expect(sink).toBeGreaterThan(0);
-    expect(archive).toBeLessThan(sink);
-    expect(store).toBeGreaterThan(sink);
-    expect(cell).toBeGreaterThan(store);
+  it('lets no room author a progression dial', () => {
+    const offenders: string[] = [];
+    for (const arena of ARENAS) {
+      for (const level of arena.levels ?? []) {
+        const sh = (level.shell ?? {}) as Record<string, number>;
+        for (const dial of ['flow', 'dissolve', 'decay', 'shred', 'exhale', 'shroud', 'smoke']) {
+          if (sh[dial] !== undefined) offenders.push(`${arena.id}/${level.id}.${dial}`);
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
   });
 
   /**
-   * And the site itself comes apart across the campaign. Zero for the first two
-   * shifts so the tutorial keeps its honest picture of normal, and shallow after
-   * — a fast climb steals the room ladder's job.
+   * And the corollary: taking the three dials away must not have taken the rooms'
+   * identities with them. Each authored room still has to differ from the baseline
+   * on the dials that describe a *place* — churn tempo, amplitude, stretch,
+   * jitter, block sizes, `oil`, `fray`.
    */
-  it('raises the site floor late and shallowly', () => {
+  it('still gives every authored room a distinction of its own', () => {
+    const PLACE = ['cycleBeats', 'ampFloor', 'maxStretch', 'jitter', 'oil', 'fray', 'swell'];
+    for (const arena of ARENAS) {
+      for (const level of arena.levels ?? []) {
+        const sh = (level.shell ?? {}) as Record<string, number> | undefined;
+        if (sh === undefined || Object.keys(sh).length === 0) continue;
+        const distinctions = PLACE.filter((k) => sh[k] !== undefined);
+        expect(distinctions.length, `${arena.id}/${level.id}`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  /**
+   * The ramp itself. Zero for the first two shifts so the tutorial keeps one
+   * honest picture of normal to measure everything against, then a climb that
+   * arrives at the full vocabulary on the last night — the Cell is only ever
+   * entered on that night, and it should be the worst thing in the game.
+   */
+  it('runs the site from sound to terminal across the campaign', () => {
     const base = { seed: 'decay-test', axiomId: 'ignition' };
     const decayAt = (name: string): number =>
       configure(CHECKPOINTS[name]!, base).siteDecay ?? 0;
     expect(decayAt('fresh')).toBe(0);
     expect(decayAt('contact')).toBe(0);
     expect(decayAt('deadgate')).toBeGreaterThan(0);
-    expect(decayAt('final')).toBeGreaterThan(decayAt('deadgate'));
-    expect(decayAt('final')).toBeLessThan(1);
+    expect(decayAt('store')).toBeGreaterThan(decayAt('deadgate'));
+    expect(decayAt('final')).toBe(1);
   });
-  /**
-   * The rot is per-room, and only the deep rooms carry it. It was global — the
-   * TERMINAL stage in LEVELS 3.2b names all three dials on one room, so a global
-   * decay could not express the ladder at all, and every room was stuck at zero.
-   * `shred` is the one dial with a real frame cost, so exactly one room may have
-   * it and it is the last one.
-   */
-  it('gives the rot only to the deep rooms, and shred only to the Cell', () => {
-    const shellOf = (arena: string, level: string): Record<string, number> =>
-      (ARENA_BY_ID.get(arena)!.levels!.find((l: { id: string }) => l.id === level)?.shell ??
-        {}) as Record<string, number>;
-    expect(shellOf('heap', 'heap')['decay'] ?? 0).toBe(0);
-    expect(shellOf('heap', 'sink')['decay'] ?? 0).toBe(0);
-    expect(shellOf('heap_store', 'store')['decay'] ?? 0).toBeGreaterThan(0);
-    expect(shellOf('heap_cell', 'cell')['decay'] ?? 0).toBeGreaterThan(
-      shellOf('heap_store', 'store')['decay'] ?? 0,
-    );
 
-    const withShred = ['heap', 'sink', 'archive', 'store', 'cell'].filter((id) => {
-      for (const arena of ['heap', 'heap_archive', 'heap_store', 'heap_cell']) {
-        const sh = shellOf(arena, id);
-        if ((sh['shred'] ?? 0) > 0) return true;
-      }
-      return false;
-    });
-    expect(withShred).toEqual(['cell']);
+  /**
+   * **The ramp. There is one decomposition system — the flow (approved
+   * 2026-08-08, frozen in structure.test.ts) — and the campaign's whole job is
+   * to walk it from nothing to exactly the approved look.**
+   *
+   * The endpoint is load-bearing: flow 1 at siteDecay 1 IS the reference the
+   * user signed off. A mapping that lands short of 1 never shows the approved
+   * look; one that exceeds it shows a look nobody has ever seen. And the shape
+   * is the identity on purpose — every guarantee the flow makes (the solid
+   * outward-roiling collider floor, the max-not-mix backing) holds at every
+   * intermediate value, so there is nothing for a curve to protect; the story
+   * layer already owns the pacing through SITE_DECAY.
+   */
+  it('walks the flow from sound to exactly the approved look', () => {
+    const shifts = [0, 0, 0.3, 0.55, 0.78, 1].map(decompositionDials);
+
+    // Sound is sound: the first two shifts pay nothing.
+    expect(shifts[0]).toEqual({ flow: 0 });
+    expect(shifts[1]).toEqual({ flow: 0 });
+
+    // The last shift is the approved look, exactly — flow 1, the state
+    // ?look=flow shows and structure.test.ts freezes. A mapping that lands
+    // anywhere else is re-deciding a decision that was not the code's to make.
+    expect(shifts[5]!.flow).toBeCloseTo(1, 5);
+
+    // Never past the approved look: beyond 1 is a picture nobody approved.
+    for (const d of shifts) expect(d.flow).toBeLessThanOrEqual(1);
+
+    // And it climbs monotonically, because a site that heals between shifts is a
+    // different game.
+    for (let i = 1; i < shifts.length; i++) {
+      expect(shifts[i]!.flow).toBeGreaterThanOrEqual(shifts[i - 1]!.flow);
+    }
   });
 });

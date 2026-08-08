@@ -646,46 +646,64 @@ untouchable: enemies and the player must pop in every room.
 
 ### 8.3 The ladder
 
-Written against the dials that exist. LEVELS §3.2b defines them and is the
-authoring reference; this is what each room is *for*.
+There are **two** gradients and they answer different questions. Keeping them
+apart is the whole of this section, because collapsing them was a real mistake
+that shipped for a while: the decomposition dials were authored per room, and the
+result was a game where the deep rooms were always ruined and the shallow ones
+never were.
 
-| room    | authored                              | reads as                          |
-|---------|---------------------------------------|-----------------------------------|
-| Heap    | nothing                               | normal — the only room that is    |
-| Sink    | `dissolve 0.35`, `oil`, `fray`        | a working floor that sweats       |
-| Archive | `dissolve 0.22`, near-still churn     | held breath                       |
-| Store   | `dissolve 1.0`, `decay 0.5`           | no sharp edges left               |
-| Cell    | `dissolve 1.6`, `decay 1.2`, `shred 0.9` | boundaries meaningless         |
+**What a room is** — read inside a single run, room to room. Its vocabulary is
+churn tempo and amplitude, jitter, block size, `oil`, `fray`, tint, layout,
+roster. LEVELS §3.2b is the authoring reference.
 
-1. **The Heap — clean.** Solid blocks, gentle churn, clear grid, no air. This is
-   what normal looks like, and it is the only room that gets to be normal. It
-   authors nothing, which is why the global `SHELL` baseline must stay at zero:
-   the Heap *is* the baseline, and a baseline parked high leaves the descent
-   nowhere to go.
+| room    | authored                                | reads as                       |
+|---------|-----------------------------------------|--------------------------------|
+| Heap    | nothing                                 | normal — the only room that is |
+| Sink    | `oil 0.16`, `fray 0.08`                 | a working floor that sweats    |
+| Archive | `cycleBeats 16`, low amplitude          | held breath                    |
+| Store   | `cycleBeats 6`, `jitter 0.85`           | brisk, nothing settled         |
+| Cell    | `cycleBeats 4`, `jitter 1.2`, max churn | never still                    |
+
+1. **The Heap — clean.** Solid blocks, gentle churn, clear grid, no air. It
+   authors nothing at all, which is why the global `SHELL` must stay at zero: the
+   Heap *is* the baseline.
 2. **The Sink — the sheen.** Thin-film interference on the *floor*, coming up
-   through the seams, and the first loss of certainty at the edges. Denser grid,
-   working tempo.
+   through the seams. Denser grid, working tempo.
 3. **The Archive — held breath.** Near-still churn at half tempo and low
-   amplitude. Its decomposition sits *below* the Sink's on purpose: stillness is
-   this room's texture, and wear that moves would spend it.
-4. **The Store — advancing.** No sharp edge anywhere, and the first room the
-   roaming rot crosses: a wave that warps silhouettes and heals behind itself.
-5. **The Cell — the Nothing.** LEVELS §3.2b's TERMINAL stage exactly: the
-   material dissolving, the rot crossing it, and debris leaving on curling paths.
-   The only room with `shred`, because it is the one dial with a real frame cost.
-   Near-black; the only colour is the light through the final gate.
+   amplitude. Stillness is this room's texture.
+4. **The Store — advancing.** Brisk and unsettled; nothing in here has come to
+   rest.
+5. **The Cell — the Nothing.** Near-black, never still; the only colour is the
+   light through the final gate.
 
-**And the same rooms get worse across the campaign.** `RunConfig.siteDecay` is a
-floor the story raises per rung — zero for the first two shifts, 0.45 by the
-last — added on top of whatever each room authored. The room-to-room gradient is
-what the player reads inside one run; this is the one they only notice on the
-third visit to a corridor they thought they knew. It is shallow and late by
-design: climb it fast and every room ends up the same shade of ruined, which
-costs the ladder above its whole job.
+**How far gone the site is** — read across the campaign, and it is the *same
+corridor* each time. One number, `RunConfig.siteDecay`, zero on the first two
+shifts and one on the last, driving `dissolve`, `decay` and `shred` and nothing
+else driving them. §8.4 has the curves.
+
+| shift | reads as                                |
+|-------|-----------------------------------------|
+| 1 – 2 | the original ruins                      |
+| 3     | a faint bleed off one edge              |
+| 4     | soft tendrils reaching into the room    |
+| 5     | boundaries mostly given up              |
+| 6     | the silhouette handed over to smoke     |
+
+**And the picture is ink into water — soft, faint, dissolving.** `dissolve` is the
+only dial that makes it; `decay` and `shred` erode and fleck, which is rubble. A
+ramp led by those two was built and it turned the ruins into hard-edged solid
+fragments. LEVELS §3.2b has the curves and the reasoning.
+
+**No room may author a decomposition dial, and a test enforces it.** The descent
+is only legible if what changes is a place the player already knows: the Heap has
+to be sound on shift one and gone by shift six and be recognisably the same Heap
+both times. Author decomposition per room instead and "terminal" comes to mean
+*the Cell* rather than *the end* — the player learns a map, and the six-shift
+decline, which is the actual story, becomes invisible.
 
 Held in reserve on purpose: the backdrop slabs behind everything keep drifting in
-all five rooms. They stop for the first time in the ending (§11 of NARRATIVE),
-and no room may spend that early.
+all five rooms and on all six shifts. They stop for the first time in the ending
+(§11 of NARRATIVE), and nothing may spend that early.
 
 ### 8.4 Where it is built
 
@@ -711,22 +729,36 @@ Two consequences, and they are the rule for every effect:
   what a blue-black floor lifts most readily, and at equal weight the room goes
   swamp.
 
-**A material belongs to a place, not to the camera.** All five dials — `oil`,
-`fray`, `dissolve`, `decay`, `shred` — are resolved *per pixel* from world-space
-room rectangles, never switched when the player crosses a threshold. Switching
-them globally repaints the room the player has just left as they step through the
-gate, which is both wrong and the most visible thing in the frame.
+**A material belongs to a place; the site's condition belongs to the night.** The
+two gradients of §8.3 are wired differently on purpose, and which side of the line
+a dial falls on is decided by the question it answers.
 
-This section previously argued that `decay` and `shred` were global "on purpose,
-because they are events roaming the whole arena". That was a description of the
-code rather than a position: LEVELS §3.2b's TERMINAL stage authors all three dials
-on one *room*, so a global rot cannot express the ladder at all — and while it was
-global, nothing set it, so the rot was never once visible. A wave roams *within* a
-room's material; the room decides whether its material rots.
+`oil` and `fray` say what a *room* is, so they are resolved **per pixel** from
+world-space room rectangles (`uZoneRect`/`uZoneMat`). Switching them on a
+threshold crossing repaints the room the player has just left as they step through
+the gate, which is both wrong and the most visible thing in the frame.
 
-`shred` is the one dial with a real frame cost — it widens the mass shader's
-working region — so it is a late accent and never a baseline. The quality
-governor (`gfx/quality.ts`) will trade bloom detail to pay for it.
+`dissolve`, `decay` and `shred` say how far gone the *site* is, so they are
+**global uniforms**, written once per shift and identical in every room — which is
+not a shortcut but the requirement. The whole building is at the same stage of
+coming apart, and a per-room version of these dials destroys the campaign
+gradient (§8.3). An earlier pass here spent real effort promoting `dissolve` into
+the material zones so that rooms could differ on it; that work was aimed at the
+wrong target and has been undone.
+
+The two ideas were confused because both are "wear". They are not the same kind
+of thing: one is a texture the architect gave a room, the other is the date.
+
+`shred` is held at **zero on every shift**, for the look before the cost: flecks
+pulling free of a silhouette are solid debris, and this effect is smoke. That it is
+also the one dial with a real frame cost — it widens the mass shader's working
+region — makes the decision free. The shader still draws it and the uniform still
+exists, so it is one number away if debris is ever wanted.
+
+Bloom is not incidental here. At the quality governor's lowest rung the wisps read
+noticeably crunchier than at its highest, so a screenshot of the decomposition is
+also a screenshot of how hard the machine was working — worth remembering before
+concluding that a value has gone wrong.
 
 **Not built.** Weather — the one permitted screen-space category, replacing the
 forbidden field programs rather than joining them. Grid slip and contortion. The

@@ -171,48 +171,75 @@ is kept — stillness as a texture is used deliberately (§3.2).
    a string). Fix the schema; rooms can then carry a field (frost shimmer,
    static) as data.
 
-### 3.2b The decomposition dials
+### 3.2b The decomposition dial
 
-The ruins can come apart. Three numbers on `LevelDef.shell`, all live today,
-all per-room, defined and documented in `src/app/visual.ts` (`SHELL`):
+The ruins come apart **across the campaign**. One number, defined in
+`src/app/visual.ts` (`SHELL.flow`) and drawn by `gfx/structure.ts`:
 
-- **`dissolve`** — the material's standing condition. Every block trades its
-  boundary for wisps: edges billow past themselves, the silhouette bleeds
-  near-black ink tendrils tens of units into the room, shadows and the lit
-  hairline soften to match. Dissolving means getting *bigger* — matter
-  leaving, not a cloud evaporating. Scales with the layer: the black base
-  barely breathes, the top grey is the most gone. Uniform across the room by
-  design; this is what the room *is*, not an event passing through it.
-- **`decay`** — the roaming deform wave. A slow rot field drifts across the
-  arena over tens of seconds; where it sits, silhouettes warp and erode, then
-  heal as it moves on. An event, not a condition.
-- **`shred`** — debris. Flecks pull free of the silhouette at the rot's
-  venting stretches and drift away on curling paths. Joins `decay`'s rot
-  field, so the two describe one process.
+- **`flow`** — the smoke (approved 2026-08-08; the recipe is frozen by
+  `src/app/gfx/structure.test.ts`). The mass's coverage becomes a
+  domain-warped noise field: solid deep inside, breaking into genuinely
+  flowing, swirling smoke with no straight contour anywhere, in every
+  direction; the shadows ride the same field. Two guarantees hold at every
+  value: the collider is always drawn solid (the base layer floors it and
+  only ever roils *outward*), and the field only ever **adds** pixels past
+  the boundary — it never opens a hole over ground you cannot walk through.
 
-The staged arc, tuned and approved (values are the whole difference):
+A family of predecessor systems (`dissolve`, `decay`, `shred`, and three
+rebuilt smoke eras) was removed outright when the flow was approved. If an
+old branch or document still names them, it is stale — there is one system.
 
-| stage    | knobs                                  | reads as                        |
-|----------|----------------------------------------|---------------------------------|
-| sound    | all 0                                  | the original ruins              |
-| ONSET    | `dissolve 0.35`                        | edges losing their certainty    |
-| ADVANCED | `dissolve 1`                           | no sharp edges left, ink fingers|
-| TERMINAL | `dissolve 1.6, decay 1.2, shred 0.9`   | boundaries meaningless          |
+#### These are not room dials. Do not author them per room.
 
-Authoring is one JSON object per room: `"shell": { "dissolve": 0.35 }`. The
-gradient writes itself onto §3.2's ladder — the Archive sound, the Heap at
-onset, the deep rooms advanced, the last room terminal. An act-driven
-progression (the same room decaying *between* runs as the story advances)
-needs a story-layer hook that writes these through `applyRoomStyle`; not yet
-built, ask for it when a beat wants it.
+**This section used to say the opposite, a ladder was built on it, and the
+result was wrong on screen.** The rule now:
 
-Two cautions. The global `SHELL` default is the campaign's *baseline* — rooms
-override upward from it, so it should stay at `sound`/`ONSET` and let rooms
-and the story escalate (it is parked at TERMINAL right now from look
-development; set it back before shipping a build). And `shred` widens the
-mass shader's working region, so it is the one dial with a real frame cost —
-fine as a late-campaign accent, wrong as a global default; the quality
-governor will eat bloom mips to pay for it on weak machines.
+> Decomposition answers *when the player is here*, never *where they are
+> standing*.
+
+The site coming apart is the campaign's clock — six shifts from sound to gone —
+and it only reads as decline if the corridor the player already knows is the
+thing that changes. Author it per room and the deep rooms are permanently
+rotted while the shallow ones are permanently sound: "terminal" comes to mean
+*the Cell* instead of *the end*, the Heap looks the same on the last night as
+the first, and what the player learns is a map instead of a decline. There is
+no gradient to write onto §3.2's ladder, because the ladder is about what rooms
+*are* and this is about what time it is.
+
+`content.test.ts` fails the build if any room authors `flow` (or resurrects a
+removed dial), and it also asserts that every room which authors a `shell` block still
+authors at least one dial that genuinely describes a *place*. Rooms have plenty:
+churn tempo (`cycleBeats`), amplitude (`ampFloor`, `maxStretch`), `jitter`,
+block `sizes`, `swell`, plus `oil` and `fray` on the floor, plus tint and layout
+and roster. The Archive is nearly still and the Store churns hard; that is how a
+room says what it is.
+
+#### The one driver
+
+`SITE_DECAY` in `src/story/arc.ts` — one 0-to-1 number per rung, emitted on the
+story-blind `RunConfig.siteDecay`. `decompositionDials()` in `renderer.ts` maps
+it straight onto `flow` (the identity — the story layer already owns the
+pacing) and `applyRoomStyle` writes it last, over whatever the room said,
+unconditionally. The story layer decides *how far gone*; the renderer decides
+*what that looks like*; the room decides nothing.
+
+| shift | `siteDecay` = `flow` | reads as                                    |
+|-------|----------------------|---------------------------------------------|
+| 1 – 2 | 0                    | the original ruins — the baseline            |
+| 3     | 0.30                 | edges losing their certainty, first smoke    |
+| 4     | 0.55                 | boundaries breaking into the field           |
+| 5     | 0.78                 | the smoke owns every edge                    |
+| 6     | 1.00                 | the approved full roil — same as `?look=flow` |
+
+The endpoint is load-bearing: `flow 1` at `siteDecay 1` is exactly the
+approved reference (`?look=flow`, frozen by `structure.test.ts`). Landing short
+of it means the campaign never shows the approved look; landing past it shows
+a look nobody has seen. Both are re-deciding a decision that was not the
+code's to make. Look-dev handles: `?look=flow` pins full strength;
+`?decomp=<0..1>` pins any intermediate stage.
+
+The global `SHELL` keeps `flow` at **0**, asserted by a test. It is the
+picture of a sound building, and every deterioration is measured from it.
 
 ### 3.3 One legible rule per room
 

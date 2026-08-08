@@ -150,21 +150,36 @@ export const DOCUMENT_IDS: readonly string[] = Object.keys(DOC_RUNG).sort(
 );
 
 /**
- * LEVELS §3.2b — how far the site has come apart, per rung.
+ * LEVELS §3.2b — how far the site has come apart, per rung. **0 to 1, and 1 is
+ * the whole of the decomposition vocabulary.**
  *
- * Deliberately shallow and deliberately late. The room-to-room gradient in
- * `arenas.json` is the one the player reads in a single run; this is the one they
- * only notice on the third visit to a corridor they thought they knew. If it
- * climbs fast it steals the room ladder's job and every room ends up looking the
- * same shade of ruined.
+ * This is the *only* thing that drives `dissolve`, `decay` and `shred`. The ruins
+ * coming apart is something that happens to the site over six shifts, and it is
+ * therefore a fact about *when* the player is there, never about which room they
+ * are standing in.
+ *
+ * **Rooms must not author these dials, and the earlier attempt to let them is the
+ * mistake this comment exists to prevent.** A per-room decomposition ladder makes
+ * the deep rooms permanently rotted and the shallow ones permanently sound, which
+ * destroys the only signal that matters: the Heap is *clean on shift one and gone
+ * by shift six*, and it is the same Heap both times. If the Cell is always
+ * terminal then terminal means "the Cell" rather than "the end", and the player
+ * learns a map instead of a decline. Rooms distinguish themselves with the dials
+ * that describe a *place* — churn tempo, amplitude, jitter, block sizes, `oil`,
+ * `fray`, tint — and `content.test.ts` fails the build if a room authors any of
+ * the three progression dials.
+ *
+ * Zero for the first two shifts, because the tutorial needs one honest picture of
+ * normal to measure everything else against; the descent begins when the story
+ * turns and reaches the full vocabulary on the last night.
  */
 const SITE_DECAY: Record<number, number> = {
   1: 0,
   2: 0,
-  3: 0.08,
-  4: 0.16,
-  5: 0.28,
-  6: 0.45,
+  3: 0.3,
+  4: 0.55,
+  5: 0.78,
+  6: 1,
 };
 
 /**

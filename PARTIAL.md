@@ -98,17 +98,24 @@ wisps — edges billow past themselves, ink tendrils, matter *leaving*), **`fray
 coming up through the seams). Also per-room: **`decay`** (a roaming rot wave that warps and heals) and
 **`shred`** (flecks pulling free at its venting stretches).
 
-All five dials are resolved per pixel from world-space room rectangles,
-so crossing a gate no longer repaints the room behind the player. `dissolve` was
-global when it arrived and had exactly that bug; `uZoneMat.z` carries it now, and
-the branch predicates use a separate conservative maximum so a dissolving room's
-wisps are never clipped against an invisible rectangle.
+`oil` and `fray` are resolved per pixel from world-space room rectangles, so
+crossing a gate no longer repaints the room behind the player. The other three are
+global on purpose — see below.
 
-The five-room ladder is authored in `arenas.json` — Heap nothing, Sink 0.35,
-Archive 0.22 (below the Sink deliberately: stillness is its texture), Store 1.0
-plus `decay 0.5`, Cell the full TERMINAL stage (1.6 / 1.2 / 0.9, and the only room
-with `shred`, which is the one dial with a real frame cost) — and `RunConfig.siteDecay` raises a floor under all of it per rung, so
-the same corridor is further gone on the last night. A test in
+**Decomposition is the campaign's, and no room may touch it.** `SITE_DECAY` in
+`arc.ts` is one 0-to-1 number per rung — 0 on the first two shifts, 1 on the last —
+emitted on `RunConfig.siteDecay`; `decompositionDials()` in `renderer.ts` maps it
+to the three dials, and `applyRoomStyle` writes them over whatever the room said.
+**`dissolve` leads at `k × 1.6`** — it is the only dial that makes smoke — with
+`decay` held to `k × 0.3` because it erodes rather than dissolves, and `shred` at
+zero because flecks are solid debris. Rooms differentiate
+on the dials that describe a *place* — churn tempo, amplitude, jitter, `oil`,
+`fray`, sizes — and `content.test.ts` fails the build if a room authors a
+progression dial, or if a room with a `shell` block authors no place dial at all.
+
+Seen on screen, one vantage in the Heap, all six shifts: sound → a faint bleed off
+one edge → soft tendrils into the room → boundaries given up → the silhouette
+handed over to smoke. See §7 for why an eye was needed and what it found — twice. A test in
 `content.test.ts` asserts the baseline is zero and the ladder climbs, because the
 global `SHELL` was left at TERMINAL after look development, which is not a wrong
 default so much as a deleted descent: every room fully decomposed, run 1 looking
@@ -125,9 +132,10 @@ Still missing:
 - **The swarm is undecided.** §8.3's Store wants flies clustering the silhouettes;
   `shred`'s flecks *leave* the mass. Close, not the same picture, and the
   difference should be decided rather than blurred.
-- **Values are unjudged.** The ladder above is derived from the specs and the code
-  and has never been seen four rooms side by side. §3.2b is right that values are
-  the whole difference.
+- **The rooms have still not been seen side by side.** The campaign ramp has been
+  judged on screen, but only in the *Heap's* geometry from one vantage. The other
+  four rooms differ in churn and block size, and whether shift 6 reads as well
+  against the Archive's stillness or the Cell's violence is unanswered.
 
 ---
 
@@ -181,9 +189,52 @@ hand, which proves wiring and cannot prove appearance.
 
 Specifically unjudged by eye: the bezel's panel offsets (`col(28)` and `col(46)`
 in `bezel.ts` are guesses and are the most likely thing to need moving), the recut
-engine editor, monochrome in-run, and **every value in the decomposition ladder**
-— the numbers are reasoned from the specs, not tuned against four rooms on a
-screen.
+engine editor, and monochrome in-run.
+
+**The decomposition work is the exception, and how it went wrong is worth keeping,
+because it went wrong twice and the second time was worse than the first.**
+
+*The values.* `dissolve 1.6` — the number look development left in the global
+`SHELL`, which LEVELS §3.2b then wrote down as the TERMINAL stage — does not read
+as decomposition at all. It fills the room. Isolating the dials one at a time from
+a fixed vantage showed `decay` and `shred` rotting silhouettes with the
+architecture fully intact, and `dissolve` having a hard ceiling near 1.0.
+
+*The dial. The look is ink into water — soft wisps, faint — and the first ramp was
+led by `decay` and `shred`, which do not dissolve anything: `decay` warps and erodes
+a silhouette and `shred` pulls solid flecks off it. The result was ruins coming
+apart into hard-edged fragments. What recommended those two was that they leave the
+architecture perfectly readable at full strength, and readability is a real virtue,
+but it is not what the effect is for. `dissolve` is the only smoke dial; it is now
+the spine, linear to 1.6, with `decay` at a third of it and `shred` at zero.*
+
+*The model, which was the other real error.* All three dials were authored **per room**,
+on the authority of a doc that said to, producing a Sink-to-Cell ladder that reads
+as reasonable in JSON and is wrong on screen: it makes decomposition a property of
+*place*, when the thing the game is about is a site coming apart over six nights.
+Per room, "terminal" means the Cell instead of the end, the Heap looks identical on
+the last shift and the first, and the decline — the actual story — cannot be seen
+at all. The dials now come only from `siteDecay`, and the test that would have
+caught this exists.
+
+Three habits came out of it. **A value tuned globally has not been tuned for any
+room:** the global switch paints the whole map, so a number that looked right there
+was only right for whatever happened to be on screen. **When a picture regresses,
+diff the data before suspecting the code** — this was blamed on the mass shader,
+and then on a filter over the arena, before `git diff` showed `gfx/` had not
+changed at all and the whole delta was four numbers in two files. And **a design
+doc can be the bug.** §3.2b said "all per-room" and was followed carefully; the
+ladder was built correctly against the wrong instruction, and no amount of care at
+the implementation end was going to catch that. When a spec's shape and the game's
+premise disagree, the premise wins and the spec gets rewritten.
+
+The capture channel that made this answerable is worth reusing: drive
+`renderer.shellMass.setStyle` / `shellFloor.setStyle` by hand from the console,
+hide `game.draft.view` and `game.bezel.view`, `governor.reset()` to pin quality at
+rung 0, then `app.renderer.extract.canvas(stage)` → downscale → `POST /__run` with
+an `x-run-name` header. JPEG byte size is a usable proxy for high-frequency detail
+on its own: `dissolve 1.6` came back at 61k where the same frame with rot only came
+back at 39k, which named the guilty dial before any image was opened.
 
 **And a test that should exist and does not.** Four separate bugs this branch —
 dead hit areas, icons over windows, the BEGIN CONTAINMENT button across its own

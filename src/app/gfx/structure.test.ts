@@ -60,6 +60,26 @@ describe('the flow look (approved 2026-08-08)', () => {
     expect(src).toContain('float fCover = smoothstep(0.30, 0.74, bias * 0.46 + flowF[layer] * 0.64);');
   });
 
+  it('never morphs: full flow replaces coverage, partial flow only adds smoke', () => {
+    // Two staging attempts interpolated between the crisp look and the field
+    // look — alpha blending, then geometry melting — and both produced
+    // pictures nobody approved, because every point between two approved
+    // pictures is an unapproved picture. The rule they earned: the approved
+    // replacement runs ONLY at full strength; below it the crisp look renders
+    // exactly and the field arrives as opaque smoke laid over it (the staged
+    // block, extent scaled by the dial, opacity never).
+    expect(src).toContain('if (uFlow >= 0.999) {');
+    expect(src).toContain('cover = fCover;');
+    expect(src).not.toContain('cover = mix(cover, fCover');
+    expect(src).toContain('if (uFlow > 0.001 && uFlow < 0.999) {');
+    // The staged smoke binds to the DRAWN blocks (per-layer bd, handed to
+    // the continuous hull past the outermost cells), not to the collider
+    // hull — a hull-anchored band sat offset from every visible edge. And
+    // the stage scales reach and threshold, never opacity.
+    expect(src).toContain('float dS = min(abs(bd), abs(bd0) + 14.0);');
+    expect(src).toContain('float aS = smoothstep(thS, thS + 0.24, flowF[layer] + proxS) * 0.92;');
+  });
+
   it('never erodes: the base layer floors the collider solid, roiling outward only', () => {
     // The floor breathes between the exact collider line and ~10u beyond.
     // flowF is clamped to [0,1], so the dilation is strictly positive — the
@@ -83,16 +103,29 @@ describe('the flow look (approved 2026-08-08)', () => {
     expect(src).toContain('* (0.35 + 0.65 * smoothstep(0.15, 0.85, flowF[2]));');
   });
 
-  it('suppresses every boundary tell under the flow', () => {
-    // The lit hairline would draw the boundary back in, and the tile guard
-    // must widen or the wisps clip against an invisible rectangle.
-    expect(src).toContain('* (1.0 - min(1.0, uFlow));');
+  it('suppresses every boundary tell at full flow — and only at full flow', () => {
+    // The lit hairline would draw the boundary back in at full strength, but
+    // below it the crisp look keeps its hairline whole (dimming it was the
+    // morphing mistake in miniature). And the tile guard must widen or the
+    // wisps clip against an invisible rectangle.
+    expect(src).toContain('* (1.0 - step(0.999, uFlow));');
     expect(src).toContain('uFlow * 60.0');
   });
 
-  it('is reachable as the pure named look: flow alone, every other dial at zero', () => {
-    expect(rendererSrc).toContain(
-      'flow: { decay: 0, shred: 0, dissolve: 0, exhale: 0, shroud: 0, smoke: 0, flow: 1 },',
-    );
+  it('is reachable as the named look at full strength, and drives the campaign ramp', () => {
+    // ?look=flow shows the approved state exactly; the campaign walks the same
+    // dial via decompositionDials (siteDecay 0..1 → flow 0..1), so the look at
+    // TERMINAL and the look at ?look=flow are one picture.
+    expect(rendererSrc).toContain('flow: { flow: 1 },');
+    expect(rendererSrc).toContain('return { flow: k };');
+  });
+
+  it('has no surviving predecessor systems — the flow is the only decomposition', () => {
+    // The dissolve/decay/shred trio and the three rebuilt smoke eras were
+    // removed outright on the user's word ("flow is everything... remove the
+    // rest"). A uniform reappearing here means an old branch leaked back in.
+    for (const dead of ['uDissolve', 'uDecay', 'uShred', 'uExhale', 'uShroud', 'uSmoke']) {
+      expect(src).not.toContain(dead);
+    }
   });
 });

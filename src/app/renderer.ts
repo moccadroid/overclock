@@ -2663,14 +2663,14 @@ function reachFor(w: number, h: number): number {
  * *quietest* rooms would leave the Cell — already terminal — unchanged, and the
  * point is that the whole building is further gone, the deep rooms included.
  */
-/** The three progression dials, plus a cache key for the room-change switch. */
+/** The progression dial, plus a cache key for the room-change switch. */
 interface Decomposition {
   key: string;
-  dials: { dissolve: number; decay: number; shred: number };
+  dials: { flow: number };
 }
 
 /**
- * How far the site has come apart, turned into the three dials that draw it.
+ * How far the site has come apart, turned into the one dial that draws it.
  *
  * **The input is the campaign's position and nothing else.** `RunConfig.siteDecay`
  * is 0 on the first two shifts and 1 on the last, and no room contributes: the
@@ -2680,87 +2680,36 @@ interface Decomposition {
  * tempo, amplitude, jitter, block sizes, `oil` and `fray` — the dials that
  * describe a *place*.
  *
- * **The mapping walks the approved arc, and past ADVANCED the ink never travels
- * alone.** The three staged looks that were signed off on screen (LEVELS §3.2b)
- * sit ON this ramp: ONSET near k 0.22, ADVANCED near k 0.62, TERMINAL exactly at
- * k 1 — dissolve 1.6, decay 1.2, shred 0.9, the full trio.
- *
- * A previous version of this function tried dissolve-leads-alone: 1.6 of ink with
- * decay capped at a third and shred pinned to zero, on the reasoning that erosion
- * and flecks read as solid chunks. On screen it produced the opposite of the
- * intent — the one look everyone agreed was wrong. The bleed's far tendrils are
- * threshold crossings of a noise field, and at high dissolve the band outruns the
- * noise wavelength, so the tendrils detach into islands; it is exactly the
- * roaming erosion and the debris streams that keep a churning, ragged shore under
- * them, which is what makes far ink read as matter LEAVING something rather than
- * rubble floating near it. Chunky-ness was never the chaperones — it was the ink
- * stranded without them. Hence the shape below:
- *
- * - **`dissolve` is the spine**, linear to 1.6, the only dial that makes smoke.
- * - **`decay` joins from mid-arc** (k 0.5) and reaches its approved 1.2 at the
- *   end — by the time the ink passes the ADVANCED look, the rot wave is already
- *   working the silhouette it pours from.
- * - **`shred` joins late** (k 0.6) and reaches its approved 0.9 — the debris is
- *   the last stage's voice, and it is also the one dial with a real frame cost,
- *   so the early campaign never pays for it.
+ * **There is one decomposition system: the flow** (approved 2026-08-08; see
+ * ShellStyle.flow and structure.test.ts). Its predecessors — the
+ * dissolve/decay/shred trio and the three rebuilt smoke eras — were removed
+ * outright once it was approved, so the whole arc is stages of one field:
+ * uFlow blends the crisp block coverage toward the field's coverage, and the
+ * field's guarantees (the base layer's outward-roiling solid floor, the
+ * backing's max-not-mix) hold at every stage, so the geometry stays honest
+ * from the first breath of smoke to the full roil.
  */
 export function decompositionDials(siteDecay: number): Decomposition['dials'] {
   const k = Math.max(0, Math.min(1, siteDecay));
-  return {
-    dissolve: k * DISSOLVE_MAX,
-    decay: Math.max(0, (k - 0.5) / 0.5) * 1.2,
-    shred: Math.max(0, (k - 0.6) / 0.4) * 0.9,
-  };
+  return { flow: k };
 }
 
 /**
- * The furthest the ink may reach.
- *
- * Measured: 0.48 is a faint bleed off one edge with the architecture untouched,
- * 0.88 is soft tendrils reaching into the room, 1.6 is the silhouette handed over
- * to smoke. At 2.0 the tendrils stop being tendrils — they detach into islands in
- * the middle of the room, which reads as floating rubble.
- */
-const DISSOLVE_MAX = 1.6;
-
-/**
- * ?decomp=dissolve,decay,shred — pins the three dials, overriding the campaign.
+ * ?decomp=<flow> — pins the dial, overriding the campaign.
  *
  * A look-development handle in the ?seed/?story family. The arc's endpoint is
  * an aesthetic judgement, and the only instrument that has been right about
- * one all along is an eye on a live run: this lets that eye turn the dials
- * directly — reload with e.g. ?decomp=1.3,0.6,0.3 — and read the numbers back
- * once a look is worth keeping. Absent or malformed, the campaign drives.
+ * one all along is an eye on a live run: this lets that eye turn the dial
+ * directly — reload with e.g. ?decomp=0.55 — and read the number back once a
+ * stage is worth keeping. Absent or malformed, the campaign drives.
  */
 /**
- * ?look=insane | fire | cells — the three smoke systems from look
- * development, one URL each, so the reference gets chosen by eye and not by
- * whichever code survived the last pivot.
- *
- * insane — Era 2: slabs + rot + vented turbulent billows (the exhalation).
- * fire   — Era 3: the shroud; the mass's body as one living black cloud.
- * cells  — Era 4 + companion: dissolving cells with tight translucent smoke.
- *
- * The Era-2/3 rot dials are set BELOW their originals on purpose: the noise
- * fields were contrast-stretched after those eras, so the same dial now bites
- * roughly twice as hard. These values approximate the remembered pictures;
- * the smoke blocks themselves are verbatim.
+ * ?look=flow — the approved smoke at full strength, whatever the campaign
+ * says, so the frozen reference (structure.test.ts) can always be viewed at
+ * exactly the state it was approved in.
  */
 const LOOKS: Record<string, Partial<import('./gfx/structure').ShellStyle>> = {
-  insane: { decay: 1.1, shred: 0.5, dissolve: 0, exhale: 1, shroud: 0, smoke: 0 },
-  fire: { decay: 1.1, shred: 0, dissolve: 0, exhale: 0, shroud: 1, smoke: 0 },
-  cells: { decay: 0, shred: 0, dissolve: 1, exhale: 0, shroud: 0, smoke: 1 },
-  // The requested mix of 1 and 2: Era-2's pouring turbulence in the cells'
-  // own grey, ON the cells. No decay and no shred — the erosion made the
-  // base layer pixely and frantic, the opposite of the asked-for gradient
-  // (top most animated, base near-still). The mild dissolve softens the
-  // boundaries top-first by its built-in layer scaling; the smoke does the
-  // rest (see the uSmoke blocks in structure.ts).
-  mix: { decay: 0, shred: 0, dissolve: 0.8, exhale: 0, shroud: 0, smoke: 1 },
-  // The field look: one domain-warped FBM system replaces every edge
-  // treatment. No decay, no shred, no dissolve, no other smoke — coverage
-  // itself is the field, shadows included. See ShellStyle.flow.
-  flow: { decay: 0, shred: 0, dissolve: 0, exhale: 0, shroud: 0, smoke: 0, flow: 1 },
+  flow: { flow: 1 },
 };
 
 const LOOK_OVERRIDE: Partial<import('./gfx/structure').ShellStyle> | null = (() => {
@@ -2778,9 +2727,9 @@ const DECOMP_OVERRIDE: Decomposition['dials'] | null = (() => {
     if (typeof window === 'undefined') return null;
     const raw = new URLSearchParams(window.location.search).get('decomp');
     if (!raw) return null;
-    const [dissolve, decay, shred] = raw.split(',').map(Number);
-    if (![dissolve, decay, shred].every((v) => Number.isFinite(v))) return null;
-    return { dissolve: dissolve!, decay: decay!, shred: shred! };
+    const flow = Number(raw);
+    if (!Number.isFinite(flow)) return null;
+    return { flow };
   } catch {
     return null;
   }

@@ -191,27 +191,17 @@ export interface ShellStyle {
   edge: number;
   oil: number;
   fray: number;
-  decay: number;
-  shred: number;
-  dissolve: number;
   /**
-   * The three smoke systems built during look development, all kept, all
-   * selectable — because the reference for "what smoke means here" is a
-   * decision that belongs to eyes, not to whichever code survived the last
-   * pivot. `exhale` is the Era-2 vented turbulent billows pouring off edges;
-   * `shroud` is the Era-3 body-of-smoke (replaces the grey slab layers while
-   * on); `smoke` is the Era-4 companion — translucent billows hugging each
-   * block's own dissolving edge. Zero costs nothing, as always.
-   */
-  exhale: number;
-  shroud: number;
-  smoke: number;
-  /**
-   * The field look — the first system here that is not "a boundary plus a
-   * noise band riding on it". A domain-warped FBM field becomes the mass's
-   * coverage across a wide band: solid deep inside, breaking into genuinely
-   * flowing smoke with no iso-contour anywhere, in every direction. The
-   * shadows inherit the same field so nothing under the smoke stays straight.
+   * The decomposition — the ONLY one. A domain-warped FBM field becomes the
+   * mass's coverage across a wide band: solid deep inside, breaking into
+   * genuinely flowing smoke with no iso-contour anywhere, in every direction.
+   * The shadows inherit the same field so nothing under the smoke stays
+   * straight. Driven by the campaign's siteDecay (see decompositionDials in
+   * renderer.ts); 0 is sound crisp geometry, 1 is the full approved roil.
+   * Every predecessor — decay, shred, dissolve, and the three rebuilt smoke
+   * eras — was removed outright once this look was approved; see the flow
+   * blocks in the fragment for what survived and structure.test.ts for the
+   * frozen recipe.
    */
   flow: number;
   shadow: number;
@@ -401,59 +391,7 @@ uniform float uEdge;
  * shimmer that was wanted, and the blocks stay exactly as sharp as they were.
  */
 uniform float uOil;
-/**
- * §8.3 — the decay: continuous, organic decomposition of the drawn mass.
- *
- * Purely presentational, like everything in this pass — the colliders
- * underneath never dissolve, so this only ever eats and regrows the picture
- * within the same cap that bounds every block. Three parts, all driven by one
- * knob: a slow macro field that decides *where* the rot currently sits (so
- * regions decay, heal, and it moves on), a finer advected field that eats the
- * silhouettes there, and a faint exhalation rising off whatever is currently
- * going.
- */
-uniform float uDecay;
-/**
- * §8.3 — the shred: the decaying edges fragmenting instead of waving.
- *
- * uDecay perturbs the distance field, and a perturbed contour is still a
- * contour — wobblier, but connected, which is why edges kept reading as
- * boundaries. The shred replaces the smooth silhouette across a band around
- * the edge with a field of soft flecks that thin toward the fringe: coverage
- * breaking into crumbs and stray matter *outside* the line, which is what
- * dissolving actually looks like. Independent knob, same roaming rot field,
- * so the two effects can run alone or stack and still agree about where the
- * decay currently is.
- */
-uniform float uShred;
-/**
- * §8.3 — the dissolve: every block trades its boundary for wisps.
- *
- * Anchored per block, not to the ruin's hull — that distinction is the whole
- * lesson of two failed attempts. Smoke bound to the hull floats over the
- * cells as a separate weather system; flecks thresholded against the hull
- * reconstruct the outline they were meant to destroy. Bound to each block's
- * own distance, the cell pattern survives while every edge in it — blocks,
- * backing, shadows, the lit hairline — stops being a line and becomes a
- * billowing transition a few dozen units wide. The amount scales with the
- * layer: the black base barely breathes, the top grey is the most dissolved,
- * so the z-axis reads as progressive decomposition. Uniform across the arena
- * by design — this is the material's condition, not a passing event; the
- * roaming effects (uDecay, uShred) layer on top when a room is actively
- * dying.
- */
-uniform float uDissolve;
-/**
- * The three smoke systems, kept side by side for look development and beyond.
- * uExhale — Era 2: vented turbulent billows pouring off the silhouette.
- * uShroud — Era 3: the mass's body as living black smoke (grey slabs yield).
- * uSmoke  — Era 4 companion: translucent billows hugging each block's own
- * dissolving edge, tight by construction. See ShellStyle for the history.
- */
-uniform float uExhale;
-uniform float uShroud;
-uniform float uSmoke;
-/** The field look. See ShellStyle.flow — coverage IS a warped FBM field. */
+/** The decomposition. See ShellStyle.flow — coverage IS a warped FBM field. */
 uniform float uFlow;
 /**
  * §8.3 — how far the block edges fray, as a fraction of a block's own size.
@@ -583,79 +521,6 @@ float vnoise(vec2 p) {
   float c = hash21(i + vec2(0.0, 1.0));
   float d = hash21(i + vec2(1.0, 1.0));
   return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
-}
-
-/**
- * The fine decay field, 0..1: what the rot is eating right here, right now.
- *
- * Two octaves of smooth noise, advected — the erosion pattern travels, which
- * is the whole difference between "coming apart" and "has a rough edge". A
- * frozen perturbation is texture; a moving one is a process. (Sits below
- * vnoise because GLSL resolves nothing forward.)
- */
-float decayAt(vec2 p) {
-  vec2 drift = vec2(uTime * 0.05, uTime * -0.038);
-  return (vnoise(p * 0.030 + drift) + 0.5 * vnoise(p * 0.085 - drift * 1.6)) / 1.5;
-}
-
-/**
- * Coverage after the shred, given the distance and the plain coverage.
- *
- * The band spans the edge and reaches two bands past it: well inside, the
- * mass is solid with the odd pinprick — a decaying interior pocks — around
- * the silhouette half the crumbs survive, and beyond it stray flecks thin
- * along a long tail with no outer wall, so there is no radius at which the
- * effect visibly stops. The crumb lattice is *advected*: the drift carries it
- * along the local outward direction of the field, so flecks pull free of the
- * silhouette and travel, rather than fizzing in place — which kept reading
- * as a boundary with a texture on it. The threshold cross-fades between
- * rolls; flecks condense and evaporate, they never pop.
- */
-float shredCover(float d, float cover, vec2 p, float band, vec2 drift) {
-  if (band < 0.5) return cover;
-  // 0 well inside the block; 1 two bands out, at the far fringe.
-  float t = clamp((d + band) / (band * 3.0), 0.0, 1.0);
-  vec2 cell = floor((p + drift) / 9.0);
-  float tick = uTime * 0.8;
-  float turn = floor(tick);
-  float fizz = mix(hash21(cell + turn * 17.3), hash21(cell + (turn + 1.0) * 17.3),
-                   smoothstep(0.0, 1.0, fract(tick)));
-  float alive = smoothstep(t * 0.92, t * 0.92 + 0.18, fizz);
-  // The far fade: multiplied, not clamped, so the tail dissolves instead of
-  // ending.
-  alive *= 1.0 - smoothstep(0.8, 1.0, t);
-  return max(cover * step(band, -d), alive);
-}
-
-/**
- * §8.3 — a dissolving edge: coverage across a soft band around a block's own
- * boundary, eaten into wisps by the billow density handed in.
- *
- * The whole point is what it is anchored to. Smoke bound to the ruin's hull
- * floats over the cells and reads as a separate weather system; this is bound
- * to one block's distance, so the block itself trades its boundary for wisps
- * while its body stays — the cell pattern survives its own decomposition.
- * Inside the band the body is solid; across it the billow decides what
- * remains; past it the wisps thin to nothing within a few dozen units. There
- * is no sharp transition anywhere in that sentence, which is the request.
- */
-float dissolved(float d, float band, float den, float bite, float aa) {
-  if (band < 0.5) return 1.0 - smoothstep(-aa, aa, d);
-  float t = clamp((d + band) / (band * 1.7), 0.0, 1.0);
-  float alive = smoothstep(0.32, 0.72, (1.0 - t) + (den - 0.5) * bite);
-  // The far-field gate — and the history of this line is a lesson worth its
-  // length. Far outside the band, t clamps to 1 (including the 1e5 of a
-  // non-member cell) and the stretched noise alone can clear the threshold:
-  // faint translucent wisps of layer-grey and shadow-black drift around the
-  // ruins wherever the guard runs. At ONSET, on a mostly sound floor, they
-  // read as artifacts — and an earlier fix killed them unconditionally.
-  // That deleted the ambient smoke the whole look had been approved for:
-  // those wisps WERE the atmosphere, and with them gone every edge in the
-  // arena went hard-contoured. Coverage metrics never noticed, because
-  // coverage cannot see softness. So: the far field scales with the dial.
-  // A sound site keeps a clean floor; a dissolving one breathes.
-  float tail = 1.0 - smoothstep(0.82, 1.0, t);
-  return alive * mix(tail, 1.0, smoothstep(0.55, 1.05, uDissolve));
 }
 
 /**
@@ -815,7 +680,7 @@ float capAt(vec2 p) {
  * it, so consecutive cycles hand off at exactly the value they finished on.
  * Nothing in here is ever discontinuous.
  */
-float blockAt(vec2 p, float size, float seed, float bias, float layerExt, float grid, float cap, float fray, float decay) {
+float blockAt(vec2 p, float size, float seed, float bias, float layerExt, float grid, float cap, float fray) {
   // The grid is staggered per layer. Aligned, a column that misses on one layer
   // tends to miss on the next as well — and across a ruin only one or two cells
   // wide that reads as the grey bunching to one side and leaving the rest bare,
@@ -897,14 +762,6 @@ float blockAt(vec2 p, float size, float seed, float bias, float layerExt, float 
   // between a pixel's own layers, so resolving it once in main is the same
   // picture for a sixth of the work.
   if (fray > 0.0) d += frayAt(p, size, uQuarter * 0.5) * fray * size;
-
-  // §8.3 — the decay eats the silhouette the same way the fray does: by
-  // perturbing the distance, which only ever shows where the distance is near
-  // zero. decay arrives signed and already gated by the macro rot field —
-  // resolved once per pixel in main, because the rot does not vary between a
-  // pixel's own layers. Mostly it erodes; occasionally it billows, and the
-  // cap below still clips whatever it grows.
-  d += decay * size * 0.55;
 
   // Clipped to the mass at full dilation.
   //
@@ -1048,28 +905,11 @@ void main(void) {
   // the screen is floor and runs one.
   float cap = capAt(p);
 
-  // §8.3 — where the rot currently sits, and what it is eating right here.
-  //
-  // rot is the slow macro field: it drifts across the arena over tens of
-  // seconds, so a region visibly decays, heals, and the rot moves somewhere
-  // else — decay as a *process*, not a permanent texture. rotEdge is the
-  // per-pixel bite, signed and centred below the mean so the mass mostly
-  // erodes and only occasionally billows. Both resolved once per pixel and
-  // handed down, because they do not vary between a pixel's own layers.
-  float rot = 0.0;
-  float rotEdge = 0.0;
-  float shredB = 0.0;
-  float vent = 0.0;
-  float denSmoke = 0.0;
-  float pour = 0.0;
-  vec2 shredDrift = vec2(0.0);
-  vec2 curl = vec2(0.0);
   float flowF[3];
   flowF[0] = 0.0;
   flowF[1] = 0.0;
   flowF[2] = 0.0;
-  if ((uDecay > 0.001 || uShred > 0.001 || uDissolve > 0.001 || uExhale > 0.001 ||
-       uShroud > 0.001 || uSmoke > 0.001 || uFlow > 0.001) && cap < 260.0) {
+  if (uFlow > 0.001 && cap < 260.0) {
     // ---- the flow field ---------------------------------------------------
     //
     // APPROVED 2026-08-08. This is THE smoke. Every constant in the flow
@@ -1110,61 +950,12 @@ void main(void) {
         flowF[i] = clamp((f - 0.5) * 2.4 + 0.5, 0.0, 1.0);
       }
     }
-    // Turbulence, shared by every decomposition effect: a curl field that
-    // bends the wisps and the fleck paths alike. Without it the motion is a
-    // straight-line escalator off the edge, which is movement but not weather.
-    vec2 tp = p * 0.016;
-    vec2 trise = vec2(uTime * 0.02, uTime * 0.13);
-    curl = vec2(vnoise(tp * 2.1 + trise.yx), vnoise(tp * 2.1 - trise)) - 0.5;
-
-    if (uSmoke > 0.001) {
-      // The cell-smoke's billow density — the Era-2 recipe, computed once and
-      // shared by the three per-layer passes and the outward tail, because
-      // one coherent weather system pouring through the whole stack is the
-      // point; the layers differentiate by anchor and amplitude, not by
-      // owning private skies.
-      vec2 spM = p * vec2(0.016, 0.0095);
-      vec2 riseM = vec2(uTime * 0.02, uTime * 0.115);
-      denSmoke = vnoise(spM + curl * 1.3 + riseM) * 0.68
-               + vnoise(spM * 3.3 + curl * 2.6 + riseM * 1.8) * 0.32;
-    }
-
-    if (uDecay > 0.001 || uShred > 0.001 || uExhale > 0.001 || uShroud > 0.001 ||
-        uSmoke > 0.001) {
-      // The roaming rot: where the wave, the debris and the vented smoke
-      // currently are. The dissolve deliberately does NOT use it — dissolving
-      // edges are the material's permanent condition, not a passing event.
-      float rotN = vnoise(p * 0.0055 + vec2(uTime * 0.017, uTime * -0.011));
-      float fine = decayAt(p);
-      float rotM = 0.30 + 0.70 * rotN;
-      rot = uDecay * rotM;
-      rotEdge = (fine - 0.42) * rot;
-      vent = smoothstep(0.52, 0.85, rotN + 0.22 * (fine - 0.5));
-      // The cell smoke's own gate strength — deliberately NOT coupled to
-      // uDecay, so a look can have calm, uneroded geometry with smoke
-      // pouring off it. FLOORED, unlike the vents: a hard vent gate left
-      // most of the boundary with literally no smoke, and a boundary with no
-      // smoke is a sharp line — the billows must live everywhere and merely
-      // breathe with the vents.
-      pour = (0.35 + 0.65 * vent) * (0.45 + 0.55 * rotM);
-      shredB = 65.0 * uShred * mix(0.12, 1.0, vent);
-      if (shredB > 0.5) {
-        // The local outward direction, from the cap's own gradient — two
-        // extra tile-local samples. Flecks are carried along it with a slight
-        // lift; the curl bends each path so no two escape the same way. The
-        // epsilon keeps the deep interior (where the gradient collapses on
-        // the medial axis) drifting gently upward instead of dividing by zero.
-        vec2 g = vec2(capAt(p + vec2(9.0, 0.0)) - cap, capAt(p + vec2(0.0, 9.0)) - cap);
-        shredDrift = -normalize(g + vec2(0.001, -3.0)) * uTime * 22.0 + curl * 30.0;
-      }
-    }
   }
 
-  // The guard widens with the shred band and the bleed — matter drifts well
-  // past the cap's usual margin, and a wisp clipped by an invisible rectangle
-  // gives the secret away.
-  float bleedBand = uDissolve * 46.0;
-  if (cap < 48.0 + shredB * 2.0 + bleedBand * 0.7 + uFlow * 60.0) {
+  // The guard widens with the flow — the field's wisps drift well past the
+  // cap's usual margin, and a wisp clipped by an invisible rectangle gives
+  // the secret away.
+  if (cap < 48.0 + uFlow * 60.0) {
     vec2 eye = p - uEye;
     // Which room's edges these blocks wear, resolved once for every layer and
     // every shadow below.
@@ -1183,29 +974,7 @@ void main(void) {
     // wants — hard, because a soft shadow is a photograph and a hard one is a
     // drawing.
     float shade = 0.0;
-    // The shadows dissolve with their blocks, and this mattered more than it
-    // sounds. The shadow is offset down-right, so along a mass's lower edge
-    // the outermost dark thing on screen is usually the shadow itself — left
-    // crisp, it redrew the perfect boundary the dissolve had just eaten, and
-    // every ruin came out frayed on top and razor-clean below. One shared
-    // field for all three layers; they merge by max anyway.
-    float sden = 0.5;
-    if (uDissolve > 0.001) {
-      // Coarser than the block wisps on purpose: the boundary's wander is the
-      // noise amplitude times the band, and fine grain averages itself away —
-      // a 5px ripple on a 200px shadow line still reads as a ruler.
-      vec2 shp = p * 0.032 + curl * 0.9 + vec2(uTime * 0.02, uTime * 0.07);
-      sden = vnoise(shp) * 0.6 + vnoise(shp * 2.5 + 4.1) * 0.4;
-      // Contrast-stretched, like every den below. Value noise concentrates
-      // around 0.5 — an octave blend rarely leaves ±0.17 — so a bite sized
-      // for a ±0.5 field delivers a third of its intended wander and every
-      // "ragged" edge comes out as a ruler with a 2px tremble.
-      sden = clamp((sden - 0.5) * 2.2 + 0.5, 0.0, 1.0);
-    }
     for (int layer = 0; layer < 3; layer++) {
-      // Era 3 — under the shroud only the black core casts: the grey slabs it
-      // would shadow with are not drawn.
-      if (uShroud > 0.001 && layer > 0) continue;
       // Indexed here rather than inside blockAt: GLSL ES only allows a vector to
       // be indexed by a constant or a loop symbol, and a function parameter is
       // neither.
@@ -1214,23 +983,8 @@ void main(void) {
       vec2 lp = p + eye * uDepth[layer];
       // Deliberately not clipped: a shadow falls on the floor beyond the block,
       // which is exactly where the cap is not.
-      float sd = blockAt(lp - uShadowOffset * size, size, seed, uBiases[layer], uLayerExtend[layer], uGridOffset[layer], -1e5, fray, rotEdge);
-      // The band does NOT shrink for the base layer. The first version scaled
-      // it up with the layer index, which handed the 260-unit base blocks —
-      // whose shadows are the longest, most visible straight lines on screen
-      // — a one-pixel band, and every ruin kept a crisp rectangle under its
-      // fray. The base's shadow needs the most eating, not the least.
-      float sBand = uDissolve * (30.0 + 6.0 * float(layer));
-      float s1;
-      if (sBand > 0.5) {
-        // Inward-shifted like nothing else: a shadow that billowed outward
-        // would exceed its own membership cells and cut. Eaten raggedly from
-        // the edge in, it reads as the shadow of a dissolving thing.
-        s1 = dissolved(sd + sBand * 0.7, sBand, sden, 0.9, aa);
-      } else {
-        s1 = 1.0 - smoothstep(-aa, aa, sd);
-      }
-      shade = max(shade, s1);
+      float sd = blockAt(lp - uShadowOffset * size, size, seed, uBiases[layer], uLayerExtend[layer], uGridOffset[layer], -1e5, fray);
+      shade = max(shade, 1.0 - smoothstep(-aa, aa, sd));
     }
     // The flow's shadows come from the FIELD, not the blocks. Merely
     // modulating the block-shaped shadows left their crisp rectangles
@@ -1238,7 +992,9 @@ void main(void) {
     // them — detached ghost slabs. Under the flow, the shadow is the hull
     // offset the same way the blocks' shadows were, shaped by the same field
     // that shapes the mass.
-    if (uFlow > 0.001) {
+    // Full strength only: below it the crisp block shadows render untouched —
+    // shadows are part of the crisp picture the intermediate rungs preserve.
+    if (uFlow >= 0.999) {
       float bdSh = massAt(p - uShadowOffset * uSizes[0]).x;
       float shF = (1.0 - smoothstep(-30.0, 26.0, bdSh))
                 * (0.35 + 0.65 * smoothstep(0.15, 0.85, flowF[2]));
@@ -1251,86 +1007,34 @@ void main(void) {
     // showing the floor through — slabs floating on the ground rather than a
     // wall with a broken edge. Out past the collider the gaps are correct and
     // wanted; over it they are a hole in something solid.
-    // Its edge dissolves and shreds with the layers, or the softening
-    // silhouette would sit on a perfectly crisp black plate wherever the
-    // blocks thin over the collider and the whole effect would read as the
-    // greys misbehaving.
-    float bd0 = massAt(p).x + rotEdge * 44.0;
-    // Wider than the blocks' bands, because this is where the outward wisps
-    // live — the backing's field is continuous, so its smoke can drift past
-    // the silhouette without ever meeting a cell seam.
-    float bBand = uDissolve * 11.0;
-    float bCover;
-    if (bBand > 0.5) {
-      float bden = vnoise(p * 0.05 + curl * 0.8 + vec2(uTime * 0.03, uTime * 0.16) * 0.5);
-      bCover = dissolved(bd0, bBand, bden, 0.34, aa);
-    } else {
-      bCover = 1.0 - smoothstep(-aa, aa, bd0);
-    }
+    float bd0 = massAt(p).x;
+    float bCover = 1.0 - smoothstep(-aa, aa, bd0);
     // Under the flow, the backing's outline joins the field too — it is the
     // straightest line in the stack and the first to betray a boundary.
-    if (uFlow > 0.001) {
+    if (uFlow >= 0.999) {
       // max, not mix: the legacy backing is exact over the collider and that
       // exactness is the floor — the field may only ADD billow beyond it.
       // Blending them let field troughs thin the plate over solid ground,
       // which is the dilate-never-erode law broken at its very foundation.
+      // Full strength only: below it the crisp backing renders untouched and
+      // the staged smoke in the layer loop carries the whole transition.
       float biasB = 1.0 - 2.0 * smoothstep(-34.0, 34.0, bd0);
       float bFlow = smoothstep(0.30, 0.72, biasB * 0.54 + flowF[0] * 0.58);
       bCover = max(bCover, bFlow * min(1.0, uFlow));
     }
-    put(acc, uMass * uBacking, shredCover(bd0, bCover, p, shredB * 0.8, shredDrift));
+    put(acc, uMass * uBacking, bCover);
 
     // Three scales, back to front. Each is offset a little further from the
     // player than the last, which from above reads as slabs stacked toward you.
-    // minBd carries the distance to the nearest drawn block out of the loop —
-    // the Era-4 smoke hugs it.
-    float minBd = 1e5;
     for (int layer = 0; layer < 3; layer++) {
-      // Era 3 — the shroud replaces the grey layers outright; the base stays
-      // as the black core that keeps the silhouette honest under the smoke.
-      if (uShroud > 0.001 && layer > 0) continue;
       float size = uSizes[layer];
       float seed = float(layer) * 21.0 + 11.0;
       vec2 lp = p + eye * uDepth[layer];
 
-      float bd = blockAt(lp, size, seed, uBiases[layer], uLayerExtend[layer], uGridOffset[layer], cap, fray, rotEdge);
-      minBd = min(minBd, bd);
+      float bd = blockAt(lp, size, seed, uBiases[layer], uLayerExtend[layer], uGridOffset[layer], cap, fray);
 
-      // §8.3 — the dissolve: the block keeps its body and loses its boundary.
-      // Band, grain, pace and bite all scale with the layer — the black base
-      // barely breathes, the top grey is the most gone — so the z-axis reads
-      // as progressive decomposition. The billow is sampled per layer through
-      // the shared curl, decorrelated by the seed, so the wisps of adjacent
-      // strata never move as one sheet.
       float fi = float(layer);
-      float band = uDissolve * (5.0 + 9.0 * fi);
-      float cover;
-      if (band > 0.5) {
-        float speed = 0.5 + 0.5 * fi;
-        vec2 sp = lp * (0.05 + 0.02 * fi);
-        // The vertical advection stays gentle. At the old rate the wisp
-        // pattern streamed upward hard enough that top edges shed while
-        // bottom edges swallowed their own fray — every ruin came out
-        // lopsided. The bleed keeps the visible rise; the edges stay evenly
-        // eaten on all sides.
-        vec2 rise = vec2(uTime * 0.03, uTime * 0.085) * speed;
-        float den = vnoise(sp + curl * (0.8 + 0.5 * fi) + rise + fi * 5.1) * 0.6
-                  + vnoise(sp * 2.6 + curl * (1.6 + fi) + rise * 1.8 + fi * 2.3) * 0.4;
-        den = clamp((den - 0.5) * 2.2 + 0.5, 0.0, 1.0);
-        // Symmetric: the wisps exceed the block's boundary — dissolving means
-        // getting BIGGER, ink into water, not a cloud evaporating. Membership
-        // is quantised per cell, so past the mass's own silhouette those
-        // outward wisps would end in razor cuts at empty-cell seams; the fade
-        // on the next line hands them over, continuously, to the bleed below,
-        // which owns everything beyond the boundary and cannot cut.
-        cover = dissolved(bd, band, den, 0.30 + 0.30 * fi, aa);
-        cover *= 1.0 - smoothstep(0.0, 10.0, bd) * smoothstep(2.0, 26.0, bd0);
-      } else {
-        cover = 1.0 - smoothstep(-aa, aa, bd);
-      }
-      // Offset by the layer seed so the three layers do not share one fleck
-      // pattern — shared crumbs read as a screen effect, not a material one.
-      cover = shredCover(bd, cover, lp + seed, shredB, shredDrift);
+      float cover = 1.0 - smoothstep(-aa, aa, bd);
 
       // ---- the flow: coverage IS the field ---------------------------------
       //
@@ -1343,7 +1047,16 @@ void main(void) {
       // Outside a layer's own membership cells bd quantises away, so the
       // effective distance falls back to the continuous hull field, offset
       // per layer so the strata still stagger.
-      if (uFlow > 0.001) {
+      // NO MORPHING. Two staging attempts tried to interpolate between the
+      // crisp look and the field look — alpha blending (translucent slabs),
+      // then geometry melting (every edge went soft) — and both failed the
+      // same way: every point between two approved pictures is an unapproved
+      // picture. So there is no in-between geometry. Below full strength the
+      // crisp look renders EXACTLY, untouched, and the field arrives as
+      // opaque smoke laid over it (the staged block after put); at full
+      // strength coverage is handed to the field outright. The rungs are
+      // discrete nights — nobody ever sees a blend.
+      if (uFlow >= 0.999) {
         // Wide, and getting wider each round the boundary survives: the wider
         // the transition, the more the field's structure outweighs the
         // distance ramp, and the less any iso-line can read.
@@ -1379,136 +1092,47 @@ void main(void) {
           float roil = flowF[1] * 10.0;
           fCover = max(fCover, 1.0 - smoothstep(-14.0, 2.0, bd0 - roil));
         }
-        cover = mix(cover, fCover, min(1.0, uFlow));
+        cover = fCover;
       }
       if (cover > 0.001) {
         vec3 body = uMass * uShades[layer];
-        // The lit edge: a hairline inside the top and left borders only. A
-        // crisp lit hairline on a dissolving border is a contradiction, so it
-        // fades out as the dissolve comes in.
+        // The lit edge: a hairline inside the top and left borders only...
         vec2 rel = lp - (floor(lp / size - uGridOffset[layer]) + 0.5 + uGridOffset[layer]) * size;
         float edge = smoothstep(-2.2 * aa, 0.0, bd);
         float side = max(step(rel.x, 0.0), step(rel.y, 0.0));
-        // ...and not under the flow either: a crisp lit hairline on a field
-        // that has no boundary would draw the boundary back in.
-        body += uMass * edge * side * uEdge * max(0.0, 1.0 - uDissolve) * (1.0 - min(1.0, uFlow));
+        // ...but not at full flow: a crisp lit hairline on a field that has
+        // no boundary would draw the boundary back in. Below full the crisp
+        // look keeps its hairline whole — dimming it was the morphing
+        // mistake in miniature.
+        body += uMass * edge * side * uEdge * (1.0 - step(0.999, uFlow));
         put(acc, body, cover);
       }
 
-      // §8.3 — the cell smoke, per layer: Era-2 turbulence worn by the cells
-      // in their own grey, drawn right over its layer so the stack keeps its
-      // depth. The z-gradient is strict and the base is exempt: the black
-      // geometry stays clean and near-still — it is the anchor everything
-      // else is measured against — the middle grey smokes only at its edges,
-      // and the top grey wears billows across its whole body and pours off
-      // its rim. Anchored to THIS layer's bd; beyond the outermost cells bd
-      // quantises away, and the tight tail after this loop carries the spill
-      // across the boundary on the continuous hull field.
-      if (uSmoke > 0.001 && pour > 0.004 && layer > 0) {
-        float reachL = layer == 1 ? 22.0 : 40.0;
-        float ampL = layer == 1 ? 0.45 : 1.0;
-        float bodyL = layer == 2 ? (1.0 - smoothstep(-40.0, 10.0, bd)) * 0.45 : 0.0;
-        float proxL = min(1.0, exp(-abs(bd) / reachL) + bodyL);
-        float aL = smoothstep(0.40, 0.90, denSmoke + fi * 0.02) * proxL * pour * 2.5 * ampL * uSmoke;
-        if (aL > 0.003) put(acc, uMass * uShades[layer] * 1.15, min(0.85, aL));
+      // ---- staged smoke: the approved field, arriving ----------------------
+      //
+      // The intermediate rungs. The crisp picture above is untouched; this
+      // lays the field's smoke OVER it, bound to the DRAWN blocks. The first
+      // attempt anchored a band to the collider hull — which is what the
+      // full look does, and there it works because no cells are visible; at
+      // a stage the cells ARE the picture, and the hull-anchored band sat
+      // offset from every visible edge, reading as a fuzz strip on one side
+      // and nothing anywhere else. dS is the distance to this layer's own
+      // silhouette, handed to the continuous hull past the outermost member
+      // cells so the smoke cannot cut at a seam (the trap this stack has
+      // fallen into before). The field decides which stretches of edge
+      // billow — opaque where it says covered, in every direction, swirling
+      // on the same orbits as the full look — and the stage scales the
+      // reach and how much of the edge smokes, never the opacity.
+      if (uFlow > 0.001 && uFlow < 0.999) {
+        float fk = min(1.0, uFlow);
+        float dS = min(abs(bd), abs(bd0) + 14.0);
+        float reachS = (18.0 + 60.0 * fk) * (0.7 + 0.45 * fi);
+        float proxS = exp(-dS / reachS);
+        float thS = 1.45 - 0.35 * fk;
+        float aS = smoothstep(thS, thS + 0.24, flowF[layer] + proxS) * 0.92;
+        if (aS > 0.003) put(acc, uMass * uShades[layer], aS);
       }
     }
-
-    // ---- the bleed --------------------------------------------------------
-    //
-    // §8.3 — the drop of ink: the mass exceeding its boundary. Anchored to
-    // the union field (continuous, cannot cut at cell seams), it spreads dark
-    // tendrils past the silhouette — dense laps over the edge, ragged fingers
-    // to about seventy units, rare tips beyond, thinning by dissolution
-    // rather than at a radius. Masked off deep inside so it never repaints
-    // the interior. It is the MASS's own near-black at high opacity, not a
-    // lighter grey at a whisper: the first version tinted it a hair off the
-    // floor colour at half alpha, which measured as present and read as
-    // nothing. Ink has to be opaque to be ink.
-    if (bleedBand > 0.5) {
-      vec2 bp = p * 0.042 + curl * 1.1 + vec2(uTime * 0.025, uTime * 0.14);
-      float bden = vnoise(bp) * 0.6 + vnoise(bp * 2.7 + vec2(2.2, uTime * 0.1)) * 0.4;
-      bden = clamp((bden - 0.5) * 2.2 + 0.5, 0.0, 1.0);
-      float bt = clamp((bd0 + bleedBand) / (bleedBand * 2.6), 0.0, 1.0);
-      // Noise-thresholded, not noise-nudged: the threshold rises with the
-      // distance and the ink is near-opaque wherever it passes. The previous
-      // additive form made alpha fall smoothly with distance, which is a
-      // gradient skirt with a straight rim — the boundary of THIS form is a
-      // contour line of the noise itself, which is what fingers look like.
-      float th = mix(0.30, 0.82, bt);
-      float a = smoothstep(th, th + 0.10, bden) * 0.92;
-      a *= smoothstep(-bleedBand, -bleedBand * 0.25, bd0);
-      a *= 1.0 - smoothstep(0.90, 1.0, bt);
-      if (a > 0.003) put(acc, uMass * 0.9, a);
-    }
-
-  }
-
-  // ---- the cell smoke's outward tail --------------------------------------
-  //
-  // The ink dropped into water: past the outermost cells the per-layer bd
-  // quantises to nothing, and smoke anchored to it would stop dead at the
-  // boundary — the exact trap this stack has fallen into twice. So right at
-  // the silhouette the same billow field rides the hull distance instead,
-  // which is continuous and cannot stop at a seam. TIGHT on purpose: the
-  // first version reached a hundred-plus units and its billows read as
-  // free-floating weather away from the cells — the one placement the smoke
-  // must never have. This spill is dead within ~60 units of the boundary,
-  // wearing the top slab grey it just left.
-  // Reach tuned against two failure modes seen on screen: at ~55 falloff the
-  // far billows detached into free-floating weather; at ~24 the smoke read
-  // as inward-only and the boundary stayed a line. 34 keeps the billows
-  // rooted to the rim while visibly exceeding it.
-  //
-  // Anchored to massAt — the TRUE mass boundary — and not to cap. cap is the
-  // reach-dilated field: its zero sits tens of units outside the visible cell
-  // faces, and a spill anchored there hovered as an offset ring of smoke
-  // with the actual edge showing through as a straight line beneath it. The
-  // inner lap (-35) is what buries that edge under billows.
-  if (uSmoke > 0.001 && pour > 0.004 && cap < 95.0) {
-    float bdT = massAt(p).x;
-    if (bdT > -35.0 && bdT < 95.0) {
-      float proxT = exp(-max(bdT, 0.0) / 34.0);
-      float aT = smoothstep(0.36, 0.88, denSmoke) * proxT * pour * 2.8 * uSmoke;
-      if (aT > 0.003) put(acc, uMass * uShades[2] * 1.15, min(0.85, aT));
-    }
-  }
-
-  // ---- the exhalation (Era 2, reconstructed) ------------------------------
-  //
-  // Verbatim from the round whose screenshot got called "insane, super
-  // cool": vented, domain-warped billows pouring off whatever the rot eats,
-  // plumes taller than wide, dense at the silhouette, tapering for a hundred
-  // units. Kept selectable because a look this liked does not get to die in
-  // a pivot again.
-  if (uExhale > 0.001 && rot * vent > 0.004 && cap < 190.0) {
-    vec2 spE = p * vec2(0.016, 0.0095);
-    vec2 riseE = vec2(uTime * 0.02, uTime * 0.115);
-    float billowE = vnoise(spE + curl * 1.3 + riseE);
-    float detailE = vnoise(spE * 3.3 + curl * 2.6 + riseE * 1.8);
-    float denE = billowE * 0.68 + detailE * 0.32;
-    float proxE = exp(-abs(cap + 12.0) / 55.0);
-    float aE = smoothstep(0.42, 0.92, denE) * proxE * rot * vent * 3.0 * uExhale;
-    if (aE > 0.003) put(acc, uMass * 2.2 + uStructure * 0.34, min(0.7, aE));
-  }
-
-  // ---- the shroud (Era 3, reconstructed) ----------------------------------
-  //
-  // Verbatim from the round that got "uuh... fire": the mass's visible body
-  // as one black living cloud — solid over the collider, tearing into curls
-  // across the edge, vents modulating only the reach. The grey slab layers
-  // yield to it (see the loop skips above).
-  if (uShroud > 0.001 && cap < 150.0) {
-    vec2 spS = p * vec2(0.020, 0.012);
-    vec2 riseS = vec2(uTime * 0.035, uTime * 0.19);
-    float billowS = vnoise(spS + curl * 1.5 + riseS);
-    float detailS = vnoise(spS * 3.1 + curl * 2.9 + riseS * 1.9);
-    float denS = billowS * 0.62 + detailS * 0.38;
-    float reachS = 55.0 + 65.0 * vent;
-    float bodyS = 1.0 - smoothstep(-30.0, reachS, cap);
-    float fieldS = bodyS + (denS - 0.5) * 0.9;
-    float aS = smoothstep(0.30, 0.72, fieldS) * uShroud;
-    if (aS > 0.003) put(acc, uMass * 1.25, min(0.96, aS));
   }
 
   // ---- the ship is never lost under a slab -----------------------------
@@ -1715,12 +1339,6 @@ export class StructurePass {
           uEdge: { value: 0.3, type: 'f32' },
           uOil: { value: 0, type: 'f32' },
           uFray: { value: 0, type: 'f32' },
-          uDecay: { value: 0, type: 'f32' },
-          uShred: { value: 0, type: 'f32' },
-          uDissolve: { value: 0, type: 'f32' },
-          uExhale: { value: 0, type: 'f32' },
-          uShroud: { value: 0, type: 'f32' },
-          uSmoke: { value: 0, type: 'f32' },
           uFlow: { value: 0, type: 'f32' },
           uZoneRect: { value: new Float32Array(MAX_ZONES * 4), type: 'vec4<f32>', size: MAX_ZONES },
           uZoneMat: { value: new Float32Array(MAX_ZONES * 4), type: 'vec4<f32>', size: MAX_ZONES },
@@ -1809,10 +1427,10 @@ export class StructurePass {
     // A wall reaches a tile through its largest block: half a cell of snap, the
     // stretch, the jitter, the shadow offset. Sixty per cent of the big layer's
     // size covers all of it with slack; the flat pad is the seal warp; the
-    // shred term is how far its flecks can drift past the silhouette — the
-    // cap has to stay accurate out to the farthest fleck or the outer fringe
-    // pops at tile seams.
-    this.margin = s.sizes[0] * 0.6 + 80 + s.shred * 130;
+    // flow term is how far the field's wisps can drift past the silhouette —
+    // the cap has to stay accurate out to the farthest wisp or the outer
+    // fringe pops at tile seams.
+    this.margin = s.sizes[0] * 0.6 + 80 + s.flow * 130;
     this.tileKey = '';
     n.uInsetPulse = s.insetPulse;
     n.uJitter = s.jitter;
@@ -1827,12 +1445,6 @@ export class StructurePass {
     n.uShadow = s.shadow;
     n.uBacking = s.backing;
     n.uShellReach = s.shellReach;
-    n.uDecay = s.decay;
-    n.uShred = s.shred;
-    n.uDissolve = s.dissolve;
-    n.uExhale = s.exhale;
-    n.uShroud = s.shroud;
-    n.uSmoke = s.smoke;
     n.uFlow = s.flow;
   }
 
