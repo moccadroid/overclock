@@ -398,16 +398,7 @@ export class Renderer {
       shell.setPalette(PALETTE.structure, PALETTE.background, PALETTE.mass);
       shell.setStyle(SHELL);
       shell.setArena(world.arena.width, world.arena.height);
-      shell.setMaterialZones(
-        {
-          oil: SHELL.oil,
-          fray: SHELL.fray,
-          dissolve: SHELL.dissolve + siteFloor(world),
-          decay: SHELL.decay,
-          shred: SHELL.shred,
-        },
-        materialZonesFor(world),
-      );
+      shell.setMaterialZones({ oil: SHELL.oil, fray: SHELL.fray }, materialZonesFor(world));
     }
     this.shellFloor.setMode(0);
     this.shellMass.setMode(1);
@@ -728,7 +719,7 @@ export class Renderer {
     const tintAmount = biome ? 0.5 : level?.tint !== undefined ? 0.35 : 0;
     this.shellTintAmount += (tintAmount - this.shellTintAmount) * Math.min(1, frameDt * 1.5);
     for (const shell of this.shells) shell.setTint(this.shellTint, this.shellTintAmount);
-    this.applyRoomStyle(level);
+    this.applyRoomStyle(level, siteFloor(world));
 
     // The screen-space "biome field" programs (frost, ember, static) were
     // removed per STORY-AND-TONE §8.1 — they read as a cartoon, and authored
@@ -1402,12 +1393,16 @@ export class Renderer {
    * see `setMaterialZones`. They are placed in the world, because switching them
    * on a room change repaints the room the player just left.
    */
-  private applyRoomStyle(level: LevelDef | null): void {
-    const id = level?.shell ? level.id : null;
+  private applyRoomStyle(level: LevelDef | null, floor: number): void {
+    const id = `${level?.shell ? level.id : ''}:${floor.toFixed(3)}`;
     if (id === this.roomStyleId) return;
     this.roomStyleId = id;
     const style = level?.shell ? ({ ...SHELL, ...level.shell } as typeof SHELL) : SHELL;
-    for (const shell of this.shells) shell.setStyle(style);
+    // LEVELS §3.2b — the campaign's own floor under whatever the room authored.
+    // Applied here because this is where the decomposition dials are set.
+    const withFloor =
+      floor > 0 ? { ...style, dissolve: Math.min(2, style.dissolve + floor) } : style;
+    for (const shell of this.shells) shell.setStyle(withFloor);
   }
 
   // ---------------------------------------------------------------- entities
@@ -2669,24 +2664,11 @@ function siteFloor(world: World): number {
 
 function materialZonesFor(world: World): MaterialZone[] {
   const zones: MaterialZone[] = [];
-  const floor = siteFloor(world);
   for (const level of world.arena.levels ?? []) {
     const oil = (level.shell?.['oil'] as number | undefined) ?? SHELL.oil;
     const fray = (level.shell?.['fray'] as number | undefined) ?? SHELL.fray;
-    const authored = (level.shell?.['dissolve'] as number | undefined) ?? SHELL.dissolve;
-    const dissolve = Math.min(2, authored + floor);
-    const decay = (level.shell?.['decay'] as number | undefined) ?? SHELL.decay;
-    const shred = (level.shell?.['shred'] as number | undefined) ?? SHELL.shred;
-    if (
-      oil === SHELL.oil &&
-      fray === SHELL.fray &&
-      dissolve === SHELL.dissolve &&
-      decay === SHELL.decay &&
-      shred === SHELL.shred
-    ) {
-      continue;
-    }
-    zones.push({ x: level.x, y: level.y, w: level.w, h: level.h, oil, fray, dissolve, decay, shred });
+    if (oil === SHELL.oil && fray === SHELL.fray) continue;
+    zones.push({ x: level.x, y: level.y, w: level.w, h: level.h, oil, fray });
   }
   return zones;
 }
