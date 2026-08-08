@@ -42,8 +42,20 @@ import {
   pressureLines,
 } from './readouts';
 
-/** Frame thickness, in pixels. */
-export const BEZEL = { top: 30, bottom: 26, side: 6 } as const;
+/**
+ * Frame thickness, in pixels.
+ *
+ * **The top band contains the readouts; it is not a caption above them.** It was
+ * 30 — enough for the titlebar alone — so the three panels sat *below* the frame,
+ * floating in the play area with nothing around them. That is what the old DOM
+ * HUD did, and re-drawing it in Pixi without giving it a container achieved
+ * parity with the thing it replaced instead of the thing it was for.
+ *
+ * 100 holds the titlebar, a rule, and three lines of instrumentation. The bottom
+ * holds the keys and the frame-cost line on two rows. Sides stay hairline: bullets
+ * come from there and field of view is cheapest to spend vertically.
+ */
+export const BEZEL = { top: 100, bottom: 44, side: 6, titleH: 28 } as const;
 
 export interface BezelState {
   /** Site designation and the room the operator is standing in. */
@@ -119,19 +131,26 @@ export class Bezel {
     this.h = h;
     this.paint();
 
-    this.title.position.set(BEZEL.side + 12, Math.round((BEZEL.top - 12) / 2));
-    this.ref.position.set(w - BEZEL.side - 12, Math.round((BEZEL.top - 10) / 2) + 1);
-    this.clock.position.set(w - BEZEL.side - 110, Math.round((BEZEL.top - 12) / 2));
-    this.keys.position.set(BEZEL.side + 12, h - BEZEL.bottom + Math.round((BEZEL.bottom - 12) / 2));
-    // The panels, inside the frame. Widths are in characters, so a column that
-    // fits at 1280 fits at every size above it.
-    const col = (n: number): number => Math.round(n * charW());
     const inset = BEZEL.side + 14;
-    this.operator.view.position.set(inset, BEZEL.top + 10);
-    this.pressure.view.position.set(Math.round(w / 2) - col(28), BEZEL.top + 10);
-    this.engine.view.position.set(w - inset - col(46), BEZEL.top + 10);
-    this.diagnostics.view.position.set(inset, h - BEZEL.bottom - LINE - 6);
-    this.alert.view.position.set(Math.round(w / 2) - col(16), h - BEZEL.bottom - LINE * 2 - 6);
+    // The titlebar owns the first row of the band.
+    this.title.position.set(inset, Math.round((BEZEL.titleH - 12) / 2));
+    this.ref.position.set(w - inset, Math.round((BEZEL.titleH - 10) / 2) + 1);
+    this.clock.position.set(w - inset - 110, Math.round((BEZEL.titleH - 12) / 2));
+
+    // The panels, *inside* the band, under the titlebar's rule. Widths are in
+    // characters, so a column that fits at 1280 fits at every size above it.
+    const col = (n: number): number => Math.round(n * charW());
+    const row = BEZEL.titleH + 8;
+    this.operator.view.position.set(inset, row);
+    this.pressure.view.position.set(Math.round(w / 2) - col(26), row);
+    // Right-hand panel: pushed to a column that leaves room for a four-row engine
+    // list without reaching the middle.
+    this.engine.view.position.set(w - inset - col(44), row);
+
+    // The bottom band holds both lines it needs.
+    this.keys.position.set(inset, h - BEZEL.bottom + 8);
+    this.diagnostics.view.position.set(inset, h - BEZEL.bottom + 22);
+    this.alert.view.position.set(Math.round(w / 2) - col(16), h - BEZEL.bottom - LINE - 4);
   }
 
   update(world: World, s: BezelState): void {
@@ -157,7 +176,7 @@ export class Bezel {
    * mid-fight is the one you are aiming at.
    */
   private paint(): void {
-    const { top, bottom, side } = BEZEL;
+    const { top, bottom, side, titleH } = BEZEL;
     const w = this.w;
     const h = this.h;
     const panel = 0x05070c;
@@ -168,6 +187,9 @@ export class Bezel {
     this.frame.rect(0, top, side, h - top - bottom).fill({ color: panel, alpha: 1 });
     this.frame.rect(w - side, top, side, h - top - bottom).fill({ color: panel, alpha: 1 });
 
+    // The rule under the titlebar: the band's own internal division, so the
+    // readouts read as recessed into the machine rather than printed on it.
+    this.frame.rect(side, titleH, w - side * 2, 1).fill(C.rule);
     // The inner edge, which is where a bezel meets its screen.
     this.frame.rect(side, top - 1, w - side * 2, 1).fill(C.faint);
     this.frame.rect(side, h - bottom, w - side * 2, 1).fill(this.hot ? C.signal : C.rule);

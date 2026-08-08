@@ -20,7 +20,7 @@
  */
 import type { World } from '../../sim/world';
 import { TUNABLE } from '../../sim/tunables';
-import { C, blank, chain, field, meter, type Line, type Seg } from '../ui';
+import { C, field, meter, type Line, type Seg } from '../ui';
 
 /** m:ss, the run's own clock. */
 function runClock(seconds: number): string {
@@ -131,19 +131,26 @@ export function pressureLines(world: World): Line[] {
 }
 
 /**
- * Right: output, and the engine that is producing it.
+ * Right: output, and what the engine is costing.
  *
- * The program list is the editor's own chain, at one line each — the same
- * `chain()` the pipeline uses, so a build reads identically in both places.
+ * **The program list is not here, and that is a trade.** It was four rows of
+ * chains, which is more than a frame two lines deep can hold — it escaped the
+ * band and floated in the play area, which is exactly what the bezel exists to
+ * stop. The old DOM HUD carried it for a real reason ("a build you cannot see is
+ * a build you cannot reason about"), and the answer is that the build now has a
+ * home one keypress away: TAB opens the editor, where the same chains are drawn
+ * larger and can be edited.
+ *
+ * If it has to come back, it needs a *column* rather than a band — a frame that is
+ * wide on the right as well as the top — which costs horizontal field of view. It
+ * is a design call, not an oversight.
  */
 export function engineLines(world: World): Line[] {
-  const lines: Line[] = [
+  return [
     [
       ['EPS ', C.faint],
       [world.eps.toFixed(1), C.bright],
-    ],
-    [
-      ['SCORE ', C.faint],
+      ['    SCORE ', C.faint],
       [String(Math.floor(world.score)), C.ink],
       ...(world.kernels > 0
         ? ([['   KERNEL ×', C.faint], [world.engine.kernel.toFixed(2), C.ink]] as Seg[])
@@ -155,24 +162,7 @@ export function engineLines(world: World): Line[] {
       ['  ', C.ink],
       ...gauge(world.engine.staticLoad, world.budget.capacity, 10, C.voltaic),
     ],
-    blank(),
   ];
-
-  world.engine.programs.forEach((program, i) => {
-    const compiled = world.engine.compiled[i]!;
-    if (!program.triggerId && !program.actionId) return;
-    const parts: string[] = [];
-    const trig = program.triggerId;
-    if (trig) parts.push(trig.replace(/_/g, ' '));
-    for (const m of program.modifierIds) if (m) parts.push(m);
-    if (program.actionId) parts.push(program.actionId);
-    lines.push([
-      [`${i + 1} `, C.faint],
-      ...(compiled.live ? chain(parts) : parts.map((p) => [p, C.rule] as Seg)),
-      [`  ${compiled.staticCost.toFixed(0)}c`, C.faint],
-    ]);
-  });
-  return lines;
 }
 
 /** Bottom left: what the machine is doing, for anyone who goes looking. */

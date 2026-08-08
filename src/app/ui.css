@@ -67,19 +67,6 @@ textarea {
   color: var(--ink);
   letter-spacing: 0.04em;
 }
-/**
- * The readouts sit **inside the bezel**, not at the edge of the screen.
- *
- * `--bezel-top` and `--bezel-bottom` are the frame's own thickness, set once in
- * `bezel.ts`. Before this the bezel drew its titlebar in the same band the top
- * corners occupied and the two overlapped into unreadable mush — the frame was
- * added around a HUD that still thought it owned the screen edge.
- */
-:root {
-  --bezel-top: 30px;
-  --bezel-bottom: 26px;
-  --bezel-side: 6px;
-}
 /* §19.4 specifies a 1px full-width line. At 1px nobody could tell how close the
    next Draft was, so it is 3px with a soft glow, backed by numbers in the HUD. */
 #xpbar {
