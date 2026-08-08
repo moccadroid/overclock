@@ -399,7 +399,13 @@ export class Renderer {
       shell.setStyle(SHELL);
       shell.setArena(world.arena.width, world.arena.height);
       shell.setMaterialZones(
-        { oil: SHELL.oil, fray: SHELL.fray, dissolve: SHELL.dissolve + siteFloor(world) },
+        {
+          oil: SHELL.oil,
+          fray: SHELL.fray,
+          dissolve: SHELL.dissolve + siteFloor(world),
+          decay: SHELL.decay,
+          shred: SHELL.shred,
+        },
         materialZonesFor(world),
       );
     }
@@ -2669,8 +2675,18 @@ function materialZonesFor(world: World): MaterialZone[] {
     const fray = (level.shell?.['fray'] as number | undefined) ?? SHELL.fray;
     const authored = (level.shell?.['dissolve'] as number | undefined) ?? SHELL.dissolve;
     const dissolve = Math.min(2, authored + floor);
-    if (oil === SHELL.oil && fray === SHELL.fray && dissolve === SHELL.dissolve) continue;
-    zones.push({ x: level.x, y: level.y, w: level.w, h: level.h, oil, fray, dissolve });
+    const decay = (level.shell?.['decay'] as number | undefined) ?? SHELL.decay;
+    const shred = (level.shell?.['shred'] as number | undefined) ?? SHELL.shred;
+    if (
+      oil === SHELL.oil &&
+      fray === SHELL.fray &&
+      dissolve === SHELL.dissolve &&
+      decay === SHELL.decay &&
+      shred === SHELL.shred
+    ) {
+      continue;
+    }
+    zones.push({ x: level.x, y: level.y, w: level.w, h: level.h, oil, fray, dissolve, decay, shred });
   }
   return zones;
 }

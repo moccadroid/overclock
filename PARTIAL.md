@@ -2,7 +2,7 @@
 
 State of the `story-arc` branch as of 2026-08-08. STORY-AND-TONE.md is the spec;
 this file is only the delta between it and the code. Everything not listed here is
-built, green (266 tests, typecheck, lint) and verified — though see §7 for what
+built, green (267 tests, typecheck, lint) and verified — though see §7 for what
 "verified" currently means.
 
 ---
@@ -95,20 +95,19 @@ the Engine's six words arrive as two ordinary transmissions. Missing:
 reference. Built and per-room: **`dissolve`** (a block trades its boundary for
 wisps — edges billow past themselves, ink tendrils, matter *leaving*), **`fray`**
 (the finer beat-synced crumble), **`oil`** (thin-film interference on the floor,
-coming up through the seams). Built and global: **`decay`** (a roaming rot wave
-that warps and heals) and **`shred`** (flecks pulling free at its venting
-stretches) — global on purpose, because they are events crossing the arena rather
-than properties of a room.
+coming up through the seams). Also per-room: **`decay`** (a roaming rot wave that warps and heals) and
+**`shred`** (flecks pulling free at its venting stretches).
 
-All three per-room dials are resolved per pixel from world-space room rectangles,
+All five dials are resolved per pixel from world-space room rectangles,
 so crossing a gate no longer repaints the room behind the player. `dissolve` was
 global when it arrived and had exactly that bug; `uZoneMat.z` carries it now, and
 the branch predicates use a separate conservative maximum so a dissolving room's
 wisps are never clipped against an invisible rectangle.
 
 The five-room ladder is authored in `arenas.json` — Heap nothing, Sink 0.35,
-Archive 0.22 (below the Sink deliberately: stillness is its texture), Store 1.0,
-Cell 1.6 — and `RunConfig.siteDecay` raises a floor under all of it per rung, so
+Archive 0.22 (below the Sink deliberately: stillness is its texture), Store 1.0
+plus `decay 0.5`, Cell the full TERMINAL stage (1.6 / 1.2 / 0.9, and the only room
+with `shred`, which is the one dial with a real frame cost) — and `RunConfig.siteDecay` raises a floor under all of it per rung, so
 the same corridor is further gone on the last night. A test in
 `content.test.ts` asserts the baseline is zero and the ladder climbs, because the
 global `SHELL` was left at TERMINAL after look development, which is not a wrong
@@ -126,10 +125,6 @@ Still missing:
 - **The swarm is undecided.** §8.3's Store wants flies clustering the silhouettes;
   `shred`'s flecks *leave* the mass. Close, not the same picture, and the
   difference should be decided rather than blurred.
-- **`decay` and `shred` are authored nowhere.** Global uniforms with no room or
-  story setting them, so today they are always zero. The Store and the Cell are
-  where they belong; `shred` is the one dial with a real frame cost, so it is a
-  late accent and never a baseline.
 - **Values are unjudged.** The ladder above is derived from the specs and the code
   and has never been seen four rooms side by side. §3.2b is right that values are
   the whole difference.

@@ -251,7 +251,8 @@
           "cycleBeats": 6,
           "ampFloor": 0.45,
           "jitter": 0.85,
-          "dissolve": 1.0
+          "dissolve": 1.0,
+          "decay": 0.5
         },
         "roster": {
           "tier": 1,
@@ -330,7 +331,9 @@
           "ampFloor": 0.6,
           "maxStretch": 0.95,
           "jitter": 1.2,
-          "dissolve": 1.6
+          "dissolve": 1.6,
+          "decay": 1.2,
+          "shred": 0.9
         },
         "roster": {
           "tier": 1,

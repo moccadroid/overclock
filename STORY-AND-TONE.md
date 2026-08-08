@@ -654,8 +654,8 @@ authoring reference; this is what each room is *for*.
 | Heap    | nothing                               | normal — the only room that is    |
 | Sink    | `dissolve 0.35`, `oil`, `fray`        | a working floor that sweats       |
 | Archive | `dissolve 0.22`, near-still churn     | held breath                       |
-| Store   | `dissolve 1.0`, brisk churn           | no sharp edges left               |
-| Cell    | `dissolve 1.6`, fastest churn         | boundaries meaningless            |
+| Store   | `dissolve 1.0`, `decay 0.5`           | no sharp edges left               |
+| Cell    | `dissolve 1.6`, `decay 1.2`, `shred 0.9` | boundaries meaningless         |
 
 1. **The Heap — clean.** Solid blocks, gentle churn, clear grid, no air. This is
    what normal looks like, and it is the only room that gets to be normal. It
@@ -668,10 +668,12 @@ authoring reference; this is what each room is *for*.
 3. **The Archive — held breath.** Near-still churn at half tempo and low
    amplitude. Its decomposition sits *below* the Sink's on purpose: stillness is
    this room's texture, and wear that moves would spend it.
-4. **The Store — advancing.** No sharp edge anywhere. This is where the roaming
-   effects earn their place if they are ever authored per-room.
-5. **The Cell — the Nothing.** Boundaries meaningless. Near-black; the only
-   colour is the light through the final gate.
+4. **The Store — advancing.** No sharp edge anywhere, and the first room the
+   roaming rot crosses: a wave that warps silhouettes and heals behind itself.
+5. **The Cell — the Nothing.** LEVELS §3.2b's TERMINAL stage exactly: the
+   material dissolving, the rot crossing it, and debris leaving on curling paths.
+   The only room with `shred`, because it is the one dial with a real frame cost.
+   Near-black; the only colour is the light through the final gate.
 
 **And the same rooms get worse across the campaign.** `RunConfig.siteDecay` is a
 floor the story raises per rung — zero for the first two shifts, 0.45 by the
@@ -709,13 +711,18 @@ Two consequences, and they are the rule for every effect:
   what a blue-black floor lifts most readily, and at equal weight the room goes
   swamp.
 
-**A material belongs to a place, not to the camera.** `oil`, `fray` and
-`dissolve` are resolved *per pixel* from world-space room rectangles, not
-switched when the player crosses a threshold. Switching them globally repainted
-the room the player had just left as they stepped through the gate, which is both
-wrong and the most visible thing in the frame. `decay` and `shred` stay global
-because they genuinely are events roaming the whole arena rather than properties
-of one room.
+**A material belongs to a place, not to the camera.** All five dials — `oil`,
+`fray`, `dissolve`, `decay`, `shred` — are resolved *per pixel* from world-space
+room rectangles, never switched when the player crosses a threshold. Switching
+them globally repaints the room the player has just left as they step through the
+gate, which is both wrong and the most visible thing in the frame.
+
+This section previously argued that `decay` and `shred` were global "on purpose,
+because they are events roaming the whole arena". That was a description of the
+code rather than a position: LEVELS §3.2b's TERMINAL stage authors all three dials
+on one *room*, so a global rot cannot express the ladder at all — and while it was
+global, nothing set it, so the rot was never once visible. A wave roams *within* a
+room's material; the room decides whether its material rots.
 
 `shred` is the one dial with a real frame cost — it widens the mass shader's
 working region — so it is a late accent and never a baseline. The quality
@@ -727,6 +734,10 @@ Cell's coupling to the player's own output, so the room breathes with the engine
 A swarm that clusters silhouettes off the cap-distance field: `shred`'s flecks
 *leave* the mass, which is close to §8.3's "flies" but not the same picture, and
 the difference should be decided rather than blurred.
+
+**Unjudged.** Every number in the table above is reasoned from this document and
+LEVELS §3.2b, not tuned against four rooms on a screen — and §3.2b is right that
+the values are the whole difference.
 
 ---
 

@@ -442,4 +442,31 @@ describe('LEVELS 3.2b — the decomposition ladder', () => {
     expect(decayAt('final')).toBeGreaterThan(decayAt('deadgate'));
     expect(decayAt('final')).toBeLessThan(1);
   });
+  /**
+   * The rot is per-room, and only the deep rooms carry it. It was global — the
+   * TERMINAL stage in LEVELS 3.2b names all three dials on one room, so a global
+   * decay could not express the ladder at all, and every room was stuck at zero.
+   * `shred` is the one dial with a real frame cost, so exactly one room may have
+   * it and it is the last one.
+   */
+  it('gives the rot only to the deep rooms, and shred only to the Cell', () => {
+    const shellOf = (arena: string, level: string): Record<string, number> =>
+      (ARENA_BY_ID.get(arena)!.levels!.find((l: { id: string }) => l.id === level)?.shell ??
+        {}) as Record<string, number>;
+    expect(shellOf('heap', 'heap')['decay'] ?? 0).toBe(0);
+    expect(shellOf('heap', 'sink')['decay'] ?? 0).toBe(0);
+    expect(shellOf('heap_store', 'store')['decay'] ?? 0).toBeGreaterThan(0);
+    expect(shellOf('heap_cell', 'cell')['decay'] ?? 0).toBeGreaterThan(
+      shellOf('heap_store', 'store')['decay'] ?? 0,
+    );
+
+    const withShred = ['heap', 'sink', 'archive', 'store', 'cell'].filter((id) => {
+      for (const arena of ['heap', 'heap_archive', 'heap_store', 'heap_cell']) {
+        const sh = shellOf(arena, id);
+        if ((sh['shred'] ?? 0) > 0) return true;
+      }
+      return false;
+    });
+    expect(withShred).toEqual(['cell']);
+  });
 });

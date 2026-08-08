@@ -127,6 +127,9 @@ export interface MaterialZone {
   fray: number;
   /** The room's standing decomposition. LEVELS §3.2b. */
   dissolve: number;
+  /** The roaming rot that crosses it, and the debris it sheds. */
+  decay: number;
+  shred: number;
 }
 
 export interface ShellWall {
@@ -469,6 +472,19 @@ uniform float uFray;
  */
 uniform vec4 uZoneRect[MAX_ZONES];
 uniform vec4 uZoneMat[MAX_ZONES];
+/**
+ * The rot, per room: how hard the roaming wave bites and how much debris it
+ * sheds. A float array beside the packed vec4 rather than a fifth channel —
+ * uSwirl sets the precedent, and a named array beats a packed one nobody can
+ * read.
+ */
+uniform float uZoneShred[MAX_ZONES];
+/**
+ * The strongest rot anywhere on screen, for the same reason uDissolveMax
+ * exists: the early-out below has to be answered before the per-pixel material
+ * is resolved, and it has to be answered for the worst case.
+ */
+uniform float uRotMax;
 uniform int uZoneCount;
 /**
  * How far a zone's material bleeds *out* through its walls, and how far *in* it
@@ -519,8 +535,9 @@ float sdBox(vec2 p, vec2 b) {
  * search so a nested or overlapping region — an arena that ever wants one — is
  * simply the last one to speak.
  */
-vec3 materialAt(vec2 p) {
-  vec3 m = vec3(uOil, uFray, uDissolve);
+vec4 materialAt(vec2 p, out float shredOut) {
+  vec4 m = vec4(uOil, uFray, uDissolve, uDecay);
+  shredOut = uShred;
   for (int i = 0; i < MAX_ZONES; i++) {
     if (i >= uZoneCount) break;
     vec4 r = uZoneRect[i];
@@ -528,7 +545,8 @@ vec3 materialAt(vec2 p) {
     float depth = -sdBox(p - r.xy, r.zw);
     float k = smoothstep(-uZoneBlend.x, uZoneBlend.y, depth);
     if (k <= 0.0) continue;
-    m = mix(m, uZoneMat[i].xyz, k);
+    m = mix(m, uZoneMat[i], k);
+    shredOut = mix(shredOut, uZoneShred[i], k);
   }
   return m;
 }
@@ -945,7 +963,8 @@ void main(void) {
     //
     // Sampled at the *unwarped* position, unlike the grid: a vortex should bend
     // the lines drawn on the floor, not drag which room the floor belongs to.
-    float oil = materialAt(p).x;
+    float oilShred;
+    float oil = materialAt(p, oilShred).x;
     if (oil > 0.0) {
       float film = vnoise(fp * 0.0042 + vec2(uTime * 0.028, uTime * -0.020))
                  + 0.45 * vnoise(fp * 0.013 + vec2(uTime * -0.019, uTime * 0.014));
@@ -1024,7 +1043,19 @@ void main(void) {
   float shredB = 0.0;
   vec2 shredDrift = vec2(0.0);
   vec2 curl = vec2(0.0);
-  if ((uDecay > 0.001 || uShred > 0.001 || uDissolveMax > 0.001) && cap < 260.0) {
+  // The room's material, resolved once and used by everything below — the
+  // roaming rot included. Decay and shred were global uniforms switched by
+  // applyRoomStyle, which is wrong twice: LEVELS 3.2b authors all three dials
+  // on a *room* (its TERMINAL stage is dissolve, decay and shred together), and a
+  // global switch repaints the room behind the player as they cross a threshold.
+  // The earlier claim that they were global "on purpose, because they are events
+  // roaming the arena" was a description of the code, not a design position: a
+  // wave roams *within* a room's material, and the room decides whether its
+  // material rots at all.
+  float shredAmt;
+  vec4 matAll = materialAt(p, shredAmt);
+  float decayAmt = matAll.w;
+  if ((uRotMax > 0.001 || uDissolveMax > 0.001) && cap < 260.0) {
     // Turbulence, shared by every decomposition effect: a curl field that
     // bends the wisps and the fleck paths alike. Without it the motion is a
     // straight-line escalator off the edge, which is movement but not weather.
@@ -1032,17 +1063,17 @@ void main(void) {
     vec2 trise = vec2(uTime * 0.02, uTime * 0.13);
     curl = vec2(vnoise(tp * 2.1 + trise.yx), vnoise(tp * 2.1 - trise)) - 0.5;
 
-    if (uDecay > 0.001 || uShred > 0.001) {
+    if (decayAmt > 0.001 || shredAmt > 0.001) {
       // The roaming rot: where the wave and the debris currently are. The
       // dissolve deliberately does NOT use it — dissolving edges are the
       // material's permanent condition, not an event passing through it.
       float rotN = vnoise(p * 0.0055 + vec2(uTime * 0.017, uTime * -0.011));
       float fine = decayAt(p);
       float rotM = 0.30 + 0.70 * rotN;
-      rot = uDecay * rotM;
+      rot = decayAmt * rotM;
       rotEdge = (fine - 0.42) * rot;
       float vent = smoothstep(0.52, 0.85, rotN + 0.22 * (fine - 0.5));
-      shredB = 65.0 * uShred * mix(0.12, 1.0, vent);
+      shredB = 65.0 * shredAmt * mix(0.12, 1.0, vent);
       if (shredB > 0.5) {
         // The local outward direction, from the cap's own gradient — two
         // extra tile-local samples. Flecks are carried along it with a slight
@@ -1066,9 +1097,8 @@ void main(void) {
     // LEVELS 3.2b — so it is placed in the world like the oil and the fray, and
     // not switched globally when the player crosses a threshold. Switching it
     // globally repainted the room behind them as they stepped through the gate.
-    vec3 mat = materialAt(p);
-    float fray = mat.y;
-    float dissolve = mat.z;
+    float fray = matAll.y;
+    float dissolve = matAll.z;
 
     // Shadows first, all three, and taken as a max rather than multiplied.
     //
@@ -1448,6 +1478,8 @@ export class StructurePass {
           uShred: { value: 0, type: 'f32' },
           uDissolve: { value: 0, type: 'f32' },
           uDissolveMax: { value: 0, type: 'f32' },
+          uRotMax: { value: 0, type: 'f32' },
+          uZoneShred: { value: new Float32Array(MAX_ZONES), type: 'f32', size: MAX_ZONES },
           uZoneRect: { value: new Float32Array(MAX_ZONES * 4), type: 'vec4<f32>', size: MAX_ZONES },
           uZoneMat: { value: new Float32Array(MAX_ZONES * 4), type: 'vec4<f32>', size: MAX_ZONES },
           uZoneCount: { value: 0, type: 'i32' },
@@ -1553,11 +1585,9 @@ export class StructurePass {
     n.uShadow = s.shadow;
     n.uBacking = s.backing;
     n.uShellReach = s.shellReach;
-    n.uDecay = s.decay;
-    n.uShred = s.shred;
-    // `dissolve` is deliberately NOT written here, for the same reason `oil` and
-    // `fray` are not: it is a property of a *place*. `decay` and `shred` stay
-    // global because they genuinely are events roaming the whole arena.
+    // `oil`, `fray`, `dissolve`, `decay` and `shred` are all deliberately absent
+    // from here: every one of them is a property of a *place*, and this method is
+    // the room-change switch. They arrive through `setMaterialZones`.
   }
 
   /**
@@ -1722,7 +1752,7 @@ export class StructurePass {
    * the screen. `base` is what a room that declares neither looks like.
    */
   setMaterialZones(
-    base: { oil: number; fray: number; dissolve: number },
+    base: { oil: number; fray: number; dissolve: number; decay: number; shred: number },
     zones: readonly MaterialZone[],
   ): void {
     const u = this.u;
@@ -1730,8 +1760,11 @@ export class StructurePass {
     n.uOil = base.oil;
     n.uFray = base.fray;
     n.uDissolve = base.dissolve;
+    n.uDecay = base.decay;
+    n.uShred = base.shred;
     const rect = u.uZoneRect as Float32Array;
     const mat = u.uZoneMat as Float32Array;
+    const shred = u.uZoneShred as Float32Array;
     const count = Math.min(MAX_ZONES, zones.length);
     for (let i = 0; i < count; i++) {
       const z = zones[i]!;
@@ -1742,12 +1775,19 @@ export class StructurePass {
       mat[i * 4] = z.oil;
       mat[i * 4 + 1] = z.fray;
       mat[i * 4 + 2] = z.dissolve;
+      mat[i * 4 + 3] = z.decay;
+      shred[i] = z.shred;
     }
     n.uZoneCount = count;
-    // The worst case on screen, for the guards. See `uDissolveMax`.
-    let worst = base.dissolve;
-    for (let i = 0; i < count; i++) worst = Math.max(worst, zones[i]!.dissolve);
-    n.uDissolveMax = worst;
+    // The worst cases on screen, for the guards. See `uDissolveMax` and `uRotMax`.
+    let worstDissolve = base.dissolve;
+    let worstRot = Math.max(base.decay, base.shred);
+    for (let i = 0; i < count; i++) {
+      worstDissolve = Math.max(worstDissolve, zones[i]!.dissolve);
+      worstRot = Math.max(worstRot, zones[i]!.decay, zones[i]!.shred);
+    }
+    n.uDissolveMax = worstDissolve;
+    n.uRotMax = worstRot;
   }
 
   /** Biome colour and how much of it. Zero amount is the plain Core. */
