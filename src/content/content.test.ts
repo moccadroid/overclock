@@ -20,6 +20,9 @@ import { HAZARD_DRAW } from '../app/renderer';
 import { SHAPE_NAMES, shapeOutline } from '../app/gfx/shapes';
 import { ACTION_PRIMITIVES } from '../sim/world';
 import { PRIMITIVE_FIELDS } from '../sim/engine';
+import { ARENA_BY_ID } from './index';
+import { SHELL } from '../app/visual';
+import { CHECKPOINTS, configure } from '../story/arc';
 
 /** The declared vocabularies, mirrored from types.ts so drift is a failure. */
 const SHAPES = [
@@ -382,5 +385,61 @@ describe('every vocabulary has an implementation (GDD §10, §11.4, §16.4)', ()
         `primitive "${primitive}" is implemented but no Action uses it`,
       ).toBe(true);
     }
+  });
+});
+
+describe('LEVELS 3.2b — the decomposition ladder', () => {
+  /**
+   * The global SHELL is the campaign's **floor**, and rooms escalate upward from
+   * it. It was left at TERMINAL after look development, which does not read as a
+   * wrong default: it means every room including the Heap is fully decomposed, so
+   * run 1 looks like the ending and the descent has nowhere to go. LEVELS 3.2b
+   * warns about it in prose; this is the same warning that fails a build.
+   */
+  it('keeps the baseline at sound, so rooms have somewhere to climb from', () => {
+    expect(SHELL.dissolve).toBe(0);
+    expect(SHELL.decay).toBe(0);
+    expect(SHELL.shred).toBe(0);
+  });
+
+  it('gives the Heap nothing, because it is the one room allowed to be normal', () => {
+    const heap = ARENA_BY_ID.get('heap')!.levels!.find((l: { id: string }) => l.id === 'heap')!;
+    expect(heap.shell?.['dissolve'] ?? 0).toBe(0);
+  });
+
+  /**
+   * The Archive sits *below* the Sink deliberately — stillness is its texture and
+   * wear that moves would spend it — so this asserts the authored shape rather
+   * than a naive "deeper is always worse".
+   */
+  it('climbs Sink → Store → Cell, with the Archive held back', () => {
+    const dissolveOf = (arena: string, level: string): number => {
+      const lv = ARENA_BY_ID.get(arena)!.levels!.find((l: { id: string }) => l.id === level);
+      return (lv?.shell?.['dissolve'] as number | undefined) ?? 0;
+    };
+    const sink = dissolveOf('heap', 'sink');
+    const archive = dissolveOf('heap_archive', 'archive');
+    const store = dissolveOf('heap_store', 'store');
+    const cell = dissolveOf('heap_cell', 'cell');
+    expect(sink).toBeGreaterThan(0);
+    expect(archive).toBeLessThan(sink);
+    expect(store).toBeGreaterThan(sink);
+    expect(cell).toBeGreaterThan(store);
+  });
+
+  /**
+   * And the site itself comes apart across the campaign. Zero for the first two
+   * shifts so the tutorial keeps its honest picture of normal, and shallow after
+   * — a fast climb steals the room ladder's job.
+   */
+  it('raises the site floor late and shallowly', () => {
+    const base = { seed: 'decay-test', axiomId: 'ignition' };
+    const decayAt = (name: string): number =>
+      configure(CHECKPOINTS[name]!, base).siteDecay ?? 0;
+    expect(decayAt('fresh')).toBe(0);
+    expect(decayAt('contact')).toBe(0);
+    expect(decayAt('deadgate')).toBeGreaterThan(0);
+    expect(decayAt('final')).toBeGreaterThan(decayAt('deadgate'));
+    expect(decayAt('final')).toBeLessThan(1);
   });
 });

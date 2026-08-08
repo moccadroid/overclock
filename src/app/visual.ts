@@ -320,7 +320,7 @@ export const SHELL = {
    *
    * Currently: TERMINAL, the last stage of the arc.
    */
-  decay: 1.2,
+  decay: 0,
   /**
    * STORY-AND-TONE §8.3 — the shred: decaying edges fragmenting instead of
    * waving. Where `decay` bends the silhouette, this breaks it — coverage
@@ -336,7 +336,7 @@ export const SHELL = {
    * smoke, and the two grammars fight. Kept as a knob — it may return for a
    * specific room or a death sequence.
    */
-  shred: 0.9,
+  shred: 0,
   /**
    * STORY-AND-TONE §8.3 — the dissolve: the mass diffusing outward, ink into
    * water. The cells stay cells — same churn, same placement, same tones —
@@ -349,7 +349,7 @@ export const SHELL = {
    *
    * Currently: TERMINAL, the last stage of the arc — see the table on decay.
    */
-  dissolve: 1.6,
+  dissolve: 0,
   /**
    * Hard drop shadow: strength, and offset as a fraction of block size.
    *

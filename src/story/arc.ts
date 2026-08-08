@@ -150,6 +150,24 @@ export const DOCUMENT_IDS: readonly string[] = Object.keys(DOC_RUNG).sort(
 );
 
 /**
+ * LEVELS §3.2b — how far the site has come apart, per rung.
+ *
+ * Deliberately shallow and deliberately late. The room-to-room gradient in
+ * `arenas.json` is the one the player reads in a single run; this is the one they
+ * only notice on the third visit to a corridor they thought they knew. If it
+ * climbs fast it steals the room ladder's job and every room ends up looking the
+ * same shade of ruined.
+ */
+const SITE_DECAY: Record<number, number> = {
+  1: 0,
+  2: 0,
+  3: 0.08,
+  4: 0.16,
+  5: 0.28,
+  6: 0.45,
+};
+
+/**
  * STORY-AND-TONE §7.1 — the growing starter. The build is OC-001's and it
  * remembers; each run starts with more of it already assembled. Run 6 is the
  * gift: the whole thing, tuned, plus the capacity to run it. Fairness is not
@@ -515,6 +533,12 @@ export function configure(story: Story, base: RunConfig): RunConfig {
     ...(rung === 1 ? { concludeOnOpen: 'sink', pressure: 0.55, meltdownAt: 480 } : {}),
     ...(rung > 1 && rung < 6 ? { meltdownAt: 600 } : {}),
     ...(rung === 6 ? { concludeOnOpen: 'cell', noExtract: true, meltdownAt: 1200 } : {}),
+    // LEVELS §3.2b — the site comes apart across the campaign, not only across
+    // its rooms. The Heap on the last night is not the Heap on the first, and
+    // nothing in the fiction has to announce it: the operator walks the same
+    // corridor and it is further gone. Zero on rung 1 so the tutorial room is
+    // the game's one honest picture of normal.
+    ...(SITE_DECAY[rung] ? { siteDecay: SITE_DECAY[rung] } : {}),
     ...(extractAt ? { extractAt } : {}),
     ...(gift.rows.length > 0 ? { bonusRows: gift.rows } : {}),
     ...(gift.capacity > 0 ? { bonusCapacity: gift.capacity } : {}),

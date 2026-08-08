@@ -864,6 +864,19 @@ export interface RunConfig {
   bonusRows?: readonly { trigger: string; modifiers: readonly string[]; action: string }[];
   /** Extra Cycle capacity to carry the bonus rows. */
   bonusCapacity?: number;
+  /**
+   * LEVELS §3.2b — how far the site itself has come apart, 0..1.
+   *
+   * A floor under every room's own decomposition, so the *same* room is worse
+   * later in the campaign than it was on the first shift. The arena authors the
+   * gradient across rooms; this lifts the whole gradient as the story advances,
+   * which is the difference between a level list and a place going wrong.
+   *
+   * Neutral on purpose. The sim carries the number and never reads it — nothing
+   * here knows what a dissolve is, and the story does not know either. The
+   * renderer decides what it costs the picture.
+   */
+  siteDecay?: number;
   /** Testing hook: bring Meltdown forward. Never set in a scored run. */
   meltdownAt?: number;
 }

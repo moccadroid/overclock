@@ -115,7 +115,8 @@
         "extract": true,
         "shell": {
           "oil": 0.16,
-          "fray": 0.08
+          "fray": 0.08,
+          "dissolve": 0.35
         },
         "roster": {
           "tier": 1,
@@ -154,7 +155,8 @@
           "cycleBeats": 16,
           "ampFloor": 0.08,
           "maxStretch": 0.35,
-          "jitter": 0.25
+          "jitter": 0.25,
+          "dissolve": 0.22
         },
         "roster": {
           "tier": 0,
@@ -248,7 +250,8 @@
         "shell": {
           "cycleBeats": 6,
           "ampFloor": 0.45,
-          "jitter": 0.85
+          "jitter": 0.85,
+          "dissolve": 1.0
         },
         "roster": {
           "tier": 1,
@@ -326,7 +329,8 @@
           "cycleBeats": 4,
           "ampFloor": 0.6,
           "maxStretch": 0.95,
-          "jitter": 1.2
+          "jitter": 1.2,
+          "dissolve": 1.6
         },
         "roster": {
           "tier": 1,

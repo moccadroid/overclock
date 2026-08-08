@@ -2,7 +2,7 @@
 
 State of the `story-arc` branch as of 2026-08-08. STORY-AND-TONE.md is the spec;
 this file is only the delta between it and the code. Everything not listed here is
-built, green (262 tests, typecheck, lint) and verified — though see §7 for what
+built, green (266 tests, typecheck, lint) and verified — though see §7 for what
 "verified" currently means.
 
 ---
@@ -89,38 +89,50 @@ the Engine's six words arrive as two ordinary transmissions. Missing:
 
 ---
 
-## 4. The visual descent — one room of five
+## 4. The visual descent — the ladder is authored, four effects are missing
 
-§8 was re-decided on screen and §8.4 carries the rule learned the hard way:
-**nothing is ever painted onto a block face.** Blocks are flat value with hard
-borders, so a film over them reads as a stain. The mass's share of the descent is
-its *outline*; colour and shimmer go on the floor, coming up through the seams.
+§8 is rewritten to the vocabulary that shipped, and LEVELS §3.2b is the authoring
+reference. Built and per-room: **`dissolve`** (a block trades its boundary for
+wisps — edges billow past themselves, ink tendrils, matter *leaving*), **`fray`**
+(the finer beat-synced crumble), **`oil`** (thin-film interference on the floor,
+coming up through the seams). Built and global: **`decay`** (a roaming rot wave
+that warps and heals) and **`shred`** (flecks pulling free at its venting
+stretches) — global on purpose, because they are events crossing the arena rather
+than properties of a room.
 
-Built: `uFray` (blocky beat-synced perturbation of the block SDF) and `uOil`
-(thin-film interference on the floor), both as **world-space material zones** read
-off each level's `shell` block — which is why crossing a gate no longer repaints
-the room behind the player. Ramp is 140 units of outward bleed, 420 to full.
+All three per-room dials are resolved per pixel from world-space room rectangles,
+so crossing a gate no longer repaints the room behind the player. `dissolve` was
+global when it arrived and had exactly that bug; `uZoneMat.z` carries it now, and
+the branch predicates use a separate conservative maximum so a dissolving room's
+wisps are never clipped against an invisible rectangle.
 
-Not built:
+The five-room ladder is authored in `arenas.json` — Heap nothing, Sink 0.35,
+Archive 0.22 (below the Sink deliberately: stillness is its texture), Store 1.0,
+Cell 1.6 — and `RunConfig.siteDecay` raises a floor under all of it per rung, so
+the same corridor is further gone on the last night. A test in
+`content.test.ts` asserts the baseline is zero and the ladder climbs, because the
+global `SHELL` was left at TERMINAL after look development, which is not a wrong
+default so much as a deleted descent: every room fully decomposed, run 1 looking
+like the ending.
 
-- **Strength is unjudged.** The Sink sits at `oil: 0.16, fray: 0.08`; both want an
-  eye on them in motion at play zoom.
-- **The Archive, Store and Cell declare no material.** Their rungs on the §8.3
-  ladder — held breath, the flies, the Nothing — are unimplemented. Churn tempo
-  overrides are already authored in `arenas.json`; only the effects are missing.
-- **`uSwarm` does not exist** (the Store's flies, clustering the silhouettes off the
-  same cap-distance field the blocks use).
+Still missing:
+
+- **Weather does not exist.** The one permitted screen-space category. The
+  forbidden frost/ember/static programs were removed and nothing replaced them.
 - **Grid slip and contortion do not exist** — Store blotches that appear and heal,
   Cell rows misaligning a pixel and healing.
-- **Cell decomposition and the EPS coupling** — blocks coming apart into drifting
-  particles, cells flickering out of membership, fuzz scaling with the player's own
-  output.
-- **Weather does not exist at all.** The forbidden frost/ember/static programs were
-  removed and nothing replaced them, so the one permitted screen-space category is
-  empty. It wants one sparse fullscreen pass.
-- **The ramp may be wrong for the small rooms.** 420 units to full on a 1300-unit
-  room only just reaches full in the middle band. Check when the deep rooms get
-  their materials; consider a per-axis ramp.
+- **The Cell does not breathe with the engine.** §8.3 wants its fuzz to scale with
+  proximity to the last lock and with the player's own output.
+- **The swarm is undecided.** §8.3's Store wants flies clustering the silhouettes;
+  `shred`'s flecks *leave* the mass. Close, not the same picture, and the
+  difference should be decided rather than blurred.
+- **`decay` and `shred` are authored nowhere.** Global uniforms with no room or
+  story setting them, so today they are always zero. The Store and the Cell are
+  where they belong; `shred` is the one dial with a real frame cost, so it is a
+  late accent and never a baseline.
+- **Values are unjudged.** The ladder above is derived from the specs and the code
+  and has never been seen four rooms side by side. §3.2b is right that values are
+  the whole difference.
 
 ---
 
@@ -174,7 +186,9 @@ hand, which proves wiring and cannot prove appearance.
 
 Specifically unjudged by eye: the bezel's panel offsets (`col(28)` and `col(46)`
 in `bezel.ts` are guesses and are the most likely thing to need moving), the recut
-engine editor, and monochrome in-run.
+engine editor, monochrome in-run, and **every value in the decomposition ladder**
+— the numbers are reasoned from the specs, not tuned against four rooms on a
+screen.
 
 **And a test that should exist and does not.** Four separate bugs this branch —
 dead hit areas, icons over windows, the BEGIN CONTAINMENT button across its own

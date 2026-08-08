@@ -398,7 +398,10 @@ export class Renderer {
       shell.setPalette(PALETTE.structure, PALETTE.background, PALETTE.mass);
       shell.setStyle(SHELL);
       shell.setArena(world.arena.width, world.arena.height);
-      shell.setMaterialZones({ oil: SHELL.oil, fray: SHELL.fray }, materialZonesFor(world));
+      shell.setMaterialZones(
+        { oil: SHELL.oil, fray: SHELL.fray, dissolve: SHELL.dissolve + siteFloor(world) },
+        materialZonesFor(world),
+      );
     }
     this.shellFloor.setMode(0);
     this.shellMass.setMode(1);
@@ -2647,13 +2650,27 @@ function reachFor(w: number, h: number): number {
  * `shell` block where it says how fast it churns, and nothing else has to know.
  * Built once per run: rooms do not move.
  */
+/**
+ * How much decomposition the campaign adds on top of whatever a room authored.
+ *
+ * Additive and clamped rather than a maximum: a floor that only lifted the
+ * *quietest* rooms would leave the Cell — already terminal — unchanged, and the
+ * point is that the whole building is further gone, the deep rooms included.
+ */
+function siteFloor(world: World): number {
+  return Math.max(0, Math.min(1, world.config.siteDecay ?? 0)) * 0.6;
+}
+
 function materialZonesFor(world: World): MaterialZone[] {
   const zones: MaterialZone[] = [];
+  const floor = siteFloor(world);
   for (const level of world.arena.levels ?? []) {
     const oil = (level.shell?.['oil'] as number | undefined) ?? SHELL.oil;
     const fray = (level.shell?.['fray'] as number | undefined) ?? SHELL.fray;
-    if (oil === SHELL.oil && fray === SHELL.fray) continue;
-    zones.push({ x: level.x, y: level.y, w: level.w, h: level.h, oil, fray });
+    const authored = (level.shell?.['dissolve'] as number | undefined) ?? SHELL.dissolve;
+    const dissolve = Math.min(2, authored + floor);
+    if (oil === SHELL.oil && fray === SHELL.fray && dissolve === SHELL.dissolve) continue;
+    zones.push({ x: level.x, y: level.y, w: level.w, h: level.h, oil, fray, dissolve });
   }
   return zones;
 }

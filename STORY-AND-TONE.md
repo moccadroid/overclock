@@ -646,59 +646,87 @@ untouchable: enemies and the player must pop in every room.
 
 ### 8.3 The ladder
 
-1. **The Heap — clean.** Solid blocks, gentle churn, clear grid, no air. This
-   is what normal looks like, and it is the only room that gets to be normal.
-2. **The Sink — the sheen.** The mass fill carries a faint oily iridescence — a
-   slow interference shimmer on the surface of the blocks, as if the material
-   sweats. Screen: sparse dust, falling. Denser grid, working tempo.
-3. **The Archive — held breath.** Near-still churn (half tempo, low amplitude).
-   The same dust, suspended — near-zero velocity, hanging. First, barely
-   visible edge wear on the blocks: corners no longer perfectly sharp.
-4. **The Store — the flies.** Particles swarm the blocks — dense within a short
-   distance of the mass, absent in open floor, moving in short darting bursts
-   that read as alive rather than as dust. Block edges visibly erode: a
-   noise-gated crumble that eats into silhouettes. Patches of grid contortion —
-   a new distortion, not Pull's — appearing and healing in blotches.
-5. **The Cell — the Nothing.** Blocks decompose at the edges into drifting
-   particles; individual cells of the mass flicker out of membership and
-   return; the fuzz scales with proximity to the last lock and with the
-   player's own EPS, so the room breathes with the engine. The grid slips —
-   rows misaligning a pixel or two and healing. Near-black; the only colour is
-   the light through the final gate.
+Written against the dials that exist. LEVELS §3.2b defines them and is the
+authoring reference; this is what each room is *for*.
 
-Held in reserve on purpose: the backdrop slabs behind everything keep drifting
-in all five rooms. They stop for the first time in the ending (§11 of
-NARRATIVE), and no room may spend that early.
+| room    | authored                              | reads as                          |
+|---------|---------------------------------------|-----------------------------------|
+| Heap    | nothing                               | normal — the only room that is    |
+| Sink    | `dissolve 0.35`, `oil`, `fray`        | a working floor that sweats       |
+| Archive | `dissolve 0.22`, near-still churn     | held breath                       |
+| Store   | `dissolve 1.0`, brisk churn           | no sharp edges left               |
+| Cell    | `dissolve 1.6`, fastest churn         | boundaries meaningless            |
+
+1. **The Heap — clean.** Solid blocks, gentle churn, clear grid, no air. This is
+   what normal looks like, and it is the only room that gets to be normal. It
+   authors nothing, which is why the global `SHELL` baseline must stay at zero:
+   the Heap *is* the baseline, and a baseline parked high leaves the descent
+   nowhere to go.
+2. **The Sink — the sheen.** Thin-film interference on the *floor*, coming up
+   through the seams, and the first loss of certainty at the edges. Denser grid,
+   working tempo.
+3. **The Archive — held breath.** Near-still churn at half tempo and low
+   amplitude. Its decomposition sits *below* the Sink's on purpose: stillness is
+   this room's texture, and wear that moves would spend it.
+4. **The Store — advancing.** No sharp edge anywhere. This is where the roaming
+   effects earn their place if they are ever authored per-room.
+5. **The Cell — the Nothing.** Boundaries meaningless. Near-black; the only
+   colour is the light through the final gate.
+
+**And the same rooms get worse across the campaign.** `RunConfig.siteDecay` is a
+floor the story raises per rung — zero for the first two shifts, 0.45 by the
+last — added on top of whatever each room authored. The room-to-room gradient is
+what the player reads inside one run; this is the one they only notice on the
+third visit to a corridor they thought they knew. It is shallow and late by
+design: climb it fast and every room ends up the same shade of ruined, which
+costs the ladder above its whole job.
+
+Held in reserve on purpose: the backdrop slabs behind everything keep drifting in
+all five rooms. They stop for the first time in the ending (§11 of NARRATIVE),
+and no room may spend that early.
 
 ### 8.4 Where it is built
 
 The structure shader (`gfx/structure.ts`) owns both halves — the mass and the
-floor it stands on — and therefore owns the descent. All of it is per-room
-through the existing `LevelDef.shell` override channel, and per-room churn tempo
-and block sizes are already data.
+floor it stands on — and therefore owns the descent. Per-room churn tempo and
+block sizes are already data.
 
-**Nothing is ever painted onto a block face.** Decided 2026-08-07, on screen,
-after trying it: the blocks are flat value with hard borders and they must stay
-that way, so a film laid over them reads as a stain on a shape no matter how the
-noise is tuned. Two consequences, and they are the rule for every effect below:
+**Nothing is ever painted onto a block face.** Decided on screen, after trying
+it: the blocks are flat value with hard borders and they must stay that way, so a
+film laid over them reads as a stain on a shape no matter how the noise is tuned.
+Two consequences, and they are the rule for every effect:
 
-- **The mass's share of the descent is its outline.** Edges fray (`uFray`) — a
-  blocky, beat-synced perturbation of the block SDF, so silhouettes crumble in
-  square nibbles that belong to the same grammar as the blocks. Erosion and
-  decomposition are further along the same dial, not a different effect. Safe
-  against "dilate, never erode" because the backing pass covers the collider
-  whatever the drawn layers do.
-- **Colour, shimmer and light go on the floor**, and come *up* through the seams
-  between slabs and around every silhouette. The sheen (`uOil`) is animated
-  thin-film interference on the ground: a drifting thickness field, a travelling
-  swell deciding where it is thick, weighted cold — green is what a blue-black
-  floor lifts most readily and at equal weight the room goes swamp. Grid
-  spacing, slip and contortion live here too.
+- **The mass's share of the descent is its outline.** `dissolve` trades a block's
+  boundary for wisps — edges billow *past* themselves and the silhouette bleeds
+  near-black tendrils into the room, so dissolving means getting bigger: matter
+  leaving, not a cloud evaporating. `fray` is the finer, beat-synced version of
+  the same idea, crumbling silhouettes in square nibbles that belong to the
+  blocks' own grammar. Both are safe against "dilate, never erode" because the
+  backing pass covers the collider whatever the drawn layers do.
+- **Colour, shimmer and light go on the floor**, and come *up* through the seams.
+  `oil` is animated thin-film interference on the ground: a drifting thickness
+  field, a travelling swell deciding where it is thick, weighted cold — green is
+  what a blue-black floor lifts most readily, and at equal weight the room goes
+  swamp.
 
-The swarm samples the same cap-distance field the blocks use, so particles
-cluster the silhouettes for free (`uSwarm`) — particles are *beside* the mass,
-never on it, which is consistent with the rule. Weather is one sparse fullscreen
-pass, replacing — not joining — the forbidden field programs.
+**A material belongs to a place, not to the camera.** `oil`, `fray` and
+`dissolve` are resolved *per pixel* from world-space room rectangles, not
+switched when the player crosses a threshold. Switching them globally repainted
+the room the player had just left as they stepped through the gate, which is both
+wrong and the most visible thing in the frame. `decay` and `shred` stay global
+because they genuinely are events roaming the whole arena rather than properties
+of one room.
+
+`shred` is the one dial with a real frame cost — it widens the mass shader's
+working region — so it is a late accent and never a baseline. The quality
+governor (`gfx/quality.ts`) will trade bloom detail to pay for it.
+
+**Not built.** Weather — the one permitted screen-space category, replacing the
+forbidden field programs rather than joining them. Grid slip and contortion. The
+Cell's coupling to the player's own output, so the room breathes with the engine.
+A swarm that clusters silhouettes off the cap-distance field: `shred`'s flecks
+*leave* the mass, which is close to §8.3's "flies" but not the same picture, and
+the difference should be decided rather than blurred.
 
 ---
 
