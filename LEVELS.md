@@ -159,8 +159,9 @@ is kept — stillness as a texture is used deliberately (§3.2).
 1. **Per-level `tint` is authored, validated, and visually inert** — the ramp
    at `renderer.ts:618` keys on biomes, which no arena defines. One line lights
    it up. Cheapest win in the codebase.
-2. **`SHELL` per level.** Block sizes, cycle tempo, amplitude are set once
-   globally; promote to a per-level override. This is the narrative gradient:
+2. **`SHELL` per level — LIVE.** `LevelDef.shell` merges over the global
+   `SHELL` (`renderer.applyRoomStyle`), and arenas.json already uses it (the
+   Sink's oil, the Archive's slowed churn). This is the narrative gradient:
    the Archive nearly still (forgotten storage), the Heap gentle, deeper rooms
    faster and higher-amplitude as the player approaches the thing being
    contained — so the ending's frozen slabs land as the bottom of a ladder the
@@ -169,6 +170,49 @@ is kept — stillness as a texture is used deliberately (§3.2).
    because the schema rejects the object form (`content/index.ts:156` declares
    a string). Fix the schema; rooms can then carry a field (frost shimmer,
    static) as data.
+
+### 3.2b The decomposition dials
+
+The ruins can come apart. Three numbers on `LevelDef.shell`, all live today,
+all per-room, defined and documented in `src/app/visual.ts` (`SHELL`):
+
+- **`dissolve`** — the material's standing condition. Every block trades its
+  boundary for wisps: edges billow past themselves, the silhouette bleeds
+  near-black ink tendrils tens of units into the room, shadows and the lit
+  hairline soften to match. Dissolving means getting *bigger* — matter
+  leaving, not a cloud evaporating. Scales with the layer: the black base
+  barely breathes, the top grey is the most gone. Uniform across the room by
+  design; this is what the room *is*, not an event passing through it.
+- **`decay`** — the roaming deform wave. A slow rot field drifts across the
+  arena over tens of seconds; where it sits, silhouettes warp and erode, then
+  heal as it moves on. An event, not a condition.
+- **`shred`** — debris. Flecks pull free of the silhouette at the rot's
+  venting stretches and drift away on curling paths. Joins `decay`'s rot
+  field, so the two describe one process.
+
+The staged arc, tuned and approved (values are the whole difference):
+
+| stage    | knobs                                  | reads as                        |
+|----------|----------------------------------------|---------------------------------|
+| sound    | all 0                                  | the original ruins              |
+| ONSET    | `dissolve 0.35`                        | edges losing their certainty    |
+| ADVANCED | `dissolve 1`                           | no sharp edges left, ink fingers|
+| TERMINAL | `dissolve 1.6, decay 1.2, shred 0.9`   | boundaries meaningless          |
+
+Authoring is one JSON object per room: `"shell": { "dissolve": 0.35 }`. The
+gradient writes itself onto §3.2's ladder — the Archive sound, the Heap at
+onset, the deep rooms advanced, the last room terminal. An act-driven
+progression (the same room decaying *between* runs as the story advances)
+needs a story-layer hook that writes these through `applyRoomStyle`; not yet
+built, ask for it when a beat wants it.
+
+Two cautions. The global `SHELL` default is the campaign's *baseline* — rooms
+override upward from it, so it should stay at `sound`/`ONSET` and let rooms
+and the story escalate (it is parked at TERMINAL right now from look
+development; set it back before shipping a build). And `shred` widens the
+mass shader's working region, so it is the one dial with a real frame cost —
+fine as a late-campaign accent, wrong as a global default; the quality
+governor will eat bloom mips to pay for it on weak machines.
 
 ### 3.3 One legible rule per room
 
