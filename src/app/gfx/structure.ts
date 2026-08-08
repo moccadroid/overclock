@@ -1236,7 +1236,21 @@ void main(void) {
         vec2 rel = lp - (floor(lp / size - uGridOffset[layer]) + 0.5 + uGridOffset[layer]) * size;
         float edge = smoothstep(-2.2 * aa, 0.0, bd);
         float side = max(step(rel.x, 0.0), step(rel.y, 0.0));
-        body += uMass * edge * side * uEdge * max(0.0, 1.0 - dissolve);
+        // The lit edge, in the *structure* colour rather than as a fraction of the
+        // mass.
+        //
+        // It was uMass * uEdge, and uMass is 0x030309 — near-black by §16.2, so
+        // that a block reads as absence and not as an object catching light. Thirty
+        // per cent of near-black is still near-black: the hairline could never
+        // appear, and neither could the three layer shades, which are also
+        // multiples of it. Three scales of block therefore collapsed into one flat
+        // silhouette with a ragged fringe, and the depth the layering exists for
+        // was invisible in every frame the game has ever drawn.
+        //
+        // The grid line's own colour is the right value for it: bright enough to
+        // separate one slab from the next, and already inside §16.2's structure
+        // band, so nothing climbs into a reserved one.
+        body += uStructure * edge * side * uEdge * max(0.0, 1.0 - dissolve);
         put(acc, body, cover);
       }
     }
