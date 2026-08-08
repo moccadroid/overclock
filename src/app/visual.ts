@@ -318,7 +318,8 @@ export const SHELL = {
    *                                                 meaningless, the deform
    *                                                 wave and debris join
    *
-   * Currently: TERMINAL, the last stage of the arc.
+   * Driven by the campaign (siteDecay) at runtime; the stored zero is the
+   * sound baseline.
    */
   decay: 0,
   /**
@@ -347,9 +348,22 @@ export const SHELL = {
    * is a line. Scales with the layer: the black base barely breathes, the
    * top grey is the most gone. See the staging table on `decay`.
    *
-   * Currently: TERMINAL, the last stage of the arc — see the table on decay.
+   * Driven by the campaign (siteDecay) at runtime — see decompositionFor in
+   * renderer.ts; the stored zero is the sound baseline.
    */
   dissolve: 0,
+  /**
+   * The three smoke systems, all kept, all off by default — selected via the
+   * ?look= handle (renderer.ts) while the reference look is chosen by eye.
+   * exhale = Era-2 vented billows ("insane"); shroud = Era-3 body-of-smoke
+   * ("fire"); smoke = Era-4 tight per-block billows. See ShellStyle in
+   * gfx/structure.ts for why all three survive.
+   */
+  exhale: 0,
+  shroud: 0,
+  smoke: 0,
+  /** The field look — see ShellStyle.flow in gfx/structure.ts. */
+  flow: 0,
   /**
    * Hard drop shadow: strength, and offset as a fraction of block size.
    *
