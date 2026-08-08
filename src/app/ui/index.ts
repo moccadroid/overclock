@@ -10,6 +10,8 @@
  *   grid          lines of coloured segments, laid out by column
  *   emit          field / meter / chain / redact — text, never pixels
  *   terminal      the constant surface: header, three words, footer keys
+ *   window        a form with a titlebar: the desk's unit of everything
+ *   desktop       z-order, focus, one drag state, the strip and the shift clock
  *   sheet         a Bureau document: frame, heading, reference, rule, stamp
  *   transmission  an intrusion: no chrome at all, and it types
  *   fx            the glass — scanlines, phosphor, and interference
@@ -47,8 +49,12 @@ export { Grid } from './grid';
 export { List } from './list';
 export { VALUE_COL, blank, chain, field, head, meter, redact, row, wrap } from './emit';
 export { Sheet, type SheetSpec } from './sheet';
+export { CHROME, PANEL, drawPanel } from './window';
 export { Button, Rows, horizontal, vertical, type ButtonOpts, type RowsOpts } from './widgets';
 export { Focus, type KeyHandler } from './focus';
 export { Glass, PHOSPHOR, type GlassStyle } from './fx';
+export { chromeGlass, tearGlass, type GlassSettings } from './uiglass';
 export { ENTRIES, Terminal, type Entry, type TerminalState } from './terminal';
 export { Transmission } from './transmission';
+export { Win, type WindowSpec } from './window';
+export { Desktop, clockLabel, type DesktopState } from './desktop';

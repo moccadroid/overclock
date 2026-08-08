@@ -67,7 +67,7 @@ export function runLines(selected: number): Line[] {
     field('OPERATOR', '████████', { col: 14 }),
     blank(),
     [['Conclude the episode at the earliest collection point.', C.ink]],
-    [['Episode output is recorded against the operator.', C.ink]],
+    [['Episode output is logged and reviewed.', C.ink]],
     blank(),
     head('AXIOM — the first row of the build, issued before the episode'),
     blank(),
@@ -169,7 +169,7 @@ export function fileBody(index: number): Line[] {
     blank(),
     [['Duties per shift: observe the episode. Deny build requests.', C.ink]],
     [['Conclude the episode at the earliest collection point.', C.ink]],
-    [['Episode output is recorded against the operator.', C.ink]],
+    [['Episode output is logged and reviewed.', C.ink]],
     blank(),
     [['First-shift operators reporting familiarity with the site', C.ink]],
     [['are within norms and need not be flagged.', C.ink]],
@@ -203,7 +203,7 @@ export function configLines(
     ['scanlines', values.scan ? 'on' : 'off', values.scan ? C.trigger : C.dim],
   ];
   const out: Line[] = [
-    [['Adjustments are recorded against the operator.', C.ink]],
+    [['Adjustments to this terminal are logged.', C.ink]],
     [['Defaults may be restored without notice.', C.ink]],
     blank(),
     head('DISPLAY AND OUTPUT'),

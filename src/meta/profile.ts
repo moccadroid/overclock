@@ -75,6 +75,24 @@ export interface LibraryData {
     phosphor: string;
     /** Scanline depth on the terminal, 0..1. 0 is a flat panel. */
     scanlines: number;
+    /**
+     * §20.1 — the display transform. See `app/gfx/display.ts`.
+     *
+     * Not one of `fx`, and not swept by the quality presets: this is not a
+     * fidelity decision or even a taste one, it is a fact about the panel the
+     * player is sitting in front of. A preset that reached in here would undo
+     * somebody's calibration on its way to turning bloom off.
+     */
+    gamma: number;
+    /**
+     * Whether the calibration sheet has been through.
+     *
+     * Separate from `gamma` on purpose. A gamma of 1 is a perfectly legitimate
+     * answer — it is the right one on the screen this was authored on — and
+     * storing only the number would make "already correct" indistinguishable
+     * from "never asked", so the sheet would either nag forever or never show.
+     */
+    calibrated: boolean;
   };
 }
 
@@ -96,6 +114,8 @@ function emptyData(): LibraryData {
       beatSync: true,
       phosphor: 'colour',
       scanlines: 0.3,
+      gamma: 1,
+      calibrated: false,
     },
   };
 }
@@ -141,6 +161,8 @@ export class Library {
           beatSync: parsed.settings?.beatSync !== false,
           phosphor: string(parsed.settings?.phosphor) ?? base.settings.phosphor,
           scanlines: number(parsed.settings?.scanlines) ?? base.settings.scanlines,
+          gamma: number(parsed.settings?.gamma) ?? base.settings.gamma,
+          calibrated: parsed.settings?.calibrated === true,
         },
       };
     } catch {
@@ -251,6 +273,20 @@ export class Library {
   /** The tube the terminal is read on, and how hard the beam misses a row. */
   setGlass(g: Partial<Pick<LibraryData['settings'], 'phosphor' | 'scanlines'>>): void {
     this.data.settings = { ...this.data.settings, ...g };
+    this.save();
+  }
+
+  /**
+   * §20.1 — the panel this is being read on, and whether we have asked about it.
+   *
+   * Its own setter rather than a field on `setGlass`, because the glass is a
+   * thing in the fiction and this is a thing in the room. The clamping lives in
+   * `app/gfx/display.ts` beside the shader that consumes it; a Library written
+   * by hand with `gamma: 40` still loads, and still gets clamped on the way to
+   * the uniform.
+   */
+  setDisplay(d: Partial<Pick<LibraryData['settings'], 'gamma' | 'calibrated'>>): void {
+    this.data.settings = { ...this.data.settings, ...d };
     this.save();
   }
 

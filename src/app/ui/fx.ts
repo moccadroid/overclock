@@ -63,6 +63,29 @@ uniform float uTear;
 uniform float uSplit;
 uniform float uNoise;
 uniform float uVignette;
+/**
+ * Barrel curvature, confined to the outer edge.
+ *
+ * A curved screen becomes a novelty at about twice this value — the moment
+ * straight text visibly bows, the effect is the subject. What is wanted is only
+ * the corners disagreeing slightly with the rectangle, which is what tells the
+ * eye it is looking at glass rather than at a page.
+ */
+uniform float uCurve;
+/**
+ * Aperture-grille triads: vertical RGB stripes at the device-pixel pitch.
+ *
+ * The detail that only resolves when the player leans in, and the reason a
+ * screenshot of this survives being looked at closely. Multiplied like the
+ * scanlines, never added, for the same reason: a phosphor stripe is the mask
+ * *blocking* two thirds of the beam.
+ */
+uniform float uGrille;
+/**
+ * Mains hum, as brightness. A real tube never sits perfectly still, and this is
+ * the difference between a dark screen and a switched-off one.
+ */
+uniform float uBreathe;
 
 float hash(vec2 p) {
   return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
@@ -71,6 +94,23 @@ float hash(vec2 p) {
 void main(void) {
   vec2 uv = vTextureCoord;
   vec2 px = uInputSize.zw;
+
+  // ---- the tube's geometry ----------------------------------------------
+  //
+  // Applied first, because everything after it is a property of the surface and
+  // has to travel with it. Sampling off the edge returns black rather than
+  // clamping, so the picture ends where the glass does instead of smearing its
+  // last row of pixels outward.
+  if (uCurve > 0.0) {
+    vec2 c = uv * 2.0 - 1.0;
+    float r2 = dot(c, c);
+    c *= 1.0 + uCurve * r2 * 0.5;
+    uv = c * 0.5 + 0.5;
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+      finalColor = vec4(0.0, 0.0, 0.0, 1.0);
+      return;
+    }
+  }
 
   // ---- tear -------------------------------------------------------------
   //
@@ -122,6 +162,28 @@ void main(void) {
     c.rgb *= 1.0 - uScan * (1.0 - line);
   }
 
+  // ---- the mask ---------------------------------------------------------
+  //
+  // Three stripes per triad, in device pixels for the same reason the scanline
+  // pitch is: a grille is a property of the tube, not of the window size.
+  if (uGrille > 0.0) {
+    float stripe = mod(floor(uv.x * uInputSize.x), 3.0);
+    vec3 mask = vec3(
+      stripe < 0.5 ? 1.0 : 0.0,
+      stripe > 0.5 && stripe < 1.5 ? 1.0 : 0.0,
+      stripe > 1.5 ? 1.0 : 0.0
+    );
+    // Lerped toward the mask rather than multiplied by it: at full strength this
+    // would throw away two thirds of the light and the desk would go black.
+    c.rgb *= mix(vec3(1.0), mask * 1.6, uGrille);
+  }
+
+  if (uBreathe > 0.0) {
+    // Two incommensurate rates, so it never reads as a pulse with a period.
+    float hum = sin(uTime * 6.283 * 0.7) * 0.6 + sin(uTime * 6.283 * 0.11) * 0.4;
+    c.rgb *= 1.0 + hum * uBreathe;
+  }
+
   if (uNoise > 0.0) {
     float n = hash(uv * 512.0 + uTime) - 0.5;
     c.rgb += n * uNoise;
@@ -145,6 +207,9 @@ export interface GlassStyle {
   split?: number;
   noise?: number;
   vignette?: number;
+  curve?: number;
+  grille?: number;
+  breathe?: number;
 }
 
 export class Glass {
@@ -165,6 +230,9 @@ export class Glass {
           uSplit: { value: 0, type: 'f32' },
           uNoise: { value: 0, type: 'f32' },
           uVignette: { value: 0, type: 'f32' },
+          uCurve: { value: 0, type: 'f32' },
+          uGrille: { value: 0, type: 'f32' },
+          uBreathe: { value: 0, type: 'f32' },
         },
       },
     });
@@ -184,6 +252,9 @@ export class Glass {
     if (s.split !== undefined) u.uSplit = s.split;
     if (s.noise !== undefined) u.uNoise = s.noise;
     if (s.vignette !== undefined) u.uVignette = s.vignette;
+    if (s.curve !== undefined) u.uCurve = s.curve;
+    if (s.grille !== undefined) u.uGrille = s.grille;
+    if (s.breathe !== undefined) u.uBreathe = s.breathe;
     if (s.tint) {
       const t = this.filter.resources.glassUniforms.uniforms.uTint as Float32Array;
       t[0] = s.tint[0];

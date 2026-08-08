@@ -116,6 +116,29 @@ describe('the Library (GDD §15)', () => {
     expect(lib.availableNodes.length).toBeGreaterThan(0);
   });
 
+  it('§20.1 — a Library written before calibration existed has not calibrated', () => {
+    // The migration that matters, because every account in the wild is one of
+    // these. A missing `gamma` has to land on the identity — anything else moves
+    // a picture the player never asked to have moved — and a missing
+    // `calibrated` has to read as false, or the one screen this feature is for
+    // never shows to the people who needed it enough to report it.
+    localStorage.setItem(
+      'overclock.library.v1',
+      JSON.stringify({ runs: 3, settings: { volume: 0.4, phosphor: 'amber' } }),
+    );
+    const lib = new Library();
+    expect(lib.snapshot.settings.gamma).toBe(1);
+    expect(lib.snapshot.settings.calibrated).toBe(false);
+    // And the settings it *did* have survive the arrival of two new ones.
+    expect(lib.snapshot.settings.volume).toBe(0.4);
+    expect(lib.snapshot.settings.phosphor).toBe('amber');
+
+    lib.setDisplay({ gamma: 1.45, calibrated: true });
+    const reopened = new Library();
+    expect(reopened.snapshot.settings.gamma).toBe(1.45);
+    expect(reopened.snapshot.settings.calibrated).toBe(true);
+  });
+
   it('an account keeps what it banked when the gating graph is re-cut', () => {
     // §15.2 — the Library only ever grows. Availability is derived, so editing
     // progression.json takes effect immediately; the stored `unlocked` list is

@@ -1,136 +1,66 @@
 /**
- * In-run HUD. GDD §19.4 — edge-mounted, minimal, EPS always visible.
- * Placeholder styling; the Ring itself lives on the avatar in the renderer.
+ * The HUD's *state*, now that the HUD itself is drawn in the bezel.
+ *
+ * This was 337 lines: six absolutely-positioned HTML divs, an xp bar, an engine
+ * strip and a frame-cost line, each building its own markup with its own colour
+ * classes in a stylesheet a long way from `tokens.ts`. All of that moved — the
+ * content to `readouts.ts`, the drawing to `bezel.ts` — for three reasons, in
+ * order of how much they mattered:
+ *
+ *   **It could not take the player's phosphor.** A monochrome tube is a global
+ *   setting; DOM text over a WebGL canvas is not on the tube at all, so an
+ *   operator on amber had an amber game with a blue-grey HUD stapled to it.
+ *
+ *   **It read as text lying on the game** rather than as a machine the game is
+ *   inside, which is the whole point of the bezel.
+ *
+ *   **It kept a second palette.** Two sources of truth for what "warning" looks
+ *   like, and the CSS one was never updated when `C` changed.
+ *
+ * What is left is the part that genuinely is state and not rendering: a smoothed
+ * frame cost, and a notice with an expiry. Both are asked for once per UI tick.
  */
-import type { World } from '../sim/world';
-import { TUNABLE } from '../sim/tunables';
-import { BRANDING } from '../branding';
-import { MODIFIER_BY_ID, NODE_BY_ID } from '../content/index';
 
-function bar(value: number, max: number, width: number): string {
-  const filled = Math.max(0, Math.min(width, Math.round((value / max) * width)));
-  return '█'.repeat(filled) + '·'.repeat(width - filled);
-}
-
-/**
- * A bar that wears its own thresholds. The track is drawn green / amber / red
- * along its length, so you can see which zone you are in *and* which one you are
- * heading into. Heat's tiers sit at 40 / 70 / 100 and load's pain starts at
- * capacity — both read as "stay in the green" without needing a legend.
- */
-function zoneBar(value: number, max: number, width: number, stops: number[]): string {
-  const filled = Math.max(0, Math.min(width, Math.round((value / max) * width)));
-  const classes = ['z-ok', 'z-warn', 'z-crit'];
-  let out = '';
-  let start = 0;
-  for (let z = 0; z < stops.length; z++) {
-    const stop = Math.round((stops[z]! / max) * width);
-    const lit = Math.max(0, Math.min(stop, filled) - start);
-    const dim = stop - start - lit;
-    const cls = classes[z] ?? 'z-crit';
-    if (lit > 0) out += `<span class="${cls}">${'█'.repeat(lit)}</span>`;
-    if (dim > 0) out += `<span class="${cls} dim">${'·'.repeat(dim)}</span>`;
-    start = stop;
-  }
-  return out;
-}
-
-function clock(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${s.toString().padStart(2, '0')}`;
-}
-
-/**
- * §19.4 — the run timer. Minutes padded, so it does not jump a character wide
- * at ten minutes and shove the rest of the line along with it.
- */
-function runClock(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-}
+/** How long a flashed line stays up. */
+const NOTICE_SECONDS = 2.4;
 
 export class Hud {
-  private readonly tl: HTMLElement;
-  private readonly tc: HTMLElement;
-  private readonly tr: HTMLElement;
-  private readonly bl: HTMLElement;
-  private readonly bc: HTMLElement;
-  private readonly br: HTMLElement;
-  private readonly xpbar: HTMLElement;
-  private readonly engine: HTMLElement;
-  private notice = '';
-  private noticeUntil = 0;
-  private readonly fps: HTMLElement;
   /** Smoothed, because a per-frame number is unreadable and always looks worse. */
   private fpsAverage = 60;
   private gpuMs = 0;
   /** CPU cost of the frame callback, smoothed like the fps. See Game.busyMs. */
   private cpuMs = 0;
-
-  constructor(root: HTMLElement) {
-    const make = (id: string): HTMLElement => {
-      const el = document.createElement('div');
-      el.id = id;
-      el.className = 'corner';
-      root.appendChild(el);
-      return el;
-    };
-    this.xpbar = document.createElement('div');
-    this.xpbar.id = 'xpbar';
-    root.appendChild(this.xpbar);
-
-    this.tl = make('hud-tl');
-    this.tc = make('hud-tc');
-    this.tr = make('hud-tr');
-    this.bl = make('hud-bl');
-    this.bc = make('hud-bc');
-    this.br = make('hud-br');
-    this.br.textContent =
-      `${BRANDING.title} · H help · TAB editor · SPACE dash · E channel · M mute`;
-
-    // The Engine strip. §19.4 keeps the HUD minimal and puts the pipeline in the
-    // editor, but a build you cannot see is a build you cannot reason about —
-    // pillar 2. Low-brightness, right edge, one line per Program.
-    this.engine = document.createElement('div');
-    this.engine.id = 'hud-engine';
-    root.appendChild(this.engine);
-
-    // Quiet by design: a number you can find when you go looking and never
-    // notice when you are not. It sits above everything so a full screen of
-    // light cannot hide it, which is exactly when you want to read it.
-    this.fps = document.createElement('div');
-    this.fps.id = 'hud-fps';
-    root.appendChild(this.fps);
-  }
+  private notice = '';
+  private noticeUntil = 0;
 
   /** A transient line for things that have no permanent home — mute, mostly. */
   flash(message: string): void {
     this.notice = message;
-    this.noticeUntil = performance.now() / 1000 + 1.8;
+    this.noticeUntil = performance.now() / 1000 + NOTICE_SECONDS;
   }
 
-  /** Called every frame; the display only refreshes with the rest of the HUD. */
+  /** The flashed line, or empty once it has expired. */
+  get message(): string {
+    return performance.now() / 1000 < this.noticeUntil ? this.notice : '';
+  }
+
   sample(frameDt: number, gpuMs = 0, cpuBusyMs = 0): void {
-    if (frameDt <= 0) return;
-    this.fpsAverage += (1 / frameDt - this.fpsAverage) * 0.08;
-    this.gpuMs = gpuMs;
-    if (cpuBusyMs > 0) this.cpuMs += (cpuBusyMs - this.cpuMs) * 0.08;
+    if (frameDt > 0) this.fpsAverage += (1 / frameDt - this.fpsAverage) * 0.08;
+    if (gpuMs > 0) this.gpuMs += (gpuMs - this.gpuMs) * 0.1;
+    if (cpuBusyMs > 0) this.cpuMs += (cpuBusyMs - this.cpuMs) * 0.1;
   }
 
-  update(world: World): void {
-    const p = world.player;
-    // GPU milliseconds beside the frame rate, when the driver will tell us.
-    // Frame rate alone hides a GPU that is working far too hard for what is on
-    // screen — which is exactly the failure that made this readout necessary.
-    //
-    // Headroom is the fps line's real job now that rendering is capped at 60:
-    // the rate can only ever confirm the cap, so the readout says what the
-    // frame *cost* and how far the machine sits above the budget. The bound is
-    // whichever side is slower — cpu and gpu run concurrently — and where the
-    // timer extension is missing the estimate is labelled cpu-only rather than
-    // silently reporting half the picture.
+  /**
+   * What the frame cost, and how far the machine sits above the budget.
+   *
+   * Frame rate alone hides a GPU working far too hard for what is on screen —
+   * exactly the failure that made this readout necessary — and with rendering
+   * capped at 60 the rate can only ever confirm the cap. Headroom is the real
+   * number. The bound is whichever side is slower, because cpu and gpu run
+   * concurrently, and where the timer extension is missing the estimate says so
+   * rather than silently reporting half the picture.
+   */
+  get frameLine(): string {
     let line = `${Math.round(this.fpsAverage)} fps`;
     if (this.cpuMs > 0) line += ` · ${this.cpuMs.toFixed(1)}ms cpu`;
     if (this.gpuMs > 0) line += ` · ${this.gpuMs.toFixed(1)}ms gpu`;
@@ -140,198 +70,6 @@ export class Hud {
       line += ` · ~${head >= 10 ? Math.round(head) : head.toFixed(1)}× headroom`;
       if (this.gpuMs <= 0) line += ' (cpu only)';
     }
-    this.fps.textContent = line;
-
-    this.xpbar.style.width = `${(world.xp / world.xpToNext) * 100}%`;
-
-    const xpPct = Math.floor((world.xp / world.xpToNext) * 100);
-    this.tl.innerHTML =
-      `INTEGRITY <span class="bar">${bar(p.integrity, p.maxIntegrity, 20)}</span> ` +
-      `${Math.ceil(p.integrity)}\n` +
-      `LEVEL ${world.level} <span class="xp">${bar(world.xp, world.xpToNext, 20)}</span> ` +
-      `${Math.floor(world.xp)}/${world.xpToNext} → ${world.level + 1}  (${xpPct}%)\n` +
-      `DASH ${p.dashCooldown > 0 ? p.dashCooldown.toFixed(1) + 's' : 'READY'}`;
-
-    const heat = world.budget.heat;
-    const tier = world.budget.tier;
-    const tierName = ['NOMINAL', 'INSTABILITY I', 'INSTABILITY II', 'OVERHEAT'][tier]!;
-    // §12.1 — Threat as a step, and what this room can express of it.
-    //
-    // It read `THREAT 8.4` — a continuous number, to one decimal, that nobody
-    // could plan against and most players never looked at twice. It is a step
-    // now for the same reason Heat has tiers rather than a bare gauge: people
-    // act on beats, not on floats.
-    //
-    // The second half only appears in a capped room, and it is the whole of the
-    // "you are behind" signal. Nothing tells the player they are too slow — the
-    // run's Threat is simply a number this room cannot reach, and the distance
-    // is what is waiting on the other side of the gate. It also previews the
-    // siege: standing at the door at ROOM 3 against THREAT 8 is a very different
-    // decision from standing there at THREAT 4, and that used to be invisible
-    // until it arrived.
-    const behind = world.threatStep - world.roomThreatStep;
-    const threatLine =
-      behind <= 0
-        ? `THREAT ${world.threatStep}`
-        : `THREAT ${world.threatStep}   ` +
-          `<span class="${behind >= 3 ? 'z-crit' : 'cool'}">ROOM ${world.roomThreatStep}</span>`;
-    // §19.4 — how long you have been in it, always.
-    //
-    // The run clock used to be the *first half* of this line and Meltdown
-    // replaced the whole thing, so at the exact point a run becomes worth
-    // measuring — past twenty minutes, chasing a number — total elapsed
-    // disappeared and only the Meltdown timer was left. Two different questions:
-    // one is "how long is this run", the other is "how long have I been diverging
-    // for". It now keeps its own slot and Meltdown takes the space beside it.
-    const elapsed = `<span class="runclock">${runClock(world.time)}</span>`;
-    const topLine =
-      world.phase === 'meltdown'
-        ? `${elapsed}   <span class="meltdown">MELTDOWN ×${world.meltdownMultiplier.toFixed(2)}` +
-          `   +${clock(world.meltdownTime)}</span>`
-        : `${elapsed}   ${threatLine}`;
-
-    // Heat used to be reported as a bare number that sat at zero and then leapt.
-    // Two things fix that: the bar carries its own tier colours (40 / 70 / 100),
-    // and the rate says which way it is moving. Venting is as informative as
-    // building — it is the proof that easing off works.
-    const rate = world.budget.heatRate;
-    let heatFlow: string;
-    if (world.budget.stalled) {
-      heatFlow = `<span class="z-crit">STALLED ${world.budget.stall.toFixed(1)}s</span>`;
-    } else if (rate > 0.05) {
-      heatFlow = `<span class="z-crit">▲ +${rate.toFixed(0)}/s</span>`;
-    } else if (rate < -0.05) {
-      heatFlow = `<span class="z-ok">▼ ${rate.toFixed(0)}/s venting</span>`;
-    } else {
-      heatFlow = `<span class="cool">stable</span>`;
-    }
-    // §6.2 — Heat's cause, printed beside Heat.
-    //
-    // This is the whole reason Heat moved onto cascade depth. The old readout
-    // could only say how hot you were, because its cause was a per-second
-    // integral of a hidden budget — nothing you could point at. Depth is a thing
-    // on the screen: you can see the chain, and now you can see the number it is
-    // charging you.
-    const depth = world.depthAverage;
-    const free = TUNABLE.heatFreeDepth;
-    const depthRead =
-      depth < 0.5
-        ? `<span class="cool">chain 0</span>`
-        : `<span class="${depth > free ? 'z-warn' : 'z-ok'}">chain ${depth.toFixed(1)}` +
-          `${depth > free ? ` · ${(depth - free).toFixed(1)} over` : ' · free'}</span>`;
-
-    const advice =
-      world.budget.stalled || heat > 55
-        ? `<span class="advice">shorten the chain — depth past ${free} is what heats you</span>`
-        : '';
-
-    this.tc.innerHTML =
-      `${topLine}\n` +
-      `HEAT ${zoneBar(heat, 100, 16, [40, 70, 100])} ` +
-      `<span class="${tier >= 2 ? 'z-crit' : tier >= 1 ? 'z-warn' : 'z-ok'}">${tierName}</span>` +
-      `   ${heatFlow}   ${depthRead}` +
-      (advice ? `\n${advice}` : '') +
-      (world.surgeTime > 0
-        ? `\n<span class="surge">REBUILD SURGE ${world.surgeTime.toFixed(0)}s · 2× XP</span>`
-        : '');
-
-    this.tr.innerHTML =
-      `<span class="eps">EPS ${world.eps.toFixed(1)}</span>\n` +
-      `SCORE ${Math.floor(world.score)}` +
-      (world.kernels > 0 ? `   KERNEL ×${world.engine.kernel.toFixed(2)}` : '') +
-      `\n` +
-      // One number, and it only moves when *you* move it. The old readout showed
-      // a dynamic pool draining against a static reservation — two quantities
-      // with one name, one of which was a cliff.
-      `CYCLES ${world.engine.staticLoad.toFixed(1)}/${world.budget.capacity}` +
-      `  ${bar(world.engine.staticLoad, world.budget.capacity, 12)}`;
-
-    this.bl.innerHTML = world.suppressedNow
-      ? '<span class="suppressed">SUPPRESSED — TRIGGERS OFFLINE</span>'
-      : '';
-
-    const queued = world.pendingDrafts;
-    const showNotice = performance.now() / 1000 < this.noticeUntil;
-    this.bc.textContent = showNotice
-      ? this.notice
-      : queued > 0
-        ? `${'^'.repeat(queued)}  ${queued} DRAFT PENDING — E`
-        : '';
-
-    this.br.textContent =
-      `enemies ${world.enemies.length}  proj ${world.projectiles.length}  ` +
-      `zones ${world.zones.length}  depth ${world.stats.maxDepth}  ` +
-      `scrap +${(world.engine.scrapStacks * 4).toFixed(0)}%`;
-
-    this.renderEngineStrip(world);
+    return line;
   }
-
-  /** One line per Program: the chain as written, and its live share of EPS. */
-  private renderEngineStrip(world: World): void {
-    const total = world.engine.programs.reduce((s, p) => s + p.recentDamage, 0);
-    const lines = world.engine.programs.map((program, i) => {
-      const compiled = world.engine.compiled[i]!;
-      if (!compiled.live && !program.triggerId && !program.actionId) {
-        return `<div class="prog dead">${i + 1}  —</div>`;
-      }
-
-      // Same kind colours as the chips and cards, so the strip reads as the
-      // same language rather than a separate list.
-      const parts: string[] = [
-        `<span class="k-trigger">${nodeName(program.triggerId) ?? '·'}</span>`,
-      ];
-      for (const m of program.modifierIds) {
-        if (m) parts.push(`<span class="k-modifier">${nodeName(m) ?? m}</span>`);
-      }
-      parts.push(`<span class="k-action">${nodeName(program.actionId) ?? '·'}</span>`);
-      const chain = parts.join('<span class="k-sep"> › </span>');
-
-      if (!compiled.live) {
-        return `<div class="prog dead">${i + 1}  ${chain}   <span class="warn">not live</span></div>`;
-      }
-
-      // §19.4 — DPS per row, on the always-visible strip. The share bar answers
-      // "which row is carrying this build"; the number answers "by how much".
-      const share = total > 0 ? (program.recentDamage / total) * 100 : 0;
-      const meter = '▏'.repeat(Math.max(0, Math.round(share / 10)));
-      const dps = program.recentDamage;
-      const dpsText =
-        dps >= 1000 ? `${(dps / 1000).toFixed(1)}k` : dps >= 1 ? dps.toFixed(0) : '—';
-      return (
-        `<div class="prog">${i + 1}  ${chain}` +
-        `   <span class="num">${compiled.staticCost.toFixed(0)}c</span>` +
-        `<span class="meter">${meter}</span>` +
-        `<span class="pct">${dpsText} dps</span></div>`
-      );
-    });
-
-    const active = world.terminals.find((t) => t.progress > 0);
-    const filled = active ? Math.round(active.progress * 10) : 0;
-    const channel = active
-      ? `<div class="channel">${active.kind.toUpperCase()} ` +
-        `${'█'.repeat(filled)}${'·'.repeat(10 - filled)}</div>`
-      : '';
-
-    // What the Engine reserves, against what it may. This only changes when the
-    // build does, which is the entire point of the resource being static: it is
-    // a number you plan against rather than one you discover.
-    const reserved = world.engine.staticLoad;
-    const supply = world.budget.capacity;
-    const pct = supply > 0 ? reserved / supply : 0;
-    const load =
-      `<div class="load">RESERVED ${zoneBar(reserved, supply, 14, [supply * 0.75, supply * 0.9, supply])}` +
-      `  <span class="${pct > 0.95 ? 'z-crit' : pct > 0.8 ? 'z-warn' : 'z-ok'}">` +
-      `${reserved.toFixed(1)}</span><span class="num">/${supply} c</span></div>`;
-
-    this.engine.innerHTML =
-      `<div class="prog head">ENGINE — TAB to edit</div>` + load + lines.join('') + channel;
-  }
-}
-
-function nodeName(id: string | null): string | null {
-  if (!id) return null;
-  const node = NODE_BY_ID.get(id);
-  if (!node) return id;
-  const mult = MODIFIER_BY_ID.get(id)?.cycleMult;
-  return mult ? `${node.name}×${mult}` : node.name;
 }

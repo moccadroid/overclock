@@ -68,7 +68,29 @@ export interface RowsOpts {
    * from the keyboard, and the screens that need a mouse commit have a button.
    */
   commitOnClick?: boolean;
+  /**
+   * Whether a second click on an already-selected row commits.
+   *
+   * This is the file-explorer contract and it is not the same as
+   * `commitOnClick`: one click selects so you can look, two open. Every desktop
+   * ever shipped works this way, and on a list where committing *opens a window*
+   * a single-click commit means you cannot move the cursor without opening
+   * something.
+   */
+  commitOnDouble?: boolean;
+  /**
+   * The pointer went down on a row and then moved away from it: the caller may
+   * want to treat that as picking the row up.
+   *
+   * Reported rather than handled, for the same reason a window reports a drag
+   * instead of running one — there is exactly one thing being dragged on the
+   * desk, so exactly one place should own it.
+   */
+  onDragOut?: (index: number) => void;
 }
+
+/** How long after a click a second one still counts as a double. */
+const DOUBLE_MS = 380;
 
 /**
  * A run of selectable lines.
@@ -87,6 +109,20 @@ export class Rows {
   private readonly band = new Graphics();
   private readonly hits: Container[] = [];
   private readonly step: number;
+  /**
+   * Explicit grid row per item, when the items are not evenly spaced.
+   *
+   * `row + i * step` covers every list in the game except one: the file
+   * explorer, whose entries are interrupted by folder headings, so item 4 might
+   * be on row 9 and item 5 on row 12. Without this the bands and the hit boxes
+   * march down on a fixed pitch while the text does not, and the cursor drifts
+   * further from the line it is supposed to be on with every heading passed.
+   */
+  private positions: number[] | null = null;
+  private lastTapIndex = -1;
+  private lastTapAt = 0;
+  /** The row the pointer went down on, until it comes up or leaves. */
+  private pressed = -1;
 
   constructor(
     private readonly grid: Grid,
@@ -108,9 +144,30 @@ export class Rows {
    * scrolled, the cursor could not follow it past the third entry, and every
    * attempt to fix it further up the stack was working around this.
    */
+  /**
+   * Place the items on given grid rows instead of on a fixed pitch.
+   *
+   * Pass one row per item, in item order. Setting it always rebuilds, because
+   * the whole reason to call it is that the rows moved.
+   */
+  setPositions(rows: readonly number[]): void {
+    this.positions = [...rows];
+    this.rebuild(this.o.count);
+  }
+
+  /** Grid row of item `i`, honouring an explicit placement if one was given. */
+  private rowOf(i: number): number {
+    return this.positions?.[i] ?? this.o.row + i * this.step;
+  }
+
   setCount(n: number): void {
     const count = Math.max(0, n);
     if (count === this.hits.length) return;
+    this.rebuild(count);
+  }
+
+  private rebuild(n: number): void {
+    const count = Math.max(0, n);
     this.o.count = count;
     for (const hit of this.hits) {
       this.view.removeChild(hit);
@@ -124,7 +181,7 @@ export class Rows {
       hit.cursor = 'pointer';
       hit.hitArea = new Rectangle(
         this.grid.x(this.o.col),
-        this.grid.y(this.o.row + i * this.step) - 2,
+        this.grid.y(this.rowOf(i)) - 2,
         this.grid.x(this.o.cols),
         LINE,
       );
@@ -135,10 +192,32 @@ export class Rows {
       hit.on('pointerout', () => {
         if (this.hover === i) this.hover = -1;
         this.paint();
+        // Left the row with the button still down: that is a pick-up, not a
+        // click. Checked on the way out rather than by measuring distance,
+        // because a row is one line tall and any threshold worth having is
+        // taller than the thing being dragged.
+        if (this.pressed === i) {
+          this.pressed = -1;
+          this.o.onDragOut?.(i);
+        }
+      });
+      hit.on('pointerdown', () => {
+        this.pressed = i;
+      });
+      hit.on('pointerupoutside', () => {
+        this.pressed = -1;
       });
       hit.on('pointertap', () => {
+        const now = performance.now();
+        const double =
+          this.o.commitOnDouble === true &&
+          this.lastTapIndex === i &&
+          now - this.lastTapAt < DOUBLE_MS;
+        this.lastTapIndex = i;
+        this.lastTapAt = now;
+        this.pressed = -1;
         this.moveTo(i);
-        if (this.o.commitOnClick) this.o.onCommit?.(i);
+        if (double || this.o.commitOnClick) this.o.onCommit?.(i);
       });
       this.hits.push(hit);
       this.view.addChild(hit);
@@ -179,11 +258,11 @@ export class Rows {
     const w = this.grid.x(this.o.cols);
     if (this.hover >= 0 && this.hover !== this.index) {
       this.band
-        .rect(x, this.grid.y(this.o.row + this.hover * this.step) - 2, w, LINE)
+        .rect(x, this.grid.y(this.rowOf(this.hover)) - 2, w, LINE)
         .fill({ color: C.ink, alpha: HOVER_A });
     }
     this.band
-      .rect(x, this.grid.y(this.o.row + this.index * this.step) - 2, w, LINE)
+      .rect(x, this.grid.y(this.rowOf(this.index)) - 2, w, LINE)
       .fill({ color: C.ink, alpha: CURSOR_A });
   }
 
@@ -193,7 +272,8 @@ export class Rows {
 }
 
 export interface ButtonOpts {
-  /** Grid position of the box's top-left, in columns and rows. */
+  /** Grid position of the box's top-left, in columns and rows. Mutable: see
+   *  `Button.place`, which a resizing window uses. */
   col: number;
   row: number;
   /** Columns of padding either side of the label. */
@@ -220,7 +300,7 @@ export class Button {
   private hovered = false;
 
   constructor(
-    grid: Grid,
+    private readonly grid: Grid,
     text: string,
     private readonly o: ButtonOpts,
   ) {
@@ -263,6 +343,21 @@ export class Button {
     this.view.on('pointertap', () => this.o.onPress?.());
 
     this.paint();
+  }
+
+  /**
+   * Move the button to a different grid row.
+   *
+   * A button positions itself once, at construction — which is fine on a fixed
+   * sheet and wrong inside a window that resizes. BEGIN CONTAINMENT is placed two
+   * rows from the bottom, so when the desk shrank the window to fit the viewport
+   * the button stayed where the *old* bottom was and ended up sitting across the
+   * window's own border.
+   */
+  place(col: number, row: number): void {
+    this.o.col = col;
+    this.o.row = row;
+    this.view.position.set(this.grid.x(col), this.grid.y(row) - 5);
   }
 
   keys(e: KeyboardEvent): boolean {

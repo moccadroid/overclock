@@ -12,7 +12,6 @@
   --void: #b44cff;
   --signal: #ff2a3c;
 }
-
 /* Nothing in the UI is prose to be copied, and a stray drag across a card left
    the whole overlay highlighted in system blue — a colour that exists nowhere in
    §16 and lands on top of everything. The seed field is the one thing you might
@@ -26,7 +25,6 @@ textarea {
   user-select: text;
   -webkit-user-select: text;
 }
-
 /* The platform scrollbar is a light-grey slab that punches a hole in §16's
    document. Restyled to a thin phosphor rail — visible enough to say "there is
    more below", quiet enough to stay inside the drawing. */
@@ -51,7 +49,6 @@ textarea {
 ::-webkit-scrollbar-corner {
   background: transparent;
 }
-
 /* Hover reading, in-world and in a fixed place. See `inspector` in overlays. */
 .inspector {
   min-height: 1.5em;
@@ -61,7 +58,6 @@ textarea {
   color: #8ba3bd;
   line-height: 1.5;
 }
-
 #ui {
   position: absolute;
   inset: 0;
@@ -71,121 +67,19 @@ textarea {
   color: var(--ink);
   letter-spacing: 0.04em;
 }
-
-#ui .corner {
-  position: absolute;
-  padding: 10px 14px;
-  line-height: 1.55;
-  white-space: pre;
+/**
+ * The readouts sit **inside the bezel**, not at the edge of the screen.
+ *
+ * `--bezel-top` and `--bezel-bottom` are the frame's own thickness, set once in
+ * `bezel.ts`. Before this the bezel drew its titlebar in the same band the top
+ * corners occupied and the two overlapped into unreadable mush — the frame was
+ * added around a HUD that still thought it owned the screen edge.
+ */
+:root {
+  --bezel-top: 30px;
+  --bezel-bottom: 26px;
+  --bezel-side: 6px;
 }
-
-#hud-tl {
-  top: 6px;
-  left: 0;
-}
-#hud-tc {
-  top: 6px;
-  left: 50%;
-  transform: translateX(-50%);
-  text-align: center;
-}
-#hud-tr {
-  top: 6px;
-  right: 0;
-  text-align: right;
-}
-#hud-bl {
-  bottom: 6px;
-  left: 0;
-}
-#hud-bc {
-  bottom: 6px;
-  left: 50%;
-  transform: translateX(-50%);
-  text-align: center;
-}
-#hud-br {
-  bottom: 6px;
-  right: 0;
-  text-align: right;
-  color: #4c6076;
-}
-
-#hud-fps {
-  position: absolute;
-  top: 6px;
-  left: 50%;
-  transform: translateX(-50%);
-  margin-top: -2px;
-  color: #2f4258;
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  pointer-events: none;
-}
-
-#hud-engine {
-  position: absolute;
-  right: 14px;
-  top: 92px;
-  text-align: right;
-  line-height: 1.75;
-  font-size: 11px;
-  color: #5d7590;
-  pointer-events: none;
-}
-#hud-engine .head {
-  color: #3f5570;
-  letter-spacing: 0.22em;
-  margin-bottom: 3px;
-}
-#hud-engine .prog {
-  white-space: nowrap;
-}
-#hud-engine .load {
-  white-space: nowrap;
-  margin-bottom: 5px;
-  letter-spacing: -0.5px;
-}
-#hud-engine .prog.dead {
-  color: #37485e;
-}
-#hud-engine .k-trigger {
-  color: var(--k-trigger);
-}
-#hud-engine .k-modifier {
-  color: var(--k-modifier);
-}
-#hud-engine .k-action {
-  color: var(--k-action);
-}
-#hud-engine .k-sep {
-  color: #33465c;
-}
-#hud-engine .prog.dead .k-trigger,
-#hud-engine .prog.dead .k-modifier,
-#hud-engine .prog.dead .k-action {
-  color: #37485e;
-}
-#hud-engine .warn {
-  color: #7a5a2a;
-}
-#hud-engine .num {
-  color: #46586e;
-}
-#hud-engine .meter {
-  color: var(--voltaic);
-  margin-left: 6px;
-  letter-spacing: -1px;
-}
-#hud-engine .pct {
-  color: #7f97b2;
-  margin-left: 6px;
-}
-#hud-engine .channel {
-  margin-top: 8px;
-  color: #9fd0ff;
-}
-
 /* §19.4 specifies a 1px full-width line. At 1px nobody could tell how close the
    next Draft was, so it is 3px with a soft glow, backed by numbers in the HUD. */
 #xpbar {
@@ -198,11 +92,9 @@ textarea {
   box-shadow: 0 0 6px rgba(255, 255, 255, 0.55);
   transition: width 120ms linear;
 }
-
 .xp {
   color: #b9ccdf;
 }
-
 .bar {
   display: inline-block;
   color: var(--ink-bright);
@@ -263,7 +155,6 @@ textarea {
 .void {
   color: var(--void);
 }
-
 /* ---- overlays ---- */
 
 .overlay {
@@ -280,7 +171,6 @@ textarea {
 .overlay.open {
   display: flex;
 }
-
 .overlay h2 {
   margin: 0;
   font-size: 13px;
@@ -288,12 +178,10 @@ textarea {
   letter-spacing: 0.35em;
   color: var(--ink);
 }
-
 .cards {
   display: flex;
   gap: 16px;
 }
-
 .card {
   width: 250px;
   min-height: 190px;
@@ -315,7 +203,6 @@ textarea {
   letter-spacing: 0.25em;
   color: #56708c;
 }
-
 /* §5.5 behaviour tags — words, not symbols.
 
    They shipped as ▸ ◍ ⧗ and were unreadable: an hourglass at eleven pixels is a
@@ -435,7 +322,6 @@ textarea {
   color: var(--beacon, #9fd0ff);
   border-color: var(--beacon, #9fd0ff);
 }
-
 .rail {
   display: flex;
   align-items: center;
@@ -461,7 +347,6 @@ textarea {
   opacity: 0.35;
   cursor: default;
 }
-
 /* ---- editor ---- */
 
 #editor .panel {
@@ -510,7 +395,6 @@ textarea {
   color: #3f5570;
   margin-left: auto;
 }
-
 #editor .head {
   display: flex;
   justify-content: space-between;
@@ -555,7 +439,6 @@ textarea {
   color: #46586e;
   letter-spacing: 0.1em;
 }
-
 /* The primer. */
 .primer-panel {
   width: min(1100px, 95vw) !important;
@@ -692,7 +575,6 @@ textarea {
 .chip-scrap:hover {
   color: var(--signal);
 }
-
 .confirm {
   display: flex;
   align-items: center;
@@ -853,7 +735,6 @@ textarea {
 .row .stats .needs {
   color: #7a5a2a;
 }
-
 /* Reorder arrows are a fallback for drag — present, but not shouting. */
 .slot-move {
   opacity: 0;
@@ -865,29 +746,27 @@ textarea {
 .row:hover .slot-move:disabled {
   opacity: 0.18;
 }
-
 @media (max-width: 900px), (max-height: 620px) {
   #editor .panel {
     padding: 12px;
   }
-  .row {
+.row {
     flex-wrap: wrap;
   }
-  .row .stats {
+.row .stats {
     width: auto;
     flex: 1 1 100%;
     text-align: left;
     padding-left: 32px;
     margin-top: 4px;
   }
-  .chip {
+.chip {
     padding: 3px 5px;
   }
-  .hint {
+.hint {
     display: none;
   }
 }
-
 .notice {
   margin: 8px 0 0 32px;
   padding: 8px 11px;
@@ -920,12 +799,10 @@ textarea {
   opacity: 0.28;
   cursor: default;
 }
-
 .hint {
   color: #46586e;
   font-size: 11px;
 }
-
 .meltdown {
   color: var(--thermal);
   letter-spacing: 0.14em;
@@ -942,7 +819,6 @@ textarea {
 .surge {
   color: var(--void);
 }
-
 /* §19.7 — the Recompile ceremony. The one moment of grandeur in a dry UI. */
 #ceremony {
   background: rgba(6, 10, 18, 0.94);
@@ -992,7 +868,6 @@ textarea {
   letter-spacing: 0.28em;
   color: var(--ink);
 }
-
 /* Recompile: choose how much to sacrifice. */
 .recompile-panel {
   width: min(760px, 94vw) !important;
@@ -1073,7 +948,6 @@ textarea {
   opacity: 0.3;
   cursor: default;
 }
-
 /* §14 — Results. The run-trace chart is the hero, everything else annotates it. */
 /* The panel itself does not scroll — only the middle does. The way out of a run
    must never be something you have to scroll down to find. */
@@ -1128,7 +1002,6 @@ textarea {
   margin-left: auto;
   color: #46586e;
 }
-
 /* Nav left, content right. A vertical list is what a game menu looks like, and
    it happens to be the layout that keeps the frame still: adding a section
    makes the rail longer, not the panel wider. */
@@ -1168,7 +1041,6 @@ textarea {
   overflow-y: auto;
   padding: 18px 4px 4px 0;
 }
-
 .title-panel > .inspector {
   flex: none;
 }
@@ -1180,7 +1052,6 @@ textarea {
   color: #3f5570;
   letter-spacing: 0.18em;
 }
-
 /* §19.5 credits. */
 .credits {
   max-width: 82ch;
@@ -1227,7 +1098,6 @@ textarea {
 .title-panel .k:first-child {
   margin-top: 0;
 }
-
 /* Play. An Axiom is a Program, so it is shown as one — the same chain
    grammar the editor and the Engine strip use, not a paragraph about it. */
 .ax-lead {
@@ -1285,7 +1155,6 @@ textarea {
   color: #46586e;
   letter-spacing: 0.24em;
 }
-
 .seedrow {
   display: flex;
   align-items: center;
@@ -1328,7 +1197,6 @@ textarea {
 .poolnote {
   color: #46586e;
 }
-
 /* Library. Locked entries are shown deliberately: a lock you can read is an
    objective, a lock you cannot is a wall. */
 .lib-cols {
@@ -1414,7 +1282,6 @@ textarea {
   color: #2f4258;
   border-style: dotted;
 }
-
 /* Music. Not a list of anything — see menu.ts. */
 .mu-lead {
   max-width: 82ch;
@@ -1442,7 +1309,6 @@ textarea {
   border-color: var(--voltaic);
   color: var(--voltaic);
 }
-
 /* ---- §18 the Music Lab: Studio, the Desk, Cells ----
    Sits under the Engine list, behind its own tabs. Everything here is the same
    document as the rest of the menu — a control that looked like a DAW would be
@@ -1470,7 +1336,6 @@ textarea {
   color: var(--voltaic);
   border-bottom-color: var(--voltaic);
 }
-
 /* A select that reads as a value you can change, not as a form control. */
 .lab-sel {
   appearance: none;
@@ -1494,7 +1359,6 @@ textarea {
   background: #0a1018;
   color: var(--ink-bright);
 }
-
 .lab-engine {
   border: 1px solid var(--structure);
   padding: 10px 12px;
@@ -1535,7 +1399,6 @@ textarea {
 .lab-slider input {
   width: 110px;
 }
-
 /* The reason column. This is the whole point of the Studio — without it the
    screen is a toy, and with it the mapping is learnable. */
 .why {
@@ -1564,7 +1427,6 @@ textarea {
   min-width: 0;
   color: #56708c;
 }
-
 .desk {
   display: flex;
   gap: 34px;
@@ -1605,7 +1467,6 @@ textarea {
 .dial.over .dial-k {
   color: var(--thermal);
 }
-
 .cell-edit {
   width: 100%;
   box-sizing: border-box;
@@ -1642,7 +1503,6 @@ textarea {
   background: rgba(255, 255, 255, 0.05);
   padding: 0 3px;
 }
-
 /* One button. Every clickable surface routes through this — the raw browser
    button is a grey slab that punches a hole in §16's document. */
 .btn {
@@ -1687,7 +1547,6 @@ textarea {
   color: var(--signal);
   border-color: #5a2a2a;
 }
-
 /* Settings.
 
    One shape for every option: label, control, hint. It was a stack of prose
@@ -1729,7 +1588,6 @@ textarea {
   min-width: 0;
   color: #46586e;
 }
-
 .set-slider {
   flex: 1 1 auto;
   accent-color: var(--voltaic);
@@ -1741,7 +1599,6 @@ textarea {
   color: var(--ink-bright);
   text-align: right;
 }
-
 /* A toggle reads as its own state — the word is the value, not a checkbox that
    you then have to map onto one. */
 .toggle {
@@ -1759,7 +1616,6 @@ textarea {
   color: var(--voltaic);
   background: rgba(0, 229, 255, 0.06);
 }
-
 /* The quality presets: one control, four positions. */
 .seg-group {
   gap: 0;
@@ -1791,14 +1647,12 @@ textarea {
   color: #2f4258;
   line-height: 1.7;
 }
-
 /* Muted is the alarming state, not the on state — the colour follows the thing
    that is wrong rather than the thing that is switched. */
 .set-mute:not(.on) {
   color: var(--signal);
   border-color: #5a2a2a;
 }
-
 /* Codex. */
 .codex-row {
   display: flex;
@@ -1836,7 +1690,6 @@ textarea {
 .cx-safe {
   color: #4fbf87;
 }
-
 /* §15.3 — the Discovery stinger. Never modal: you earn most of these mid-cascade
    with the screen full, and a pause here would punish the behaviour it rewards. */
 #stinger {
@@ -1884,11 +1737,9 @@ textarea {
   letter-spacing: 0.1em;
   font-size: 11px;
 }
-
 .discoveries {
   margin-bottom: 16px;
 }
-
 /* §19.6 — the collected stats, shown where the build is read. */
 .chassis {
   display: flex;
@@ -1918,7 +1769,6 @@ textarea {
 .chassis .delta {
   color: #4fbf87;
 }
-
 /* §19.8 — pause. Reuses the Results frame: same panel, same pinned foot, so the
    two screens that answer "what now" answer it the same way. */
 .console-run .pz-body {
@@ -1988,7 +1838,6 @@ textarea {
   color: #4fbf87;
   line-height: 1.7;
 }
-
 /* One line, one size, never wrapped. These carried their keyboard shortcut in
    the label, which made "RETURN TO MENU [L / ESC]" long enough to break across
    two lines in a fixed-width foot — three buttons of three different heights

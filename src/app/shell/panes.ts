@@ -30,6 +30,7 @@ import type { Library } from '../../meta/profile';
 import type { AxiomDef, EnemyDef, NodeDef } from '../../sim/types';
 import { C, NEVER, PHOSPHOR, type Line, type Seg, blank, chain, field, head, meter, redact } from '../ui';
 import { VIEW_EFFECTS, VIEW_PRESETS, presetFor } from '../visual';
+import { DISPLAY, GAMMA_MAX, GAMMA_MIN } from '../gfx/display';
 import { BEAT_BY_ID, type Beat } from '../../story/script';
 import { beatLines } from '../../story/layout';
 
@@ -73,7 +74,7 @@ function runPreamble(shift: number): Line[] {
     field('OPERATOR', '████████', { col: 14 }),
     blank(),
     [[`Extraction opens at ${clock}. Leaving at one closes the record`, C.ink]],
-    [['for the shift. Output is recorded against the operator.', C.ink]],
+    [['for the shift. Output is logged under the operator number.', C.ink]],
     blank(),
     head('AXIOM — the first row of the build, issued before the episode'),
     blank(),
@@ -362,7 +363,7 @@ export function fileBody(
       [['is denial per OC-0061 clause 3. Conclude the episode at', C.ink]],
       [['the earliest collection point.', C.ink]],
       blank(),
-      [['Output is recorded against the operator and reviewed.', C.ink]],
+      [['Output is logged and reviewed.', C.ink]],
       [['Extraction concludes an episode correctly and is commended', C.ink]],
       [['in the shift log.', C.ink]],
       blank(),
@@ -732,13 +733,24 @@ export function configFields(lib: Library): ConfigField[] {
     value: () => (s().scanlines <= 0 ? 'off' : `${Math.round(s().scanlines * 100)}`.padStart(3) + '%'),
     ink: () => (s().scanlines > 0 ? C.ink : C.dim),
   });
+  // And under all of it, the panel — answered before the shell booted. Two rows
+  // rather than one: the level is worth nudging without leaving the sheet, and
+  // the screen is worth reaching without knowing that nudging it is what that
+  // screen does.
+  fields.push({
+    id: 'gamma',
+    label: 'display level',
+    value: () => DISPLAY.gamma.toFixed(2),
+    ink: () => (Math.abs(DISPLAY.gamma - 1) > 0.001 ? C.trigger : C.ink),
+  });
+  fields.push({ id: 'calibrate', label: 'calibration', value: () => 'RE-RUN' });
   return fields;
 }
 
 export function configLines(fields: readonly ConfigField[], cursor: number, lib: Library): Line[] {
   const s = lib.snapshot.settings;
   const out: Line[] = [
-    [['Adjustments are recorded against the operator.', C.ink]],
+    [['Adjustments to this terminal are logged.', C.ink]],
     [['Defaults may be restored without notice.', C.ink]],
     blank(),
     head('OUTPUT AND PRESENTATION'),
@@ -758,6 +770,10 @@ export function configLines(fields: readonly ConfigField[], cursor: number, lib:
     if (f.id === 'music') line.push(['  ', C.ink], ...meter(s.music * 10, 10, C.ink));
     if (f.id === 'effects') line.push(['  ', C.ink], ...meter(s.effects * 10, 10, C.ink));
     if (f.id === 'scanlines') line.push(['  ', C.ink], ...meter(s.scanlines * 10, 10, C.ink));
+    if (f.id === 'gamma') {
+      const t = (DISPLAY.gamma - GAMMA_MIN) / (GAMMA_MAX - GAMMA_MIN);
+      line.push(['  ', C.ink], ...meter(t * 10, 10, C.ink));
+    }
     out.push(line);
   }
   out.push(blank());

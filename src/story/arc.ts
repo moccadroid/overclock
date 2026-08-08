@@ -137,6 +137,19 @@ const DOC_RUNG: Record<string, number> = {
 };
 
 /**
+ * The documents the campaign can ever place, in ladder order.
+ *
+ * Exported because the file explorer lists what is *not* yet recovered — see
+ * `shell/filetree.ts` — and that list has to be exactly this one. Deriving it
+ * from "every beat carrying a sheet" instead pulls in the notices and the
+ * onboarding, which are not recoverable documents: they arrive, or they were
+ * always there. This is the ladder, and the ladder lives in the story layer.
+ */
+export const DOCUMENT_IDS: readonly string[] = Object.keys(DOC_RUNG).sort(
+  (a, b) => (DOC_RUNG[a] ?? 0) - (DOC_RUNG[b] ?? 0),
+);
+
+/**
  * STORY-AND-TONE §7.1 — the growing starter. The build is OC-001's and it
  * remembers; each run starts with more of it already assembled. Run 6 is the
  * gift: the whole thing, tuned, plus the capacity to run it. Fairness is not

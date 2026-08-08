@@ -9,10 +9,13 @@
  */
 import { Game } from './app/game';
 import { TitleScreen } from './app/shell/title';
+import { DeskShell } from './app/shell/deskhost';
+import { calibrate } from './app/shell/calibrate';
 import { BRANDING } from './branding';
 import { Library } from './meta/profile';
 import { Audio } from './audio/audio';
 import { applyEffects } from './app/visual';
+import { setGamma } from './app/gfx/display';
 import { installUserCells } from './meta/cellstore';
 import { describeRun, loadRuns, recoverPartial } from './meta/runstore';
 import { sealAbandoned } from './meta/outbox';
@@ -34,6 +37,12 @@ const audio = new Audio();
 // §20.1 — a player's visual preferences apply before the first frame, not after
 // they have already seen the wrong one.
 applyEffects(library.snapshot.settings.fx);
+// §20.1 — and the panel it is all being read on, for the same reason and one
+// line earlier in the argument: every value in this game lives in the bottom
+// quarter of the range, so a display left uncorrected does not look dim, it
+// looks empty. Read once here; the title screen's calibration sheet moves it
+// from under the player's own eyes.
+setGamma(library.snapshot.settings.gamma);
 audio.setMuted(library.snapshot.settings.muted);
 audio.setVolume(library.snapshot.settings.volume);
 audio.setMusicVolume(library.snapshot.settings.music);
@@ -214,13 +223,40 @@ async function boot(): Promise<void> {
   // the terminal, nudged straight at the next shift. Stripped from the URL
   // below with `start`, so a copied link opens the menu normally.
   const openRun = params.get('open') === 'run';
+
+  // §20.1 — before the shell, before LOGIN, before the deep link.
+  //
+  // First, because everything after it is drawn in the bottom quarter of the
+  // range and an uncorrected panel does not render that as a dark game, it
+  // renders it as an empty one. A player who cannot see the start screen cannot
+  // find the settings screen that would have fixed the start screen. Returns
+  // immediately once the account has answered, which is once, ever.
+  await calibrate(menuUi, library);
+
+  // **The desk is the between-run surface.**
+  //
+  // It replaces the terminal outright: the same contract (`present()` resolves
+  // with a seed and an Axiom), the same story plumbing at the commitment point,
+  // the same calibration screen and the same glass settings — rendered as a
+  // workstation instead of as three words on a page.
+  //
+  // `?shell=terminal` still reaches the old surface, because it is the control:
+  // if something on the desk reads wrong, the question is always whether it read
+  // wrong before, and that has to stay answerable.
+  const useTerminal = params.get('shell') === 'terminal';
+  void openRun;
+
   const setup = autoStart
     ? { seed: linkedSeed!, axiomId: linkedAxiom! }
-    : await new TitleScreen(menuUi, library, audio, story).present({
-        ...(linkedSeed ? { seed: linkedSeed } : {}),
-        ...(linkedAxiom ? { axiomId: linkedAxiom } : {}),
-        ...(openRun ? { open: 'run' as const } : {}),
-      });
+    : useTerminal
+      ? await new TitleScreen(menuUi, library, audio, story).present({
+          ...(linkedSeed ? { seed: linkedSeed } : {}),
+          ...(linkedAxiom ? { axiomId: linkedAxiom } : {}),
+          ...(openRun ? { open: 'run' as const } : {}),
+        })
+      : await new DeskShell(menuUi, library, audio, story).present({
+          ...(linkedSeed ? { seed: linkedSeed } : {}),
+        });
 
   document.title = `${BRANDING.title} — ${setup.axiomId} — ${setup.seed}`;
 

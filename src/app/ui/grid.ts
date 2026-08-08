@@ -45,6 +45,20 @@ export class Grid {
 
   constructor() {
     this.view.addChild(this.bars);
+    // **Nothing in here may ever be a pointer target.**
+    //
+    // A `Text` with the default event mode is still a valid hit target as soon as
+    // an ancestor is interactive — and a window is interactive, because touching
+    // it raises it. So every glyph on every sheet was competing with the controls
+    // underneath it: a click on a file row landed on the row's *text*, which has
+    // no handler, and the row it belonged to never heard about it. That is the
+    // whole of "half the clicks open the wrong file and the other half do
+    // nothing", and it is why the titlebar could only be grabbed above and below
+    // its own title.
+    //
+    // Set on the container rather than per glyph: the pool creates text lazily,
+    // so anything per-object has to be remembered in `put` forever.
+    this.view.interactiveChildren = false;
   }
 
   /** Pixel offset of a column and a row, for anything that has to line up with

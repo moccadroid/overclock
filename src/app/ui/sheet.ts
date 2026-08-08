@@ -12,11 +12,23 @@
 import { Container, Graphics, Text } from 'pixi.js';
 import { Grid } from './grid';
 import { C, LINE, type Line, charW, style } from './tokens';
+import { CHROME, drawPanel } from './window';
 
-/** Margins, in pixels, because the frame is not on the character grid. */
-const PAD = 56;
-const HEAD_RULE = 82;
-const FOOT_RULE = 54;
+/**
+ * **A sheet is a window that cannot be dragged.**
+ *
+ * The metrics come from `CHROME`, so an in-run document is framed exactly like a
+ * window on the desk — same border weight, same titlebar, same panel. Before this
+ * they were two unrelated looks at two different densities, and the engine editor
+ * read as a mock-up of a different program: 56 pixels of margin and a 112-pixel
+ * content origin against a window's 12 and 37.
+ *
+ * That density is most of what made the in-run surfaces feel oversized. Nothing
+ * about their *layout* changed — everything is positioned in grid rows against
+ * `originX`/`originY` — so compacting the chassis compacts every one of them.
+ */
+const PAD = CHROME.padX;
+const FOOT_RULE = 34;
 /** Rows of clear space kept under the last line, so the stamp has somewhere to
  *  land that is not on top of a sentence. */
 const STAMP_ROWS = 3;
@@ -45,12 +57,15 @@ export class Sheet {
   private w = 0;
 
   constructor(spec: SheetSpec) {
-    this.headText = new Text({ text: spec.head, style: style(14, C.bright, 8) });
-    this.refText = new Text({ text: spec.ref, style: style(11, 0x35485e, 4) });
+    this.headText = new Text({ text: spec.head, style: style(12, C.bright, 6) });
+    this.refText = new Text({ text: spec.ref, style: style(10, C.dim, 3) });
     this.refText.anchor.set(1, 0);
     this.stampText = spec.stamp
       ? new Text({ text: spec.stamp, style: style(19, spec.stampInk ?? C.signal, 5) })
       : null;
+    // Labels are never pointer targets — see `Grid` and `Win` for the whole story.
+    this.headText.eventMode = 'none';
+    this.refText.eventMode = 'none';
     if (this.stampText) {
       this.stampText.anchor.set(0.5, 0.5);
       // Struck after filing, so it does not respect the layout.
@@ -70,7 +85,7 @@ export class Sheet {
     return PAD;
   }
   get originY(): number {
-    return 112;
+    return CHROME.border + CHROME.titleH + CHROME.padY;
   }
 
   /**
@@ -82,6 +97,11 @@ export class Sheet {
    */
   heightFor(rows: number): number {
     return this.originY + (rows + STAMP_ROWS) * LINE + FOOT_RULE;
+  }
+
+  /** The frame, for a caller that wants to sit something on the titlebar. */
+  get titleHeight(): number {
+    return CHROME.titleH;
   }
 
   /** How many columns of body text this sheet holds at its current size. */
@@ -97,17 +117,12 @@ export class Sheet {
     this.w = w;
 
     this.chrome.clear();
-    this.chrome.rect(0, 0, w, h).fill({ color: C.void, alpha: 0.985 });
-    this.chrome.rect(0, 0, w, 1).fill(C.paper);
-    this.chrome.rect(0, h - 1, w, 1).fill(C.paper);
-    this.chrome.rect(0, 0, 1, h).fill(C.paper);
-    this.chrome.rect(w - 1, 0, 1, h).fill(C.paper);
-    // Two rules, and they are the only structure the sheet has.
-    this.chrome.rect(PAD, HEAD_RULE, w - PAD * 2, 1).fill(C.faint);
+    drawPanel(this.chrome, w, h, { frame: C.paper, band: true });
+    // The one rule a sheet has that a window does not: the footer.
     this.chrome.rect(PAD, h - FOOT_RULE, w - PAD * 2, 1).fill(C.rule);
 
-    this.headText.position.set(PAD, 38);
-    this.refText.position.set(w - PAD, 42);
+    this.headText.position.set(PAD, Math.round((CHROME.titleH - 12) / 2));
+    this.refText.position.set(w - PAD, Math.round((CHROME.titleH - 10) / 2) + 1);
     this.stampText?.position.set(w - 130, h - FOOT_RULE - LINE);
 
     this.grid.view.position.set(this.originX, this.originY);

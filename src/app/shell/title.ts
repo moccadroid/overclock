@@ -42,6 +42,8 @@ import { VIEW_EFFECTS, VIEW_PRESETS, applyEffects } from '../visual';
 import type { StoryStore } from '../../story/store';
 import { BEAT_BY_ID } from '../../story/script';
 import { DocumentSheet } from './document';
+import { CalibrationView } from './calibrate';
+import { DISPLAY, DisplayPass, GAMMA_STEP, setGamma } from '../gfx/display';
 import { drawEnemy } from '../gfx/enemy';
 import { HUE_COLOR } from '../visual';
 
@@ -113,6 +115,21 @@ export class TitleScreen {
   private readonly intrusionLayer = new Container();
   /** The same shader the shell lab used: quantised bands that jump and hold. */
   private readonly tear = new Glass({ tear: 1, split: 1.8, noise: 0.07, scan: 0.34 });
+  /**
+   * §20.1 — the panel, after the tube.
+   *
+   * Last in the chain and it has to be: the glass takes light *away* — scanlines
+   * are the beam missing a row and can only ever multiply down — so a display
+   * correction applied before it would be immediately undone by the thing it was
+   * meant to compensate for. The operator calibrates through their scanlines
+   * because that is what they are going to be playing through.
+   *
+   * Installed unconditionally, unlike the run's, which takes itself back off at
+   * gamma 1. The shell holds a flat 60 drawing four words and a list — it can
+   * afford a pass that does nothing, and the calibration sheet needs the filter
+   * already live to move off 1.00 in the first place.
+   */
+  private readonly display = new DisplayPass();
   private readonly terminal: Terminal;
 
   private readonly title = new Text({ text: BRANDING.title, style: style(34, 0xffffff, 19) });
@@ -140,6 +157,8 @@ export class TitleScreen {
   /** The Bureau, on paper, at the same commitment point. Lazily mounted. */
   private noticeSheet: DocumentSheet | null = null;
   private noticeId: string | null = null;
+  /** §20.1 — the panel. Answered before the shell booted; re-run from `config`. */
+  private calibrationView: CalibrationView | null = null;
   /** True while a run is waiting on the channel to finish. */
   private holdingRun = false;
   private docId = '';
@@ -208,8 +227,9 @@ export class TitleScreen {
     this.backdrop.init();
     this.behind.addChild(this.backdrop.root, this.startLayer, this.termLayer);
     this.app.stage.addChild(this.behind, this.intrusionLayer);
-    this.app.stage.filters = [this.glass.filter];
+    this.app.stage.filters = [this.glass.filter, this.display.filter];
     this.applyGlass();
+    this.display.sync();
 
     for (const t of [this.title, this.tagline, this.login]) t.anchor.set(0.5, 0);
     this.login.eventMode = 'static';
@@ -278,6 +298,7 @@ export class TitleScreen {
     this.login.position.set(cx, top + 128);
     this.backdrop.resize(w, h);
     this.terminal.layout(w, h);
+    this.calibrationView?.layout(w, h);
     if (this.sheet) this.redraw();
     this.paintKeys();
   }
@@ -377,6 +398,38 @@ export class TitleScreen {
   private get notice(): DocumentSheet {
     if (!this.noticeSheet) this.noticeSheet = new DocumentSheet(this.intrusionLayer);
     return this.noticeSheet;
+  }
+
+  /**
+   * §20.1 — re-run the calibration screen, over everything.
+   *
+   * The same view `main.ts` shows before the shell exists, hosted here in the
+   * shell's own stage rather than in a second Application — the pre-boot gate
+   * gets its own context because nothing else is up yet, and that argument does
+   * not survive the shell being up. In `intrusionLayer` so it covers the
+   * terminal and the open document, and under the stage's filters so it is
+   * corrected by the setting it is adjusting.
+   */
+  private openCalibration(): void {
+    if (this.calibrationView) return;
+    const view = new CalibrationView(
+      // Persisted on every step. Somebody who sets this and then closes the tab
+      // to go and find a better chair has still set it.
+      (gamma) => this.library.setDisplay({ gamma }),
+      (gamma) => {
+        this.library.setDisplay({ gamma, calibrated: true });
+        view.destroy();
+        this.calibrationView = null;
+        // The level row reads `DISPLAY` live, but `calibrated` comes from the
+        // Library, so the configuration sheet is stale until it is rebuilt.
+        this.fields = configFields(this.library);
+        if (this.docId === 'config') this.redraw();
+        this.audio.chrome('confirm');
+      },
+    );
+    this.calibrationView = view;
+    this.intrusionLayer.addChild(view.view);
+    view.layout(this.app.screen.width, this.app.screen.height);
   }
 
   /** Acknowledge the Bureau's notice. Documents arrive whole; one key files it. */
@@ -871,6 +924,15 @@ export class TitleScreen {
     } else if (f.id === 'scanlines') {
       this.library.setGlass({ scanlines: step(s.scanlines) });
       this.applyGlass();
+    } else if (f.id === 'gamma') {
+      // Straight onto the live setting rather than through `s`: the Library is
+      // where it is *kept*, but `DISPLAY` is where it is, and the two only agree
+      // because this line puts the clamped result back.
+      this.library.setDisplay({ gamma: setGamma(DISPLAY.gamma + d * GAMMA_STEP) });
+    } else if (f.id === 'calibrate') {
+      this.audio.chrome('click');
+      this.openCalibration();
+      return;
     }
     this.audio.chrome('click');
     this.redraw();
@@ -903,6 +965,14 @@ export class TitleScreen {
   }
 
   private handleKey(e: KeyboardEvent): void {
+    // §20.1 — the calibration screen owns the keyboard outright while it is up,
+    // and it is checked first so the ESC that would otherwise log the operator
+    // out cannot fall through it.
+    if (this.calibrationView) {
+      this.calibrationView.keys(e);
+      e.preventDefault();
+      return;
+    }
     // §8 — while the channel is open it owns the keyboard. There is deliberately
     // no Report control and never will be (§10 turns on its absence): the only
     // thing you can do with a transmission is finish reading it.
@@ -985,6 +1055,10 @@ export class TitleScreen {
     this.acc = 0;
     this.glass.update(step);
     this.tear.update(step);
+    // One uniform write, every frame, so nothing that moves the level has to
+    // remember to push it — the calibration sheet, the configuration row and
+    // whatever comes next all just set `DISPLAY.gamma` and the picture follows.
+    this.display.sync();
     this.intrusion?.update(step);
     this.backdrop.update(step, this.app.screen.width, this.app.screen.height);
     this.app.render();

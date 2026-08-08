@@ -13,6 +13,7 @@ import { DraftSheet } from './shell/draftsheet';
 import { PauseSheet } from './shell/pausesheet';
 import { PipeSheet } from './shell/pipesheet';
 import { CeremonySheet } from './shell/ceremonysheet';
+import { Bezel } from './shell/bezel';
 import { primerLines } from './primer';
 import { Input } from './input';
 import { NO_INPUT, World, type RunConfig } from '../sim/world';
@@ -69,6 +70,8 @@ export class Game {
   private editor!: PipeSheet;
   private pauseSheet!: PauseSheet;
   private ceremony!: CeremonySheet;
+  /** The frame the run is drawn inside. */
+  private bezel!: Bezel;
   private recompileChoice!: RecompileOverlay;
   private stinger!: Stinger;
   /** §14 — the end-of-episode report, on a Sheet like every other document. */
@@ -89,6 +92,25 @@ export class Game {
    * it is still inside it.
    */
   private busyMs = 0;
+
+  /**
+   * The frame, once every UI tick.
+   *
+   * The wall clock is the *desk's* — the night keeps running while the operator is
+   * inside — so it comes from the shift the account is on, not from the episode.
+   */
+  private paintBezel(): void {
+    const w = this.world;
+    this.bezel.update(w, {
+      site: '1147',
+      room: w.currentLevel?.name ?? w.arena.name,
+      shift: this.library.snapshot.runs + 1147,
+      clock: 22 * 60 + 10 + Math.floor(w.time / 60),
+      notice: this.hud.message,
+      fps: this.hud.frameLine,
+      hot: w.budget.heat >= 40,
+    });
+  }
   private uiTimer = 0;
   /** §17.2 — hitstop, and the per-second budget that keeps it a stutter, not a freeze. */
   private hitstop = 0;
@@ -199,17 +221,27 @@ export class Game {
     ui.id = 'ui';
     mount.appendChild(ui);
 
-    this.hud = new Hud(ui);
+    // The player's tube reaches the run's paperwork, not just the desk.
+    this.renderer.setChromeGlass(this.library.snapshot.settings);
+    // The bezel goes on first, under every sheet, so a document opens *over* the
+    // machine rather than inside its frame.
+    this.bezel = new Bezel();
+    this.renderer.chromeLayer.addChildAt(this.bezel.view, 0);
+    const fitBezel = (): void =>
+      this.bezel.layout(this.renderer.app.screen.width, this.renderer.app.screen.height);
+    fitBezel();
+    window.addEventListener('resize', fitBezel);
+    this.hud = new Hud();
     this.recompileChoice = new RecompileOverlay(ui);
     this.stinger = new Stinger(ui);
     // Everything that reads as a filed document lives on the Sheet framework,
     // drawn into the run's own renderer (one WebGL context, like the report).
-    this.editor = new PipeSheet(this.renderer.app.stage);
-    this.draft = new DraftSheet(this.renderer.app.stage);
-    this.pauseSheet = new PauseSheet(this.renderer.app.stage);
-    this.ceremony = new CeremonySheet(this.renderer.app.stage);
-    this.report = new EpisodeReport(this.renderer.app.stage);
-    this.document = new DocumentSheet(this.renderer.app.stage);
+    this.editor = new PipeSheet(this.renderer.chromeLayer);
+    this.draft = new DraftSheet(this.renderer.chromeLayer);
+    this.pauseSheet = new PauseSheet(this.renderer.chromeLayer);
+    this.ceremony = new CeremonySheet(this.renderer.chromeLayer);
+    this.report = new EpisodeReport(this.renderer.chromeLayer);
+    this.document = new DocumentSheet(this.renderer.chromeLayer);
     // §14 — the two places a run changes by hand rather than by time passing.
     // Both feed the recorder and the corpus; the recorder needs the index, the
     // corpus needs what was on the table beside it.
@@ -286,7 +318,7 @@ export class Game {
       // CONTINUE too — the primary action is the primary key.
       const storyMode = !!this.story;
       if (cmd === 'continue' || (storyMode && cmd === 'confirm')) {
-        location.href = `${location.pathname}?open=run`;
+        location.href = `${location.pathname}?${backToShell('open=run')}`;
       } else if (cmd === 'confirm') {
         const url = new URL(location.href);
         url.searchParams.set('seed', `run-${Math.floor(Math.random() * 1e9).toString(36)}`);
@@ -295,7 +327,7 @@ export class Game {
         url.searchParams.set('start', '1');
         location.href = url.toString();
       } else if (cmd === 'library' || cmd === 'pause') {
-        location.href = location.pathname;
+        location.href = `${location.pathname}?${backToShell()}`;
       }
       return;
     }
@@ -819,7 +851,7 @@ export class Game {
     this.uiTimer += elapsed;
     if (this.uiTimer > 0.05) {
       this.uiTimer = 0;
-      this.hud.update(this.world);
+      this.paintBezel();
     }
 
     this.busyMs = performance.now() - busyStart;
@@ -1088,7 +1120,7 @@ export class Game {
       this.recorder.step(this.world, NO_INPUT);
       this.world.advance(NO_INPUT, SIM_DT);
     }
-    this.hud.update(this.world);
+    this.paintBezel();
     this.renderer.render(this.world, SIM_DT, true);
     this.renderer.present();
     const w = this.world;
@@ -1119,4 +1151,19 @@ export class Game {
 
 }
 
-
+/**
+ * The query a return-to-shell needs, preserving which shell the player is on.
+ *
+ * Returning from a run is a full page load with a URL this file builds from
+ * scratch, so anything not named here is dropped — which is how a run launched
+ * from one surface came back on the other. Only the surface choice survives;
+ * debug parameters are deliberately left behind, for the same reason `story` is
+ * stripped on boot.
+ */
+function backToShell(extra = ''): string {
+  const keep = new URLSearchParams();
+  const shell = new URLSearchParams(location.search).get('shell');
+  if (shell) keep.set('shell', shell);
+  const q = keep.toString();
+  return [q, extra].filter(Boolean).join('&');
+}

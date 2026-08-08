@@ -30,22 +30,90 @@ import { C, LINE, SIZE, Sheet, blank, charW, head, style, wrap, type Line } from
  * ops sit to the right of all of it. At 88 the chain and the ops fought over the
  * same columns the moment a build had anything in it.
  */
-const COLS = 118;
+const COLS = 106;
 /** Grid row the first program row sits on. */
 const FIRST_ROW = 4;
 /**
- * Grid rows one program occupies: two for the chip itself — a node carries a
- * name and its tags, and the tags belong inside the chip rather than glued to
- * the end of the name — then its numbers, then a gap.
+ * Grid rows one program occupies: the chip's row, its numbers, and one of air.
+ *
+ * This was four — two for the chip (its name on one line and its tags on a
+ * second), one for the numbers, one of air — and it put ninety-two pixels between
+ * one chain and the next, which read as a mock-up of an editor rather than an
+ * editor. The tags left the chip (see `KIND_EDGE`), so the chip is one line — but
+ * the row of air stayed. At two rows the chains were flush against each other and
+ * the numbers sat on the chip's own bottom edge: a list with no gutter reads as one
+ * block of text, and the point of a chain is that it is a discrete thing.
+ *
+ * **This number is the number of lines the body loop pushes per program.** They
+ * are two halves of one layout — the chips are painted over rows the text leaves
+ * blank — and when they disagree the numbers walk down onto the chips, one row
+ * further out with every program. That is exactly what happened when this went
+ * from 4 to 3 without the loop losing a line.
  */
-const ROW_STEP = 4;
-/** Chip height: exactly the two grid rows it covers. */
-const CHIP_H = LINE * 2;
-/** Chip corner radius. The document's frames are hairline squares; a chip is a
- *  key you press, and at this weight of line a square one reads as a defect. */
-const CHIP_R = 4;
+const ROW_STEP = 3;
+/**
+ * Chip height: its own grid row, plus a little.
+ *
+ * Bounded by the row pitch — at `LINE + 8` a chip overhung the row below it and
+ * collided with its own numbers, which is what put the dps meter behind the chips.
+ */
+const CHIP_H = LINE + 4;
+/** Chip corner radius. A chip is a key you press, so it is not quite square —
+ *  but only just: at 4 it read as a rounded button from a much later decade, and
+ *  everything else on this surface is a hairline rectangle. */
+const CHIP_R = 2;
+
+/**
+ * **A chip's border says what kind of node it is.**
+ *
+ * It used to be said in words — `WHEN Clock`, `DO Bolt` — which is three
+ * characters of grammar on every row explaining a distinction the *position*
+ * already makes: the first chip is always the trigger and the last is always the
+ * action. The words were noise, and the tags underneath them ("flight", "area")
+ * made every chip two lines tall to carry information that belongs on the card,
+ * not in the editor.
+ *
+ * So the kind is the outline. Dotted is a condition — something that *may*
+ * happen; dashed is an instruction — something the engine *does*; solid is a
+ * modifier, which is neither and simply sits in the chain. Read once, then read
+ * forever at a glance, and it costs no columns and no rows.
+ */
+const KIND_EDGE = {
+  trigger: { on: 2, off: 2 },
+  modifier: null,
+  action: { on: 5, off: 3 },
+} as const;
+
+/**
+ * A rectangle whose border is drawn in dashes, by hand.
+ *
+ * Pixi has no dash pattern, and a stroked path would land on half-pixels at this
+ * weight anyway — every other hairline in this dialect is a filled rect for the
+ * same reason.
+ */
+function dashRect(
+  g: Graphics,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  colour: number,
+  dash: { on: number; off: number },
+): void {
+  const step = dash.on + dash.off;
+  for (let i = 0; i < w; i += step) {
+    const run = Math.min(dash.on, w - i);
+    g.rect(x + i, y, run, 1).fill(colour);
+    g.rect(x + i, y + h - 1, run, 1).fill(colour);
+  }
+  for (let i = 0; i < h; i += step) {
+    const run = Math.min(dash.on, h - i);
+    g.rect(x, y + i, 1, run).fill(colour);
+    g.rect(x + w - 1, y + i, 1, run).fill(colour);
+  }
+}
 /** Inside a chip, left and right of its label. */
-const CHIP_PAD = 10;
+const CHIP_PAD = 8;
 
 const KIND_INK = { trigger: C.trigger, modifier: C.modifier, action: C.action } as const;
 
@@ -66,8 +134,6 @@ interface ChipBox {
   inert: boolean;
   /** Measured, positioned and owned by `paintChips`; drawn in the same pass. */
   text: Text;
-  /** The node's tags, in their own ink. Null on an empty slot. */
-  tags: Text | null;
 }
 
 /** A small framed control. The editor needs a dozen of them and they are tiny. */
@@ -342,12 +408,11 @@ export class PipeSheet {
       blank(),
     ];
 
-    // Four grid rows per program: two for the chip (drawn, not typed), one for
-    // its numbers, one of air. ROW_STEP is the same number and they must stay
-    // that way — the chip is painted at the row this loop leaves blank.
+    // Two grid rows per program: one the chip is painted over, one for its
+    // numbers. **This must push exactly ROW_STEP lines** — see that constant.
     world.engine.programs.forEach((program, i) => {
       const compiled = world.engine.compiled[i]!;
-      lines.push(blank(), blank());
+      lines.push(blank());
       if (compiled.live) {
         const share = totalDps > 0 ? (program.recentDamage / totalDps) * 100 : 0;
         const filled = Math.max(0, Math.min(8, Math.round(share / 12.5)));
@@ -379,6 +444,7 @@ export class PipeSheet {
               : 'trigger';
         lines.push([['      ', C.ink], [`needs a ${needs}`, C.rule]]);
       }
+      // The gutter between chains. Keeps this loop at exactly ROW_STEP lines.
       lines.push(blank());
     });
 
@@ -500,11 +566,11 @@ export class PipeSheet {
         const nodeId = world.engine.read(i, slot);
         const node = nodeId ? NODE_BY_ID.get(nodeId) : null;
         const mult = nodeId ? MODIFIER_BY_ID.get(nodeId)?.cycleMult : undefined;
-        const word = kind === 'trigger' ? 'WHEN ' : kind === 'action' ? 'DO ' : '';
+        // No `WHEN`/`DO`: the outline says it. See `KIND_EDGE`.
         const inert =
           kind === 'modifier' && nodeId ? inertFields(nodeId, program.actionId).length > 0 : false;
         const label = nodeId
-          ? `${word}${node?.name ?? nodeId}${mult ? ` ×${mult}` : ''}`
+          ? `${node?.name ?? nodeId}${mult ? ` ×${mult}` : ''}`
           : kind === 'modifier'
             ? '—'
             : `no ${kind}`;
@@ -513,24 +579,18 @@ export class PipeSheet {
           text: inert ? `${label} · no effect` : label,
           style: style(SIZE, ink, 1),
         });
-        // The tags are properties of the node, not part of its name — and they
-        // are *words* ("flight", "area", "duration"), so concatenating them ran
-        // them together into "Field areaduration" and glued the result onto the
-        // name. Separated, and in the faint ink, they read as what they are.
-        const marks = nodeId ? tagsOf(nodeId).map((t) => TAG_GLYPH[t]) : [];
-        const tags =
-          marks.length > 0
-            ? new Text({ text: marks.join(' · '), style: style(10, C.faint, 1) })
-            : null;
-        return { program: i, slot, kind, nodeId, label, inert, text, tags };
+        // The tags are gone from the editor. They are properties of the node —
+        // "flight", "area", "duration" — and carrying them here cost every chip a
+        // second line to restate what the node's own card already says. The editor
+        // is for *arranging*; the card is for reading.
+        return { program: i, slot, kind, nodeId, label, inert, text };
       }),
     );
 
     // Room for the × of whichever chip in this column is filled, plus air.
     const gutter = Math.round(charW() * 4);
-    /** The tags sit on a second line inside the chip, so a chip is two rows tall. */
     const inner = (cell: (typeof cells)[number][number]): number =>
-      Math.max(Math.ceil(cell.text.width), Math.ceil(cell.tags?.width ?? 0));
+      Math.ceil(cell.text.width);
     const widths = slots.map((_, j) => {
       const widest = Math.max(0, ...cells.map((row) => inner(row[j]!)));
       return Math.max(Math.round(charW() * 7), widest + CHIP_PAD * 2);
@@ -550,17 +610,9 @@ export class PipeSheet {
       row.forEach((cell, j) => {
         const w = widths[j]!;
         this.boxes.push({ ...cell, x, y, w });
-        const block = cell.text.height + (cell.tags ? cell.tags.height : 0);
-        const top = Math.round(y + (h - block) / 2);
+        const top = Math.round(y + (h - cell.text.height) / 2);
         cell.text.position.set(Math.round(x + (w - cell.text.width) / 2), top);
         this.labels.addChild(cell.text);
-        if (cell.tags) {
-          cell.tags.position.set(
-            Math.round(x + (w - cell.tags.width) / 2),
-            top + Math.round(cell.text.height),
-          );
-          this.labels.addChild(cell.tags);
-        }
         x += w + gutter;
       });
     });
@@ -577,7 +629,13 @@ export class PipeSheet {
       if (held) shape.fill({ color: C.bright, alpha: 0.16 });
       else if (legal) shape.fill({ color: C.trigger, alpha: 0.1 });
       else if (box.nodeId) shape.fill({ color: ink, alpha: 0.05 });
-      shape.stroke({ color: edge, width: 1, alignment: 0.5 });
+      // The outline says what kind of node this is — see `KIND_EDGE`. A modifier
+      // keeps the plain stroke; a trigger is dotted and an action dashed, drawn by
+      // hand because Pixi has no dash pattern and a stroke at this weight lands on
+      // half-pixels anyway.
+      const dash = KIND_EDGE[box.kind];
+      if (dash) dashRect(g, Math.round(box.x), Math.round(box.y), Math.round(box.w), h, edge, dash);
+      else shape.stroke({ color: edge, width: 1, alignment: 0.5 });
 
       // One hit area per slot: picks up, places, and feeds the reading line.
       const hit = new Container();
@@ -586,9 +644,14 @@ export class PipeSheet {
       hit.hitArea = new Rectangle(box.x, box.y, box.w, h);
       hit.on('pointerover', () => {
         const node = box.nodeId ? NODE_BY_ID.get(box.nodeId) : null;
+        // The tags read here rather than on the chip. They are properties of the
+        // node, they are words, and a chip that carried them was two lines tall to
+        // restate what one hover says better.
+        const marks = box.nodeId ? tagsOf(box.nodeId).map((t) => TAG_GLYPH[t]) : [];
+        const tail = marks.length > 0 ? `  [${marks.join(' · ')}]` : '';
         this.reading = box.inert
           ? `NO EFFECT on this action — it ignores ${inertFields(box.nodeId!, world.engine.programs[box.program]!.actionId).join(', ')}. It still costs Cycles.`
-          : (node?.description ?? '');
+          : `${node?.description ?? ''}${tail}`;
         this.readingText.text = this.reading;
       });
       hit.on('pointertap', () => this.pick(box.program, box.slot));

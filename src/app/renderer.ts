@@ -20,11 +20,13 @@ import type { Containment, TerminalKind, World } from '../sim/world';
 import { enemy as getEnemy } from '../content/index';
 import { Camera } from './camera';
 import { BAND, HUE_COLOR, PALETTE, SHELL, VIEW, VISUAL, sampleGate } from './visual';
+import { Glass, chromeGlass, type GlassSettings } from './ui';
 import { PostPass } from './gfx/post';
 import { LightField } from './gfx/lights';
 import { MaskField } from './gfx/mask';
 import { BloomPipeline } from './gfx/bloom';
 import { GpuTimer } from './gfx/gputimer';
+import { DisplayPass } from './gfx/display';
 import {
   StructurePass,
   type MaterialZone,
@@ -143,10 +145,46 @@ export const HAZARD_DRAW: Record<string, (d: HazardDrawCtx) => void> = {
 
 export class Renderer {
   readonly app = new Application();
+  /**
+   * Every filed document drawn during a run — the engine editor, the draft, the
+   * pause sheet, the report — on its own layer above the arena, wearing the
+   * player's tube.
+   *
+   * Phosphor and scanlines used to be shell-only, so an operator on amber started
+   * a shift and the run's own paperwork came back in colour on a flat panel. The
+   * arena is deliberately *not* on this layer: see `uiglass.ts` for why a
+   * monochrome arena would delete a channel the player reads threats with.
+   */
+  readonly chromeLayer = new Container();
+  private readonly chromeTube = new Glass();
+  /**
+   * The same tube, over the arena.
+   *
+   * **The trade is accepted deliberately.** `PHOSPHOR` warns that on one phosphor
+   * there is no difference between thermal and signal red, and §16.3 makes the fuel
+   * hues *mean elements* — so an amber arena genuinely costs the player a channel
+   * they read threats with. That is the point: the operator chose a monochrome
+   * tube, and a monochrome tube is worse at this job. It is a setting, not a
+   * difficulty, and the game does not get to quietly opt out of it on the one
+   * surface where it would be felt.
+   */
+  private readonly arenaTube = new Glass();
   camera!: Camera;
 
   private bloom!: BloomPipeline;
   private readonly post = new PostPass();
+  /**
+   * §20.1 — the operator's panel, applied to the finished frame.
+   *
+   * On the *stage*, not on the world group, and that is the whole point of it
+   * being a separate pass from `post`: post runs under the mass so that a light
+   * cannot lift a slab from beneath it, which means everything post touches is
+   * only part of the picture. A display correction that missed the mass, the
+   * indicators and the sheets would be a correction that made the arena legible
+   * and left the walls black.
+   */
+  private readonly display = new DisplayPass();
+  private displayOn = false;
   private lights!: LightField;
   private masks!: MaskField;
   private readonly particles = new ParticleField();
@@ -245,6 +283,18 @@ export class Renderer {
   gpu!: GpuTimer;
   /** §21b.4 — the background colour, easing toward the current biome's. */
   private tint: number = PALETTE.background;
+  /**
+   * Put the player's tube on the run's paperwork. Called at start and whenever the
+   * configuration sheet moves — the same style the desk uses, from one function.
+   */
+  setChromeGlass(s: GlassSettings): void {
+    this.chromeTube.set(chromeGlass(s));
+    // The arena takes the phosphor but not the scanlines: the mass is already a
+    // field of hairline blocks on a grid, and a scanline over it is moiré.
+    const arena = chromeGlass(s);
+    this.arenaTube.set({ mono: arena.mono, tint: arena.tint, scan: 0 });
+  }
+
   /** Both halves of the shell, for the many settings they share. */
   private get shells(): readonly StructurePass[] {
     return [this.shellFloor, this.shellMass];
@@ -384,7 +434,11 @@ export class Renderer {
       this.massSprite,
       this.ghostSprite,
       this.screenLayer,
+      this.chromeLayer,
     );
+    this.chromeLayer.filters = [this.chromeTube.filter];
+    // Everything the run draws that is not paperwork.
+    this.worldGroup.filters = [this.arenaTube.filter];
 
     this.layout();
     this.camera.snapTo(world.player.x, world.player.y);
@@ -2495,9 +2549,26 @@ export class Renderer {
    * already happened, so what this measures is the composite and the post stack.
    */
   present(): void {
+    this.syncDisplay();
     this.gpu.begin();
     this.app.render();
     this.gpu.end();
+  }
+
+  /**
+   * Install the display transform, or take it back off.
+   *
+   * Inside the timer's bracket rather than at init, because a stage filter is a
+   * fullscreen copy and a gamma of 1 is the identity — a player whose screen is
+   * already right must not pay a pass for the setting merely existing. One
+   * uniform write per frame is the price of never having to remember to call
+   * this when the setting moves.
+   */
+  private syncDisplay(): void {
+    const want = this.display.sync();
+    if (want === this.displayOn) return;
+    this.displayOn = want;
+    this.app.stage.filters = want ? [this.display.filter] : [];
   }
 
   /** Diagnostics for the HUD. */

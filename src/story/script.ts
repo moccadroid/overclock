@@ -281,7 +281,7 @@ export const BUREAU: readonly Beat[] = [
     body: [
       'The assignment begins with this shift. Orientation notices are posted at four stations inside the cell and shall be read at the operator\'s convenience during the first episode.',
       'Duties are stated at OC-0001, which is filed on this terminal. Completion of orientation is recorded when the first partition has been held open per station notice 4.',
-      'Output is recorded against the operator and reviewed.',
+      'Output is logged and reviewed.',
     ],
   },
   {
@@ -406,7 +406,7 @@ export const BUREAU: readonly Beat[] = [
     note: 'Run 3, the archive. Clause 4.1 is the hinge of the whole design: findings are withheld because disclosure accelerates the finding. It reads as a company hiding test results; it means naming the compromise helps it along. Clause 4.2 stays under the bar forever.',
     body: [
       '2  EXAMINATION',
-      '2.1  Operators shall be examined at appointment and at intervals of not more than forty (40) shifts. Findings shall be recorded against the operator on Form OC-19 and shall not be disclosed to the operator, save where disclosure is directed under 4.2.',
+      '2.1  Operators shall be examined at appointment and at intervals of not more than forty (40) shifts. Findings shall be entered on Form OC-19 and filed with the operator record, and shall not be disclosed to the operator, save where disclosure is directed under 4.2.',
       '3  FINDINGS AND ONSET',
       { pre: [
         '3.1  The following are within norms and are not of',
@@ -475,7 +475,7 @@ export const BUREAU: readonly Beat[] = [
     body: [
       '3  ON CONCLUSION OF AN INTERVIEW UNDER OC-0061',
       '3.1  The interviewer shall endorse Form OC-31 with the disposition and forward it to Personnel the same day.',
-      '3.2  Where the disposition at 3.1 is (c), the register entry shall be closed and the candidate\'s file consolidated into the program line item for the index year. Physical disposition is arranged by Facilities, is not itemised, and is not recorded against the program.',
+      '3.2  Where the disposition at 3.1 is (c), the register entry shall be closed and the candidate\'s file consolidated into the program line item for the index year. Physical disposition is arranged by Facilities, is not itemised, and does not appear in the program return.',
       '3.3  Correspondence received for a closed operator shall be destroyed unopened. Enquiries shall be answered by reference to the standing form of words at Annex B.',
       [
         '3.4  Effects recovered from the interview room are handled per ',
@@ -556,7 +556,7 @@ export const BUREAU: readonly Beat[] = [
         ['ORIGIN       ', bar('no record exists', NEVER)],
       ] },
       '1  PROCEDURE',
-      '1.1  The item is suppressed continuously. An episode begins when the item initiates cascade and ends at collection. Episodes shall be concluded at the earliest collection point, and the duration, depth and output of each episode shall be recorded against the operator and reviewed per OC-0052. No provision of this instruction shall be read as assigning value to output.',
+      '1.1  The item is suppressed continuously. An episode begins when the item initiates cascade and ends at collection. Episodes shall be concluded at the earliest collection point, and the duration, depth and output of each episode shall be entered in the operator record and reviewed per OC-0052. No provision of this instruction shall be read as assigning value to output.',
       '2  AUTHORISATION',
       '2.1  During an episode the item will request extensions to its own build. Requests shall be surfaced to the operator, and the standing decision is denial per OC-0061 clause 3.',
       '2.2  Authorisation authority shall not be delegated to automated systems under any circumstances. Refer to OC-001-D.',
