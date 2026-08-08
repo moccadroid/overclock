@@ -22,9 +22,12 @@
  * Neither can reach the mass from here.
  */
 import { Filter, GlProgram, Texture } from 'pixi.js';
+import { VISUAL } from '../visual';
 
 /** Keep in step with MAX_GLITCH in the fragment shader. */
 const MAX_GLITCH = 8;
+/** Keep in step with BLOOM_MIPS in gfx/bloom.ts and the sampler list here. */
+const MIPS = 5;
 
 const vertex = `
 in vec2 aPosition;
@@ -105,6 +108,34 @@ uniform float uLit;
 uniform float uHaze;
 uniform float uTime;
 
+/**
+ * §16.1 — the emissive layer and its bloom, composited here.
+ *
+ * These used to be seven full-screen sprites over the world: a flat copy, a hot
+ * additive copy, two tinted aberration fringes and three copies run through
+ * independent Gaussian blur chains. Every one was a full-screen write, and the
+ * blurs re-blurred the same texture at three radii every frame. The mips
+ * arrive pre-downsampled (gfx/bloom.ts), so the whole stack is now a handful
+ * of texture reads in the pass this shader was already paying for.
+ *
+ * uHot is the old hot copy: how far past 1 the glow burns, applied as extra
+ * gain on the emissive rather than as a second draw. uTearPx shifts the
+ * emissive sideways — Overheat tearing the frame. The fringes are per-channel
+ * reads at uFringePx, which is also simply *better* aberration than two
+ * additive tinted copies ever were.
+ */
+uniform sampler2D uBase;
+uniform sampler2D uMip1;
+uniform sampler2D uMip2;
+uniform sampler2D uMip3;
+uniform sampler2D uMip4;
+uniform sampler2D uMip5;
+uniform float uBloomW[5];
+uniform float uHot;
+uniform float uTearPx;
+uniform float uFringePx;
+uniform float uFringeA;
+
 float hash(vec2 p) {
   return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
 }
@@ -116,6 +147,13 @@ vec2 toScreen(vec2 uv) {
 
 vec2 toInput(vec2 screen) {
   return (screen * uScreen - uOutputFrame.xy) / uInputSize.xy;
+}
+
+/** The world with the emissive layer over it, at an input-space uv. */
+vec3 sceneAt(vec2 inUv) {
+  vec3 under = texture(uTexture, inUv).rgb;
+  vec4 em = texture(uBase, toScreen(inUv) - vec2(uTearPx / uScreen.x, 0.0));
+  return under * (1.0 - em.a) + em.rgb * (1.0 + uHot);
 }
 
 void main(void) {
@@ -170,8 +208,9 @@ void main(void) {
       float jump = floor(uTime * 14.0);
       float slip = hash(vec2(band, jump)) - 0.5;
       // Only some bands move. A field where every line slips is mush.
-      float active = step(0.55, hash(vec2(band * 1.7, jump * 0.9)));
-      tear = vec2(slip * active * glitch * 0.055, 0.0);
+      // ("active" is reserved in GLSL ES 3.00 — hence the name.)
+      float slipping = step(0.55, hash(vec2(band * 1.7, jump * 0.9)));
+      tear = vec2(slip * slipping * glitch * 0.055, 0.0);
       uv += tear;
     }
   }
@@ -230,17 +269,50 @@ void main(void) {
   // *thing*. Split radially and an elite standing in the middle of the screen
   // would have no fringe at all.
   vec4 colour;
+  vec4 em;
   vec2 dir = centred * uAberration * 0.02
     + vec2(glitch * 0.009, 0.0)
     + vec2(state.g, -state.g) * 0.009;
+  // The emissive layer is a screen-space buffer; every shift the world has
+  // taken so far — glitch tear, shimmer, barrel — is already in uv, so
+  // sampling it through toScreen(uv) keeps the two layers welded together
+  // under any distortion. uTearPx is the Overheat tear, emissive-only, exactly
+  // as the sprite version was.
+  vec2 euv = toScreen(uv) - vec2(uTearPx / uScreen.x, 0.0);
   if (uAberration > 0.0 || glitch > 0.001 || state.g > 0.004) {
+    // dir is an input-space displacement; the emissive wants it in screen
+    // space or the split widens as the stage's bounds grow.
+    vec2 sdir = dir * (uInputSize.xy / uScreen);
     colour.r = texture(uTexture, uv + dir).r;
     colour.g = texture(uTexture, uv).g;
     colour.b = texture(uTexture, uv - dir).b;
     colour.a = texture(uTexture, uv).a;
+    em.r = texture(uBase, euv + sdir).r;
+    em.b = texture(uBase, euv - sdir).b;
+    vec2 ga = texture(uBase, euv).ga;
+    em.g = ga.x;
+    em.a = ga.y;
   } else {
     colour = texture(uTexture, uv);
+    em = texture(uBase, euv);
   }
+
+  // ---- the emissive layer, and its glow ---------------------------------
+  //
+  // Source-over for the flat copy — entities occlude the floor, they do not
+  // add to it — then everything that spreads is additive: the hot copy, the
+  // §16.7 fringes, and the bloom read off the mip chain.
+  colour.rgb = colour.rgb * (1.0 - em.a) + em.rgb * (1.0 + uHot);
+  if (uFringeA > 0.0) {
+    vec2 f = vec2(uFringePx / uScreen.x, 0.0);
+    colour.rgb += texture(uBase, euv + f).rgb * vec3(1.0, 0.25, 0.25) * uFringeA;
+    colour.rgb += texture(uBase, euv - f).rgb * vec3(0.25, 0.5, 1.0) * uFringeA;
+  }
+  colour.rgb += texture(uMip1, euv).rgb * uBloomW[0]
+              + texture(uMip2, euv).rgb * uBloomW[1]
+              + texture(uMip3, euv).rgb * uBloomW[2]
+              + texture(uMip4, euv).rgb * uBloomW[3]
+              + texture(uMip5, euv).rgb * uBloomW[4];
 
   // ---- lighting -------------------------------------------------------
   //
@@ -294,7 +366,9 @@ void main(void) {
     vec3 sum = vec3(0.0);
     for (int i = 1; i <= 6; i++) {
       float s = 1.0 + float(i) * 0.005 * uBleed;
-      sum += texture(uTexture, toInput(0.5 + centred * s)).rgb;
+      // Recomposited, not the underlay: the streaks are supposed to hang off
+      // the bright strokes, and the bright strokes live in the emissive layer.
+      sum += sceneAt(toInput(0.5 + centred * s));
     }
     colour.rgb += (sum / 6.0) * uBleed * 0.75;
   }
@@ -325,7 +399,9 @@ void main(void) {
     // and is legible at any brightness.
     if (state.b > 0.004) {
       float k = state.b;
-      vec3 echo = texture(uTexture, uv + vec2(0.006, 0.0) * k).rgb;
+      // The echo has to carry the emissive layer — the phased enemy IS the
+      // emissive — so it reads the recomposited scene, not the underlay.
+      vec3 echo = sceneAt(uv + vec2(0.006, 0.0) * k);
       float bands = 0.55 + 0.45 * sin(spx.y * 0.55 + uTime * 3.0);
       colour.rgb = mix(colour.rgb, max(colour.rgb * 0.55, echo * 0.8), k * bands);
       float lum = dot(colour.rgb, vec3(0.299, 0.587, 0.114));
@@ -427,11 +503,92 @@ export class PostPass {
           uScreen: { value: new Float32Array([1, 1]), type: 'vec2<f32>' },
           uGlitchCount: { value: 0, type: 'i32' },
           uGlitch: { value: new Float32Array(MAX_GLITCH * 4), type: 'vec4<f32>', size: MAX_GLITCH },
+          uBloomW: { value: new Float32Array(MIPS), type: 'f32', size: MIPS },
+          uHot: { value: 0, type: 'f32' },
+          uTearPx: { value: 0, type: 'f32' },
+          uFringePx: { value: 0, type: 'f32' },
+          uFringeA: { value: 0, type: 'f32' },
         },
         uLight: Texture.WHITE.source,
         uMask: Texture.EMPTY.source,
+        uBase: Texture.EMPTY.source,
+        uMip1: Texture.EMPTY.source,
+        uMip2: Texture.EMPTY.source,
+        uMip3: Texture.EMPTY.source,
+        uMip4: Texture.EMPTY.source,
+        uMip5: Texture.EMPTY.source,
       },
     });
+  }
+
+  /**
+   * Point the composite at the emissive buffer and its mips. Called at init and
+   * after any resize, because the buffers are recreated rather than resized.
+   */
+  setBloomTextures(base: Texture, mips: readonly Texture[]): void {
+    this.filter.resources.uBase = base.source;
+    for (let i = 0; i < MIPS; i++) {
+      this.filter.resources[`uMip${i + 1}`] = (mips[i] ?? base).source;
+    }
+  }
+
+  /**
+   * The bloom escalation, mapped onto mip weights. `intensity` keeps the old
+   * sprite-alpha contract: 1 is the tuned §16 baseline, past 1.2 the glow
+   * spills wider, past 2.4 it floods — the Heat/Meltdown ladder. `mips` is the
+   * quality knob: weights beyond the refreshed mips are forced to zero so a
+   * stale buffer is never read, and the glow honestly tightens instead.
+   */
+  setBloom(intensity: number, mips: number): void {
+    const w = (this.filter.resources.postUniforms.uniforms as Record<string, unknown>)
+      .uBloomW as Float32Array;
+    const tight = Math.min(1.4, intensity);
+    const wide = Math.max(0, Math.min(1.1, intensity - 1.2)) * 0.75;
+    const huge = Math.max(0, Math.min(1, intensity - 2.4)) * 0.6;
+    // Energy sits in the far mips on purpose. The first mapping spread it
+    // evenly from the half-res mip outward, and a halo that hugs a one-pixel
+    // stroke does not read as glow — it reads as the stroke being out of
+    // focus. The whole frame went smudgy. The old BlurFilter look was a wide
+    // soft aura over strokes that stayed sharp, so the near mips carry almost
+    // nothing and the spread lives at 1/16 and 1/32 — glow around things, not
+    // blur on them.
+    w[0] = 0;
+    w[1] = tight * 0.08;
+    w[2] = tight * 0.22;
+    w[3] = tight * 0.45;
+    w[4] = tight * 0.25 + wide + huge;
+    // A lower quality tier folds the missing mips' energy inward rather than
+    // deleting it — the glow tightens instead of disappearing, which is a
+    // degrade someone might not notice rather than a light switching off. The
+    // fold keeps most of the energy; a little is honestly lost, the same way
+    // the radius is.
+    for (let i = MIPS - 1; i >= Math.max(1, mips); i--) {
+      w[i - 1] = w[i - 1]! + w[i]! * 0.85;
+      w[i] = 0;
+    }
+    if (mips <= 0) for (let i = 0; i < MIPS; i++) w[i] = 0;
+  }
+
+  /** How hot the emissive burns before any of it spreads. 1 is neutral. */
+  setGlow(amount: number): void {
+    (this.filter.resources.postUniforms.uniforms as Record<string, number>).uHot = Math.max(
+      0,
+      amount - 1,
+    );
+  }
+
+  /** §16.7 step 2 — chromatic fringes on the emissive layer, 0..1. */
+  setAberrationFringe(amount: number): void {
+    const u = this.filter.resources.postUniforms.uniforms as Record<string, number>;
+    const safe = amount * VISUAL.degradationIntensity;
+    u.uFringeA = safe * 0.5;
+    u.uFringePx = safe * VISUAL.aberrationInstability2;
+  }
+
+  /** §16.7 step 4 — Overheat tears the emissive sideways. Signed, 0 is none. */
+  setTear(amount: number): void {
+    const u = this.filter.resources.postUniforms.uniforms as Record<string, number>;
+    u.uTearPx = amount * VISUAL.degradationIntensity * VISUAL.tearAmount;
   }
 
   /**
@@ -469,20 +626,6 @@ export class PostPass {
   /** How much of the state field to apply. Zero skips the sample entirely. */
   setState(amount: number): void {
     (this.filter.resources.postUniforms.uniforms as Record<string, number>).uState = amount;
-  }
-
-  /** True when every effect is off — the pass can then be skipped entirely. */
-  static isOff(s: PostSettings): boolean {
-    return (
-      s.barrel === 0 &&
-      s.aberration === 0 &&
-      s.scan === 0 &&
-      s.grain === 0 &&
-      s.vignette === 0 &&
-      s.bleed === 0 &&
-      s.lit === 0 &&
-      s.haze === 0
-    );
   }
 
   /**

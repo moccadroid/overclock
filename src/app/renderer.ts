@@ -27,6 +27,7 @@ import { MaskField } from './gfx/mask';
 import { BloomPipeline } from './gfx/bloom';
 import { GpuTimer } from './gfx/gputimer';
 import { DisplayPass } from './gfx/display';
+import { GFX, type GraphicsSettings } from './gfx/quality';
 import {
   StructurePass,
   type MaterialZone,
@@ -169,6 +170,8 @@ export class Renderer {
    * surface where it would be felt.
    */
   private readonly arenaTube = new Glass();
+  /** Whether the arena tube is worth its pass — false on the colour phosphor. */
+  private arenaTubeOn = false;
   camera!: Camera;
 
   private bloom!: BloomPipeline;
@@ -293,6 +296,16 @@ export class Renderer {
     // field of hairline blocks on a grid, and a scanline over it is moiré.
     const arena = chromeGlass(s);
     this.arenaTube.set({ mono: arena.mono, tint: arena.tint, scan: 0 });
+    // A colour tube is the identity, and the identity is a full-screen pass
+    // nobody should pay for — the same discipline display.ts holds itself to.
+    this.arenaTubeOn = (arena.mono ?? 0) > 0;
+    this.syncWorldFilters();
+  }
+
+  private syncWorldFilters(): void {
+    this.worldGroup.filters = this.arenaTubeOn
+      ? [this.post.filter, this.arenaTube.filter]
+      : [this.post.filter];
   }
 
   /** Both halves of the shell, for the many settings they share. */
@@ -348,17 +361,21 @@ export class Renderer {
   /** Renderer-local seconds. Only ever compared against itself. */
   private clock = 0;
 
-  async init(mount: HTMLElement, world: World): Promise<void> {
+  async init(mount: HTMLElement, world: World, graphics: GraphicsSettings): Promise<void> {
     this.camera = new Camera(world.arena);
 
     await this.app.init({
       background: PALETTE.background,
       resizeTo: window,
-      antialias: true,
+      // MSAA is off unless asked for. The world is composed from render
+      // textures, so multisampling the canvas was resolving a retina
+      // framebuffer to antialias a dozen quad edges and the indicator strokes
+      // — see gfx/quality.ts. A context attribute, so it holds for the run.
+      antialias: graphics.msaa,
       autoDensity: true,
-      resolution: Math.min(2, window.devicePixelRatio || 1),
+      resolution: Math.min(Math.max(1, graphics.renderScale), window.devicePixelRatio || 1),
       // We present the frame ourselves, from the game loop, so the GPU timer can
-      // bracket exactly one screen render. Pixi's own ticker would also fire
+      // bracket exactly one frame's passes. Pixi's own ticker would also fire
       // between our passes — bloom and the light field each call `render()` into
       // a texture — and a timer query cannot nest.
       autoStart: false,
@@ -373,6 +390,7 @@ export class Renderer {
     this.post.setLightTexture(this.lights.source);
     this.masks = new MaskField(this.app);
     this.post.setMaskTexture(this.masks.source);
+    this.post.setBloomTextures(this.bloom.source, this.bloom.mipTextures);
 
     this.floorSprite.filters = [this.shellFloor.filter];
     this.massSprite.filters = [this.shellMass.filter];
@@ -425,8 +443,10 @@ export class Renderer {
 
     this.backdrop.tint = PALETTE.background;
     // Everything the post pass may touch goes in the group; everything that must
-    // stay beyond the reach of light goes above it.
-    this.worldGroup.addChild(this.backdrop, this.floorSprite, this.bloom.output);
+    // stay beyond the reach of light goes above it. The emissive layer is no
+    // longer a child — the post pass composites it from the bloom buffers, so
+    // the group is just the opaque underlay: backdrop and floor.
+    this.worldGroup.addChild(this.backdrop, this.floorSprite);
     this.app.stage.addChild(
       this.worldGroup,
       // Above the entities *and* above post, so an overhanging slab occludes the
@@ -437,8 +457,11 @@ export class Renderer {
       this.chromeLayer,
     );
     this.chromeLayer.filters = [this.chromeTube.filter];
-    // Everything the run draws that is not paperwork.
-    this.worldGroup.filters = [this.arenaTube.filter];
+    // Everything the run draws that is not paperwork. Post always runs — it is
+    // the compositor now, not an effect — and the arena's tube joins it only
+    // when the phosphor is actually monochrome; installed here once, because a
+    // per-frame filters assignment was how the tube got silently stomped.
+    this.syncWorldFilters();
 
     this.layout();
     this.camera.snapTo(world.player.x, world.player.y);
@@ -455,12 +478,15 @@ export class Renderer {
       sprite.width = this.app.screen.width;
       sprite.height = this.app.screen.height;
     }
-    // The bloom texture is recreated on resize, so the ghost has to be pointed
-    // at the new one or it keeps drawing the old frame forever.
-    if (this.bloom) this.ghostSprite.texture = this.bloom.source;
     this.bloom.resize();
     this.lights?.resize();
     this.masks?.resize();
+    // The bloom buffers are recreated on resize, so everything holding one has
+    // to be re-pointed or it keeps drawing the old frame forever.
+    if (this.bloom) {
+      this.ghostSprite.texture = this.bloom.source;
+      this.post.setBloomTextures(this.bloom.source, this.bloom.mipTextures);
+    }
     if (this.lights) this.post.setLightTexture(this.lights.source);
     if (this.lights) {
       this.shellMass.setLight(
@@ -610,6 +636,17 @@ export class Renderer {
    * actually have.
    */
   render(world: World, frameDt: number, cameraActive: boolean, alpha = 1): void {
+    // The bracket opens here rather than in present() so the light, mask,
+    // emissive and mip passes are inside it — they are GPU work this frame
+    // asked for, and a timer that misses them once reported a clean 0.93ms
+    // while the pre-passes did whatever they liked.
+    this.gpu.begin();
+    // The live quality — the governor's rung in auto mode, the player's exact
+    // knobs in custom. Cheap to apply every frame, and applying it every frame
+    // is what makes a mid-run settings change land without a hook.
+    this.bloom.setQuality(GFX.bloomMips);
+    this.lights.setBudget(GFX.lightBudget);
+
     const p = world.player;
     this.playerX = p.prevX + (p.x - p.prevX) * alpha;
     this.playerY = p.prevY + (p.y - p.prevY) * alpha;
@@ -651,10 +688,13 @@ export class Renderer {
     // and the renderer becomes the doom clock (§13.2).
     const melt = world.phase === 'meltdown' ? Math.min(1.6, world.meltdownTime / 360) : 0;
 
-    this.bloom.setAberration(Math.min(1, (tier >= 2 ? 0.5 + 0.5 * heat : 0) + melt * 0.55));
-    this.bloom.setTear(world.budget.stalled ? (this.jitter(1) > 0 ? 1 : -1) * 0.6 : melt * 0.12);
-    this.bloom.setBloom(VISUAL.bloomIntensity * VIEW.bloom * (1 + heat * 0.35 + melt * 0.5));
-    this.bloom.setGlow(VIEW.glow);
+    this.post.setAberrationFringe(Math.min(1, (tier >= 2 ? 0.5 + 0.5 * heat : 0) + melt * 0.55));
+    this.post.setTear(world.budget.stalled ? (this.jitter(1) > 0 ? 1 : -1) * 0.6 : melt * 0.12);
+    this.post.setBloom(
+      VISUAL.bloomIntensity * VIEW.bloom * (1 + heat * 0.35 + melt * 0.5),
+      this.bloom.activeMips,
+    );
+    this.post.setGlow(VIEW.glow);
     // Step 5: the background lightens toward white as the final minutes approach.
     // The world overexposes.
     // §21b.4 — the biome you are standing in tints the world. Approached rather
@@ -702,16 +742,10 @@ export class Renderer {
       this.app.screen.width,
       this.app.screen.height,
     );
-    // A suppression field lives entirely in this pass, so the pass has to run
-    // even for a player who turned every effect off — otherwise Suppressors
-    // become invisible on a Schematic preset, which is worse than the ring was.
-    const off =
-      PostPass.isOff(VIEW) &&
-      heat < 0.02 &&
-      melt < 0.02 &&
-      this.glitchFields.length === 0 &&
-      this.masks.empty;
-    this.worldGroup.filters = off ? [] : [this.post.filter];
+    // The pass always runs now — it is the compositor that puts the emissive
+    // layer and its bloom over the floor, not an optional effect. The old "all
+    // effects off" skip has nothing left to skip: with every knob at zero the
+    // shader is a composite and a handful of dead branches.
 
     this.bloom.compose();
   }
@@ -1337,7 +1371,7 @@ export class Renderer {
       if (r.x > vx1 || r.x + r.w < vx0 || r.y > vy1 || r.y + r.h < vy0) continue;
       walls.push({ x: r.x, y: r.y, w: r.w, h: r.h, open: 0, glow: 0, reach: reachFor(r.w, r.h) });
     }
-    for (const shell of this.shells) shell.setWalls(walls);
+    for (const shell of this.shells) shell.setWalls(walls, view);
 
     for (const shell of this.shells) {
       shell.setCamera(this.originX, this.originY, this.originScale, this.playerX, this.playerY);
@@ -2544,15 +2578,30 @@ export class Renderer {
   /**
    * Draw the frame to the screen, timed.
    *
-   * Called by the game loop after `render()` has built the scene. Everything
-   * inside the bracket is one screen present; the bloom and light passes have
-   * already happened, so what this measures is the composite and the post stack.
+   * Called by the game loop after `render()` has built the scene. The timer
+   * bracket opens at the top of `render()` — the light, mask, emissive and mip
+   * passes are this frame's GPU work as much as the composite is — and closes
+   * here, so `gpu.lastMs` is finally the whole frame rather than the flattering
+   * half of it.
    */
   present(): void {
     this.syncDisplay();
-    this.gpu.begin();
     this.app.render();
     this.gpu.end();
+  }
+
+  /**
+   * The canvas resolution cap, live. Clamped to the display's actual ratio —
+   * asking for 2x on a 1x panel is just memory. The world is composed at CSS
+   * resolution regardless (see gfx/bloom.ts), so this is the sheets' text
+   * sharpness and the final composite's pixel count, and dropping it mid-run
+   * is safe: every buffer is keyed to the CSS size, which does not change.
+   */
+  setResolution(scale: number): void {
+    const target = Math.min(Math.max(1, scale), window.devicePixelRatio || 1);
+    if (Math.abs(this.app.renderer.resolution - target) < 0.01) return;
+    this.app.renderer.resolution = target;
+    this.app.resize();
   }
 
   /**

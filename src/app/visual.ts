@@ -286,6 +286,71 @@ export const SHELL = {
    */
   fray: 0,
   /**
+   * STORY-AND-TONE §8.3 — the decay. The ruins are continually coming apart
+   * and re-forming: silhouettes eaten by a slow organic rot that drifts across
+   * the mass, heals, and returns somewhere else, with a faint exhalation
+   * rising off the edges that are currently going.
+   *
+   * Different from `fray` in kind, not just amount. Fray is quantised crumbs
+   * re-rolled on the beat — damage in the block vocabulary. Decay is smooth,
+   * advected and continuous — something *organic* happening to the
+   * architecture, which is exactly why it is allowed to break the "no curves"
+   * rule at the edges: the curve is the intruder, not the building.
+   *
+   * Zero is sound structure; around 0.3 reads as neglect; 0.6 is obvious,
+   * continuous decomposition. The erosion is bounded by the cap like every
+   * block, so however hard it billows outward it never lies about cover.
+   *
+   * This, `shred` and `dissolve` below are the decomposition dials. The
+   * intended arc, to be driven per room or per act once the staging is wired
+   * to the story: `dissolve` is the material's standing condition and rises
+   * through the acts; `decay` (the roaming deform wave) and `shred` (debris)
+   * join late, when a room is actively dying. The three staged looks, tuned
+   * against the reference (dissolve 1, everything else 0):
+   *
+   *   ONSET      dissolve 0.35                    — it has begun: edges just
+   *                                                 losing their certainty,
+   *                                                 first faint tendrils
+   *   ADVANCED   dissolve 1                       — the reference look: no
+   *                                                 sharp edges left, ink
+   *                                                 fingers reaching out
+   *   TERMINAL   dissolve 1.6, decay 1.2, shred 0.9 — the end: boundaries
+   *                                                 meaningless, the deform
+   *                                                 wave and debris join
+   *
+   * Currently: TERMINAL, the last stage of the arc.
+   */
+  decay: 1.2,
+  /**
+   * STORY-AND-TONE §8.3 — the shred: decaying edges fragmenting instead of
+   * waving. Where `decay` bends the silhouette, this breaks it — coverage
+   * shatters into soft crumbs across a band around the edge, with stray
+   * flecks drifting free outside the line before thinning to nothing.
+   *
+   * Independent of `decay` and stackable with it; both follow the same
+   * roaming rot field, so together they read as one process. Zero is a clean
+   * silhouette; 0.5 is edges crumbling; past 1 the boundary stops being a
+   * line at all.
+   *
+   * Off: the quantised crumbs read as a screen treatment next to the shroud's
+   * smoke, and the two grammars fight. Kept as a knob — it may return for a
+   * specific room or a death sequence.
+   */
+  shred: 0.9,
+  /**
+   * STORY-AND-TONE §8.3 — the dissolve: the mass diffusing outward, ink into
+   * water. The cells stay cells — same churn, same placement, same tones —
+   * but everything exceeds its boundary: block edges billow past themselves,
+   * the silhouette bleeds grey tendrils some fifty units out into the room,
+   * shadows and the lit hairline soften to match. Dissolving means getting
+   * BIGGER — matter leaving, not a cloud evaporating — and no edge anywhere
+   * is a line. Scales with the layer: the black base barely breathes, the
+   * top grey is the most gone. See the staging table on `decay`.
+   *
+   * Currently: TERMINAL, the last stage of the arc — see the table on decay.
+   */
+  dissolve: 1.6,
+  /**
    * Hard drop shadow: strength, and offset as a fraction of block size.
    *
    * The three layers each cast one, and the shader takes the deepest rather

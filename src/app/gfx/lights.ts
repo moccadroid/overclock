@@ -174,6 +174,13 @@ export class LightField {
 
   private load = 0;
   private texture: RenderTexture;
+  /**
+   * The live budget — MAX_LIGHTS is the ceiling and the pool size, this is
+   * what tonight's frame is allowed. The quality governor lowers it under
+   * pressure; the selection below keeps the brightest, so what a smaller
+   * budget sheds is ambience, never the detonation.
+   */
+  private budget = MAX_LIGHTS;
 
   constructor(private readonly app: Application) {
     this.textures = {
@@ -212,6 +219,11 @@ export class LightField {
   begin(): void {
     this.count = 0;
     this.pressure = 0;
+  }
+
+  /** Clamp the per-frame submission budget. See gfx/quality.ts. */
+  setBudget(budget: number): void {
+    this.budget = Math.max(1, Math.min(MAX_LIGHTS, Math.floor(budget)));
   }
 
   private push(
@@ -378,8 +390,9 @@ export class LightField {
    */
   private select(): number {
     const count = this.count;
+    const budget = this.budget;
     while (this.order.length < count) this.order.push(0);
-    if (count <= MAX_LIGHTS) {
+    if (count <= budget) {
       for (let i = 0; i < count; i++) this.order[i] = i;
       return count;
     }
@@ -397,12 +410,12 @@ export class LightField {
     let kept = 0;
     for (; cut > 0; cut--) {
       const next = kept + bins[cut]!;
-      if (next > MAX_LIGHTS) break;
+      if (next > budget) break;
       kept = next;
     }
 
     let n = 0;
-    for (let i = 0; i < count && n < MAX_LIGHTS; i++) {
+    for (let i = 0; i < count && n < budget; i++) {
       if (binOf(requests[i]!.energy) >= cut) this.order[n++] = i;
     }
     return n;

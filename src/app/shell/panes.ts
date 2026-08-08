@@ -744,6 +744,42 @@ export function configFields(lib: Library): ConfigField[] {
     ink: () => (Math.abs(DISPLAY.gamma - 1) > 0.001 ? C.trigger : C.ink),
   });
   fields.push({ id: 'calibrate', label: 'calibration', value: () => 'RE-RUN' });
+  // §20.1b — throughput, not taste. One mode row, and the knobs under it read
+  // `auto` while the governor owns them: a number the machine will move on its
+  // own is not a number the sheet should present as yours.
+  const custom = () => s().graphics.mode === 'custom';
+  fields.push({
+    id: 'gfx:mode',
+    label: 'graphics',
+    value: () => (custom() ? 'CUSTOM' : 'AUTO'),
+    ink: () => (custom() ? C.trigger : C.ink),
+  });
+  const knob = (value: () => string): (() => string) => () => (custom() ? value() : 'auto');
+  const knobInk = () => (custom() ? C.ink : C.dim);
+  fields.push({
+    id: 'gfx:bloom',
+    label: '  bloom quality',
+    value: knob(() => (s().graphics.bloomMips <= 0 ? 'OFF' : s().graphics.bloomMips < 5 ? 'TIGHT' : 'FULL')),
+    ink: knobInk,
+  });
+  fields.push({
+    id: 'gfx:lights',
+    label: '  light budget',
+    value: knob(() => `${s().graphics.lightBudget}`),
+    ink: knobInk,
+  });
+  fields.push({
+    id: 'gfx:scale',
+    label: '  sharpness',
+    value: knob(() => `${s().graphics.renderScale}x`),
+    ink: knobInk,
+  });
+  fields.push({
+    id: 'gfx:msaa',
+    label: '  smoothing',
+    value: knob(() => (s().graphics.msaa ? 'MSAA (next shift)' : 'off')),
+    ink: knobInk,
+  });
   return fields;
 }
 

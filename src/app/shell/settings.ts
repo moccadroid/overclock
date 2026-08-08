@@ -102,6 +102,38 @@ export function adjustSetting(id: string, d: number, host: SettingsHost): boolea
     case 'calibrate':
       host.openCalibration();
       return false;
+    // §20.1b — the graphics knobs. Writes land in the Library and nothing else
+    // happens here: the game loop reads the snapshot every frame, so the next
+    // frame simply is the new setting. The sub-knobs only answer in custom
+    // mode — in auto the governor owns them, and a row that moves on its own
+    // must not pretend to be adjustable.
+    case 'gfx:mode':
+      library.setGraphics({ mode: s.graphics.mode === 'auto' ? 'custom' : 'auto' });
+      return true;
+    case 'gfx:bloom': {
+      if (s.graphics.mode !== 'custom') return false;
+      const steps = [0, 3, 5];
+      const cur = Math.max(0, steps.indexOf(s.graphics.bloomMips));
+      library.setGraphics({ bloomMips: steps[(cur + d + steps.length) % steps.length]! });
+      return true;
+    }
+    case 'gfx:lights': {
+      if (s.graphics.mode !== 'custom') return false;
+      const steps = [128, 256, 512];
+      const cur = Math.max(0, steps.indexOf(s.graphics.lightBudget));
+      library.setGraphics({ lightBudget: steps[(cur + d + steps.length) % steps.length]! });
+      return true;
+    }
+    case 'gfx:scale':
+      if (s.graphics.mode !== 'custom') return false;
+      library.setGraphics({ renderScale: s.graphics.renderScale >= 2 ? 1 : 2 });
+      return true;
+    case 'gfx:msaa':
+      // The one knob that cannot land live: antialias is a context attribute,
+      // decided when the canvas was created. The sheet says "next shift".
+      if (s.graphics.mode !== 'custom') return false;
+      library.setGraphics({ msaa: !s.graphics.msaa });
+      return true;
     default:
       if (id.startsWith('fx:')) {
         const fx = id.slice(3);

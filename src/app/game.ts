@@ -27,6 +27,7 @@ import { flushOutbox, installLifecycleHooks } from '../meta/telemetry-send';
 import { cardId } from '../sim/draft';
 import { SIM_DT } from '../sim/tunables';
 import { VISUAL } from './visual';
+import { applyGraphics, QualityGovernor } from './gfx/quality';
 import type { Library } from '../meta/profile';
 import { Stinger } from './stinger';
 import { EpisodeReport } from './shell/report';
@@ -171,6 +172,8 @@ export class Game {
   private markersSent = 0;
   /** Last GPU reading, so a held value is not counted as a fresh sample. */
   private lastGpuMs = -1;
+  /** §20.1b — walks the quality ladder in auto mode. See gfx/quality.ts. */
+  private readonly governor = new QualityGovernor();
 
   constructor(
     config: RunConfig,
@@ -210,7 +213,7 @@ export class Game {
   }
 
   async start(mount: HTMLElement): Promise<void> {
-    await this.renderer.init(mount, this.world);
+    await this.renderer.init(mount, this.world, this.library.snapshot.settings.graphics);
     // Here rather than in the constructor: the GPU string and the backend only
     // exist once there is a renderer to ask, and asking early would have meant
     // standing up a throwaway WebGL context on the machines least able to
@@ -823,6 +826,20 @@ export class Game {
     const freshGpu = gpuMs !== this.lastGpuMs ? gpuMs : 0;
     this.lastGpuMs = gpuMs;
     this.telemetry.frame(elapsed * 1000, freshGpu, this.busyMs);
+
+    // Graphics quality, before the frame is built so it applies to this one.
+    // Custom mode mirrors the knobs exactly; auto walks the ladder on the same
+    // headroom numbers the line above just shipped. The governor only listens
+    // while the sim runs — a paused sheet is cheap, and ten quiet minutes on
+    // the pause screen must not talk the ladder into a rung the fight cannot
+    // afford.
+    const graphics = this.library.snapshot.settings.graphics;
+    if (graphics.mode === 'custom') {
+      applyGraphics(graphics);
+    } else if (this.mode === 'running') {
+      this.governor.frame(elapsed * 1000, this.busyMs, gpuMs);
+    }
+    this.renderer.setResolution(graphics.renderScale);
 
     // §18.2 read backwards: the picture is told where the beat is. Read every
     // frame from the audio clock rather than accumulated here, because the audio

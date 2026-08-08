@@ -67,7 +67,7 @@
  * so the mass does not swim when the view moves and a block you walked past is
  * in the same place when you walk back.
  */
-import { Filter, GlProgram, Texture } from 'pixi.js';
+import { BufferImageSource, Filter, GlProgram, Texture } from 'pixi.js';
 
 /**
  * How many walls the mass shader can draw in one frame. Keep in step with the
@@ -85,11 +85,30 @@ import { Filter, GlProgram, Texture } from 'pixi.js';
  * nothing until a screen genuinely contains that many, which is why it went
  * from 14 to 24 to 48 as the arenas grew: a gate frame is eighteen rectangles
  * on its own, and at 24 a screen with a gate on it had six slots left for the
- * entire rest of the room. Beyond a few hundred the per-pixel loop starts to
- * matter and the answer is a broadphase, not a bigger array.
+ * entire rest of the room. The per-pixel cost of the array stopped mattering
+ * when the tile broadphase landed (see uTiles in the shader): a pixel now
+ * loops over the handful of walls that can reach it, and this bound is only
+ * how many the *frame* can carry.
  */
 const MAX_WALLS = 48;
 const MAX_WARP = 6;
+/**
+ * The broadphase grid: 16x16 tiles over the view, up to 12 wall indices per
+ * tile. Keep TILE_CAP in step with the `#define` in the fragment shader. Three
+ * RGBA8 texels per tile — 3 KiB re-uploaded only on frames whose culled wall
+ * set actually changed, which is camera movement across a room boundary, not
+ * every frame.
+ */
+const TILES = 16;
+const TILE_CAP = 12;
+/**
+ * How far past the view sample points can land: seal warps displace `p` by a
+ * couple of dozen units, shadows and layer parallax by less than a hundred.
+ */
+const VIEW_PAD = 160;
+/** End-of-list and overflowed-tile markers, matching the shader. */
+const TILE_END = 255;
+const TILE_OVERFLOW = 254;
 /**
  * How many rooms can declare their own material at once. Keep in step with the
  * `#define` in the fragment shader.
@@ -172,6 +191,9 @@ export interface ShellStyle {
   edge: number;
   oil: number;
   fray: number;
+  decay: number;
+  shred: number;
+  dissolve: number;
   shadow: number;
   shadowOffset: readonly [number, number];
   backing: number;
@@ -205,6 +227,15 @@ void main(void) {
 `;
 
 const fragment = `
+/*
+ * The version marker below is load-bearing. Pixi compiles a GlProgram as GLSL
+ * ES 1.00 with a compatibility shim unless the fragment source contains
+ * exactly that string — and the broadphase cannot survive 1.00: texelFetch
+ * does not exist there, and an array indexed through a function parameter is
+ * illegal. Pixi strips the marker and re-inserts it as the true first line of
+ * the compiled source, which is why a comment may legally precede it here.
+ */
+#version 300 es
 precision highp float;
 
 in vec2 vTextureCoord;
@@ -291,6 +322,29 @@ uniform vec4 uWarp[MAX_WARP];
 uniform float uSwirl[MAX_WARP];
 uniform int uWarpCount;
 
+/**
+ * The broadphase. MAX_WALLS made every mass query walk every wall on screen —
+ * per pixel, seven times a pixel — and the comment on the constant already knew
+ * where that ends: "beyond a few hundred the per-pixel loop starts to matter
+ * and the answer is a broadphase". This is that broadphase, arrived at well
+ * before a few hundred, because a slower GPU multiplies the loop the same way
+ * more walls do.
+ *
+ * A 16x16 grid over the view, one tile = three RGBA8 texels = up to twelve
+ * wall indices whose influence can reach that tile. Most of any screen is open
+ * floor, so most lookups read one texel triple and loop over nothing. 255 is
+ * the end marker; 254 in the first slot means the tile overflowed — more walls
+ * reach it than the list holds, gates being the honest case (a gate frame is
+ * eighteen rectangles) — and the query falls back to the full loop it would
+ * have run anyway. Correctness never depends on the grid, only speed.
+ */
+#define TILE_CAP 12
+uniform sampler2D uTiles;
+/** World origin of tile (0,0), reciprocal of the tile size, and counts - 1. */
+uniform vec2 uTileOrigin;
+uniform vec2 uTileInv;
+uniform vec2 uTileMax;
+
 uniform vec3 uStructure;
 uniform vec3 uBase;
 uniform vec3 uMass;
@@ -327,6 +381,48 @@ uniform float uEdge;
  * shimmer that was wanted, and the blocks stay exactly as sharp as they were.
  */
 uniform float uOil;
+/**
+ * §8.3 — the decay: continuous, organic decomposition of the drawn mass.
+ *
+ * Purely presentational, like everything in this pass — the colliders
+ * underneath never dissolve, so this only ever eats and regrows the picture
+ * within the same cap that bounds every block. Three parts, all driven by one
+ * knob: a slow macro field that decides *where* the rot currently sits (so
+ * regions decay, heal, and it moves on), a finer advected field that eats the
+ * silhouettes there, and a faint exhalation rising off whatever is currently
+ * going.
+ */
+uniform float uDecay;
+/**
+ * §8.3 — the shred: the decaying edges fragmenting instead of waving.
+ *
+ * uDecay perturbs the distance field, and a perturbed contour is still a
+ * contour — wobblier, but connected, which is why edges kept reading as
+ * boundaries. The shred replaces the smooth silhouette across a band around
+ * the edge with a field of soft flecks that thin toward the fringe: coverage
+ * breaking into crumbs and stray matter *outside* the line, which is what
+ * dissolving actually looks like. Independent knob, same roaming rot field,
+ * so the two effects can run alone or stack and still agree about where the
+ * decay currently is.
+ */
+uniform float uShred;
+/**
+ * §8.3 — the dissolve: every block trades its boundary for wisps.
+ *
+ * Anchored per block, not to the ruin's hull — that distinction is the whole
+ * lesson of two failed attempts. Smoke bound to the hull floats over the
+ * cells as a separate weather system; flecks thresholded against the hull
+ * reconstruct the outline they were meant to destroy. Bound to each block's
+ * own distance, the cell pattern survives while every edge in it — blocks,
+ * backing, shadows, the lit hairline — stops being a line and becomes a
+ * billowing transition a few dozen units wide. The amount scales with the
+ * layer: the black base barely breathes, the top grey is the most dissolved,
+ * so the z-axis reads as progressive decomposition. Uniform across the arena
+ * by design — this is the material's condition, not a passing event; the
+ * roaming effects (uDecay, uShred) layer on top when a room is actively
+ * dying.
+ */
+uniform float uDissolve;
 /**
  * §8.3 — how far the block edges fray, as a fraction of a block's own size.
  *
@@ -443,7 +539,9 @@ float frayAt(vec2 p, float size, float t) {
   return mix(a, b, smoothstep(0.0, 1.0, fract(t))) - 0.5;
 }
 
-/** Smooth value noise. Only the floor's sheen samples it; the mass never does. */
+
+/** Smooth value noise. The floor's sheen and the decay field sample it; the
+ *  block geometry itself never does — shape changes stay in the block grammar. */
 float vnoise(vec2 p) {
   vec2 i = floor(p);
   vec2 f = fract(p);
@@ -455,10 +553,146 @@ float vnoise(vec2 p) {
   return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
 }
 
+/**
+ * The fine decay field, 0..1: what the rot is eating right here, right now.
+ *
+ * Two octaves of smooth noise, advected — the erosion pattern travels, which
+ * is the whole difference between "coming apart" and "has a rough edge". A
+ * frozen perturbation is texture; a moving one is a process. (Sits below
+ * vnoise because GLSL resolves nothing forward.)
+ */
+float decayAt(vec2 p) {
+  vec2 drift = vec2(uTime * 0.05, uTime * -0.038);
+  return (vnoise(p * 0.030 + drift) + 0.5 * vnoise(p * 0.085 - drift * 1.6)) / 1.5;
+}
+
+/**
+ * Coverage after the shred, given the distance and the plain coverage.
+ *
+ * The band spans the edge and reaches two bands past it: well inside, the
+ * mass is solid with the odd pinprick — a decaying interior pocks — around
+ * the silhouette half the crumbs survive, and beyond it stray flecks thin
+ * along a long tail with no outer wall, so there is no radius at which the
+ * effect visibly stops. The crumb lattice is *advected*: the drift carries it
+ * along the local outward direction of the field, so flecks pull free of the
+ * silhouette and travel, rather than fizzing in place — which kept reading
+ * as a boundary with a texture on it. The threshold cross-fades between
+ * rolls; flecks condense and evaporate, they never pop.
+ */
+float shredCover(float d, float cover, vec2 p, float band, vec2 drift) {
+  if (band < 0.5) return cover;
+  // 0 well inside the block; 1 two bands out, at the far fringe.
+  float t = clamp((d + band) / (band * 3.0), 0.0, 1.0);
+  vec2 cell = floor((p + drift) / 9.0);
+  float tick = uTime * 0.8;
+  float turn = floor(tick);
+  float fizz = mix(hash21(cell + turn * 17.3), hash21(cell + (turn + 1.0) * 17.3),
+                   smoothstep(0.0, 1.0, fract(tick)));
+  float alive = smoothstep(t * 0.92, t * 0.92 + 0.18, fizz);
+  // The far fade: multiplied, not clamped, so the tail dissolves instead of
+  // ending.
+  alive *= 1.0 - smoothstep(0.8, 1.0, t);
+  return max(cover * step(band, -d), alive);
+}
+
+/**
+ * §8.3 — a dissolving edge: coverage across a soft band around a block's own
+ * boundary, eaten into wisps by the billow density handed in.
+ *
+ * The whole point is what it is anchored to. Smoke bound to the ruin's hull
+ * floats over the cells and reads as a separate weather system; this is bound
+ * to one block's distance, so the block itself trades its boundary for wisps
+ * while its body stays — the cell pattern survives its own decomposition.
+ * Inside the band the body is solid; across it the billow decides what
+ * remains; past it the wisps thin to nothing within a few dozen units. There
+ * is no sharp transition anywhere in that sentence, which is the request.
+ */
+float dissolved(float d, float band, float den, float bite, float aa) {
+  if (band < 0.5) return 1.0 - smoothstep(-aa, aa, d);
+  float t = clamp((d + band) / (band * 1.7), 0.0, 1.0);
+  float alive = smoothstep(0.32, 0.72, (1.0 - t) + (den - 0.5) * bite);
+  // The tail killer, and it is load-bearing: t clamps to 1 far outside the
+  // band — including the 1e5 a non-member cell returns — and once the noise
+  // was contrast-stretched, a high den could clear the threshold there on its
+  // own. Every surface using this function grew faint phantom blobs on open
+  // floor anywhere the guard let the shader run. Whatever the noise says,
+  // coverage must die with distance.
+  return alive * (1.0 - smoothstep(0.82, 1.0, t));
+}
+
 /** Distance to the nearest line of a world-space grid, in world units. */
 float gridDist(vec2 p, float spacing) {
   vec2 g = abs(fract(p / spacing - 0.5) - 0.5) * spacing;
   return min(g.x, g.y);
+}
+
+/** The tile's wall list, as floats: indices, then 255 as the end mark. */
+void tileIds(vec2 c, out float ids[TILE_CAP]) {
+  vec2 t = clamp(floor((c - uTileOrigin) * uTileInv), vec2(0.0), uTileMax);
+  int tx = int(t.x) * 3;
+  int ty = int(t.y);
+  vec4 a = texelFetch(uTiles, ivec2(tx, ty), 0) * 255.0;
+  vec4 b = texelFetch(uTiles, ivec2(tx + 1, ty), 0) * 255.0;
+  vec4 e = texelFetch(uTiles, ivec2(tx + 2, ty), 0) * 255.0;
+  ids[0] = a.x; ids[1] = a.y; ids[2] = a.z; ids[3] = a.w;
+  ids[4] = b.x; ids[5] = b.y; ids[6] = b.z; ids[7] = b.w;
+  ids[8] = e.x; ids[9] = e.y; ids[10] = e.z; ids[11] = e.w;
+}
+
+/** One wall's contribution to the mass distance — the body of massAt's loop. */
+void wallMass(int i, vec2 c, inout float d, inout float r) {
+  vec4 w = uWalls[i];
+  float wd = sdBox(c - w.xy, w.zw);
+  float open = uWallState[i].x;
+  if (open > 0.0) {
+    // §21b.5 — the gate. A slot growing along the wall's long axis, which the
+    // block field turns into slabs withdrawing from the opening.
+    vec2 slot = w.z > w.w
+      ? vec2(w.z * open * 1.02, w.w * 4.0)
+      : vec2(w.z * 4.0, w.w * open * 1.02);
+    wd = max(wd, -sdBox(c - w.xy, slot));
+  }
+  if (wd < d) {
+    d = wd;
+    r = uWallState[i].y;
+  }
+}
+
+/** §21b.5 — one gate's cut light, if it is open and burning. See main(). */
+void gateCut(int i, vec2 p, inout vec4 acc) {
+  float open = uWallState[i].x;
+  if (open <= 0.0) return;
+  // The heat of the cut is scored, not derived: a gate can flare before it
+  // moves and cool while it finishes, which no function of openness alone can
+  // express.
+  float heat = uWallState[i].z;
+  if (heat <= 0.0) return;
+  vec4 w = uWalls[i];
+  vec2 slot = w.z > w.w
+    ? vec2(w.z * open * 1.02, w.w * 4.0)
+    : vec2(w.z * 4.0, w.w * open * 1.02);
+  float sd = sdBox(p - w.xy, slot);
+  float within = 1.0 - smoothstep(-40.0, 90.0, sdBox(p - w.xy, w.zw));
+  float sweep = 0.55 + 0.45 * sin(p.y * 0.05 - uTime * 6.0);
+  acc.rgb += uCutColor * 0.62 * exp(-abs(sd) / 52.0) * within * 0.5 * heat;
+  acc.rgb += mix(uCutColor, vec3(1.0), 0.45) * exp(-abs(sd) / 8.0) * within * (0.5 + sweep * 0.7) * heat;
+}
+
+/** One wall's contribution to the cap — the body of capAt's loop. */
+void wallCap(int i, vec2 p, inout float d) {
+  vec4 w = uWalls[i];
+  float r = uWallState[i].y;
+  float wd = sdBox(p - w.xy, w.zw + r);
+  float open = uWallState[i].x;
+  if (open > 0.0) {
+    // The slot is widened by the same reach, or the cap would leave a rim of
+    // mass across an opening that is supposed to be clear.
+    vec2 slot = w.z > w.w
+      ? vec2(w.z * open * 1.02 + r, w.w * 4.0)
+      : vec2(w.z * 4.0, w.w * open * 1.02 + r);
+    wd = max(wd, -sdBox(p - w.xy, slot));
+  }
+  d = min(d, wd);
 }
 
 /**
@@ -475,23 +709,18 @@ float gridDist(vec2 p, float spacing) {
 vec2 massAt(vec2 c) {
   float d = -sdBox(c - uArenaC, uArenaH);
   float r = uShellReach;
-  for (int i = 0; i < MAX_WALLS; i++) {
-    if (i >= uWallCount) break;
-    vec4 w = uWalls[i];
-    float wd = sdBox(c - w.xy, w.zw);
-    float open = uWallState[i].x;
-    if (open > 0.0) {
-      // §21b.5 — the gate. A slot growing along the wall's long axis, which the
-      // block field turns into slabs withdrawing from the opening.
-      vec2 slot = w.z > w.w
-        ? vec2(w.z * open * 1.02, w.w * 4.0)
-        : vec2(w.z * 4.0, w.w * open * 1.02);
-      wd = max(wd, -sdBox(c - w.xy, slot));
+  float ids[TILE_CAP];
+  tileIds(c, ids);
+  if (ids[0] > 253.5 && ids[0] < 254.5) {
+    for (int i = 0; i < MAX_WALLS; i++) {
+      if (i >= uWallCount) break;
+      wallMass(i, c, d, r);
     }
-    if (wd < d) {
-      d = wd;
-      r = uWallState[i].y;
-    }
+    return vec2(d, r);
+  }
+  for (int j = 0; j < TILE_CAP; j++) {
+    if (ids[j] > 254.5) break;
+    wallMass(int(ids[j] + 0.5), c, d, r);
   }
   return vec2(d, r);
 }
@@ -506,21 +735,18 @@ vec2 massAt(vec2 c) {
  */
 float capAt(vec2 p) {
   float d = -sdBox(p - uArenaC, max(vec2(1.0), uArenaH - uShellReach));
-  for (int i = 0; i < MAX_WALLS; i++) {
-    if (i >= uWallCount) break;
-    vec4 w = uWalls[i];
-    float r = uWallState[i].y;
-    float wd = sdBox(p - w.xy, w.zw + r);
-    float open = uWallState[i].x;
-    if (open > 0.0) {
-      // The slot is widened by the same reach, or the cap would leave a rim of
-      // mass across an opening that is supposed to be clear.
-      vec2 slot = w.z > w.w
-        ? vec2(w.z * open * 1.02 + r, w.w * 4.0)
-        : vec2(w.z * 4.0, w.w * open * 1.02 + r);
-      wd = max(wd, -sdBox(p - w.xy, slot));
+  float ids[TILE_CAP];
+  tileIds(p, ids);
+  if (ids[0] > 253.5 && ids[0] < 254.5) {
+    for (int i = 0; i < MAX_WALLS; i++) {
+      if (i >= uWallCount) break;
+      wallCap(i, p, d);
     }
-    d = min(d, wd);
+    return d;
+  }
+  for (int j = 0; j < TILE_CAP; j++) {
+    if (ids[j] > 254.5) break;
+    wallCap(int(ids[j] + 0.5), p, d);
   }
   return d;
 }
@@ -538,7 +764,7 @@ float capAt(vec2 p) {
  * it, so consecutive cycles hand off at exactly the value they finished on.
  * Nothing in here is ever discontinuous.
  */
-float blockAt(vec2 p, float size, float seed, float bias, float layerExt, float grid, float cap, float fray) {
+float blockAt(vec2 p, float size, float seed, float bias, float layerExt, float grid, float cap, float fray, float decay) {
   // The grid is staggered per layer. Aligned, a column that misses on one layer
   // tends to miss on the next as well — and across a ruin only one or two cells
   // wide that reads as the grey bunching to one side and leaving the rest bare,
@@ -620,6 +846,14 @@ float blockAt(vec2 p, float size, float seed, float bias, float layerExt, float 
   // between a pixel's own layers, so resolving it once in main is the same
   // picture for a sixth of the work.
   if (fray > 0.0) d += frayAt(p, size, uQuarter * 0.5) * fray * size;
+
+  // §8.3 — the decay eats the silhouette the same way the fray does: by
+  // perturbing the distance, which only ever shows where the distance is near
+  // zero. decay arrives signed and already gated by the macro rot field —
+  // resolved once per pixel in main, because the rot does not vary between a
+  // pixel's own layers. Mostly it erodes; occasionally it billows, and the
+  // cap below still clips whatever it grows.
+  d += decay * size * 0.55;
 
   // Clipped to the mass at full dilation.
   //
@@ -762,7 +996,56 @@ void main(void) {
   // one offset past that. Below the guard is seven wall loops; above it, most of
   // the screen is floor and runs one.
   float cap = capAt(p);
-  if (cap < 48.0) {
+
+  // §8.3 — where the rot currently sits, and what it is eating right here.
+  //
+  // rot is the slow macro field: it drifts across the arena over tens of
+  // seconds, so a region visibly decays, heals, and the rot moves somewhere
+  // else — decay as a *process*, not a permanent texture. rotEdge is the
+  // per-pixel bite, signed and centred below the mean so the mass mostly
+  // erodes and only occasionally billows. Both resolved once per pixel and
+  // handed down, because they do not vary between a pixel's own layers.
+  float rot = 0.0;
+  float rotEdge = 0.0;
+  float shredB = 0.0;
+  vec2 shredDrift = vec2(0.0);
+  vec2 curl = vec2(0.0);
+  if ((uDecay > 0.001 || uShred > 0.001 || uDissolve > 0.001) && cap < 260.0) {
+    // Turbulence, shared by every decomposition effect: a curl field that
+    // bends the wisps and the fleck paths alike. Without it the motion is a
+    // straight-line escalator off the edge, which is movement but not weather.
+    vec2 tp = p * 0.016;
+    vec2 trise = vec2(uTime * 0.02, uTime * 0.13);
+    curl = vec2(vnoise(tp * 2.1 + trise.yx), vnoise(tp * 2.1 - trise)) - 0.5;
+
+    if (uDecay > 0.001 || uShred > 0.001) {
+      // The roaming rot: where the wave and the debris currently are. The
+      // dissolve deliberately does NOT use it — dissolving edges are the
+      // material's permanent condition, not an event passing through it.
+      float rotN = vnoise(p * 0.0055 + vec2(uTime * 0.017, uTime * -0.011));
+      float fine = decayAt(p);
+      float rotM = 0.30 + 0.70 * rotN;
+      rot = uDecay * rotM;
+      rotEdge = (fine - 0.42) * rot;
+      float vent = smoothstep(0.52, 0.85, rotN + 0.22 * (fine - 0.5));
+      shredB = 65.0 * uShred * mix(0.12, 1.0, vent);
+      if (shredB > 0.5) {
+        // The local outward direction, from the cap's own gradient — two
+        // extra tile-local samples. Flecks are carried along it with a slight
+        // lift; the curl bends each path so no two escape the same way. The
+        // epsilon keeps the deep interior (where the gradient collapses on
+        // the medial axis) drifting gently upward instead of dividing by zero.
+        vec2 g = vec2(capAt(p + vec2(9.0, 0.0)) - cap, capAt(p + vec2(0.0, 9.0)) - cap);
+        shredDrift = -normalize(g + vec2(0.001, -3.0)) * uTime * 22.0 + curl * 30.0;
+      }
+    }
+  }
+
+  // The guard widens with the shred band and the bleed — matter drifts well
+  // past the cap's usual margin, and a wisp clipped by an invisible rectangle
+  // gives the secret away.
+  float bleedBand = uDissolve * 46.0;
+  if (cap < 48.0 + shredB * 2.0 + bleedBand * 0.7) {
     vec2 eye = p - uEye;
     // Which room's edges these blocks wear, resolved once for every layer and
     // every shadow below.
@@ -781,6 +1064,25 @@ void main(void) {
     // wants — hard, because a soft shadow is a photograph and a hard one is a
     // drawing.
     float shade = 0.0;
+    // The shadows dissolve with their blocks, and this mattered more than it
+    // sounds. The shadow is offset down-right, so along a mass's lower edge
+    // the outermost dark thing on screen is usually the shadow itself — left
+    // crisp, it redrew the perfect boundary the dissolve had just eaten, and
+    // every ruin came out frayed on top and razor-clean below. One shared
+    // field for all three layers; they merge by max anyway.
+    float sden = 0.5;
+    if (uDissolve > 0.001) {
+      // Coarser than the block wisps on purpose: the boundary's wander is the
+      // noise amplitude times the band, and fine grain averages itself away —
+      // a 5px ripple on a 200px shadow line still reads as a ruler.
+      vec2 shp = p * 0.032 + curl * 0.9 + vec2(uTime * 0.02, uTime * 0.07);
+      sden = vnoise(shp) * 0.6 + vnoise(shp * 2.5 + 4.1) * 0.4;
+      // Contrast-stretched, like every den below. Value noise concentrates
+      // around 0.5 — an octave blend rarely leaves ±0.17 — so a bite sized
+      // for a ±0.5 field delivers a third of its intended wander and every
+      // "ragged" edge comes out as a ruler with a 2px tremble.
+      sden = clamp((sden - 0.5) * 2.2 + 0.5, 0.0, 1.0);
+    }
     for (int layer = 0; layer < 3; layer++) {
       // Indexed here rather than inside blockAt: GLSL ES only allows a vector to
       // be indexed by a constant or a loop symbol, and a function parameter is
@@ -790,8 +1092,23 @@ void main(void) {
       vec2 lp = p + eye * uDepth[layer];
       // Deliberately not clipped: a shadow falls on the floor beyond the block,
       // which is exactly where the cap is not.
-      float sd = blockAt(lp - uShadowOffset * size, size, seed, uBiases[layer], uLayerExtend[layer], uGridOffset[layer], -1e5, fray);
-      shade = max(shade, 1.0 - smoothstep(-aa, aa, sd));
+      float sd = blockAt(lp - uShadowOffset * size, size, seed, uBiases[layer], uLayerExtend[layer], uGridOffset[layer], -1e5, fray, rotEdge);
+      // The band does NOT shrink for the base layer. The first version scaled
+      // it up with the layer index, which handed the 260-unit base blocks —
+      // whose shadows are the longest, most visible straight lines on screen
+      // — a one-pixel band, and every ruin kept a crisp rectangle under its
+      // fray. The base's shadow needs the most eating, not the least.
+      float sBand = uDissolve * (30.0 + 6.0 * float(layer));
+      float s1;
+      if (sBand > 0.5) {
+        // Inward-shifted like nothing else: a shadow that billowed outward
+        // would exceed its own membership cells and cut. Eaten raggedly from
+        // the edge in, it reads as the shadow of a dissolving thing.
+        s1 = dissolved(sd + sBand * 0.7, sBand, sden, 0.9, aa);
+      } else {
+        s1 = 1.0 - smoothstep(-aa, aa, sd);
+      }
+      shade = max(shade, s1);
     }
     put(acc, vec3(0.0), uShadow * shade);
 
@@ -800,7 +1117,23 @@ void main(void) {
     // showing the floor through — slabs floating on the ground rather than a
     // wall with a broken edge. Out past the collider the gaps are correct and
     // wanted; over it they are a hole in something solid.
-    put(acc, uMass * uBacking, 1.0 - smoothstep(-aa, aa, massAt(p).x));
+    // Its edge dissolves and shreds with the layers, or the softening
+    // silhouette would sit on a perfectly crisp black plate wherever the
+    // blocks thin over the collider and the whole effect would read as the
+    // greys misbehaving.
+    float bd0 = massAt(p).x + rotEdge * 44.0;
+    // Wider than the blocks' bands, because this is where the outward wisps
+    // live — the backing's field is continuous, so its smoke can drift past
+    // the silhouette without ever meeting a cell seam.
+    float bBand = uDissolve * 11.0;
+    float bCover;
+    if (bBand > 0.5) {
+      float bden = vnoise(p * 0.05 + curl * 0.8 + vec2(uTime * 0.03, uTime * 0.16) * 0.5);
+      bCover = dissolved(bd0, bBand, bden, 0.34, aa);
+    } else {
+      bCover = 1.0 - smoothstep(-aa, aa, bd0);
+    }
+    put(acc, uMass * uBacking, shredCover(bd0, bCover, p, shredB * 0.8, shredDrift));
 
     // Three scales, back to front. Each is offset a little further from the
     // player than the last, which from above reads as slabs stacked toward you.
@@ -809,17 +1142,82 @@ void main(void) {
       float seed = float(layer) * 21.0 + 11.0;
       vec2 lp = p + eye * uDepth[layer];
 
-      float bd = blockAt(lp, size, seed, uBiases[layer], uLayerExtend[layer], uGridOffset[layer], cap, fray);
-      float cover = 1.0 - smoothstep(-aa, aa, bd);
+      float bd = blockAt(lp, size, seed, uBiases[layer], uLayerExtend[layer], uGridOffset[layer], cap, fray, rotEdge);
+
+      // §8.3 — the dissolve: the block keeps its body and loses its boundary.
+      // Band, grain, pace and bite all scale with the layer — the black base
+      // barely breathes, the top grey is the most gone — so the z-axis reads
+      // as progressive decomposition. The billow is sampled per layer through
+      // the shared curl, decorrelated by the seed, so the wisps of adjacent
+      // strata never move as one sheet.
+      float fi = float(layer);
+      float band = uDissolve * (5.0 + 9.0 * fi);
+      float cover;
+      if (band > 0.5) {
+        float speed = 0.5 + 0.5 * fi;
+        vec2 sp = lp * (0.05 + 0.02 * fi);
+        // The vertical advection stays gentle. At the old rate the wisp
+        // pattern streamed upward hard enough that top edges shed while
+        // bottom edges swallowed their own fray — every ruin came out
+        // lopsided. The bleed keeps the visible rise; the edges stay evenly
+        // eaten on all sides.
+        vec2 rise = vec2(uTime * 0.03, uTime * 0.085) * speed;
+        float den = vnoise(sp + curl * (0.8 + 0.5 * fi) + rise + fi * 5.1) * 0.6
+                  + vnoise(sp * 2.6 + curl * (1.6 + fi) + rise * 1.8 + fi * 2.3) * 0.4;
+        den = clamp((den - 0.5) * 2.2 + 0.5, 0.0, 1.0);
+        // Symmetric: the wisps exceed the block's boundary — dissolving means
+        // getting BIGGER, ink into water, not a cloud evaporating. Membership
+        // is quantised per cell, so past the mass's own silhouette those
+        // outward wisps would end in razor cuts at empty-cell seams; the fade
+        // on the next line hands them over, continuously, to the bleed below,
+        // which owns everything beyond the boundary and cannot cut.
+        cover = dissolved(bd, band, den, 0.30 + 0.30 * fi, aa);
+        cover *= 1.0 - smoothstep(0.0, 10.0, bd) * smoothstep(2.0, 26.0, bd0);
+      } else {
+        cover = 1.0 - smoothstep(-aa, aa, bd);
+      }
+      // Offset by the layer seed so the three layers do not share one fleck
+      // pattern — shared crumbs read as a screen effect, not a material one.
+      cover = shredCover(bd, cover, lp + seed, shredB, shredDrift);
       if (cover > 0.001) {
         vec3 body = uMass * uShades[layer];
-        // The lit edge: a hairline inside the top and left borders only.
+        // The lit edge: a hairline inside the top and left borders only. A
+        // crisp lit hairline on a dissolving border is a contradiction, so it
+        // fades out as the dissolve comes in.
         vec2 rel = lp - (floor(lp / size - uGridOffset[layer]) + 0.5 + uGridOffset[layer]) * size;
         float edge = smoothstep(-2.2 * aa, 0.0, bd);
         float side = max(step(rel.x, 0.0), step(rel.y, 0.0));
-        body += uMass * edge * side * uEdge;
+        body += uMass * edge * side * uEdge * max(0.0, 1.0 - uDissolve);
         put(acc, body, cover);
       }
+    }
+
+    // ---- the bleed --------------------------------------------------------
+    //
+    // §8.3 — the drop of ink: the mass exceeding its boundary. Anchored to
+    // the union field (continuous, cannot cut at cell seams), it spreads dark
+    // tendrils past the silhouette — dense laps over the edge, ragged fingers
+    // to about seventy units, rare tips beyond, thinning by dissolution
+    // rather than at a radius. Masked off deep inside so it never repaints
+    // the interior. It is the MASS's own near-black at high opacity, not a
+    // lighter grey at a whisper: the first version tinted it a hair off the
+    // floor colour at half alpha, which measured as present and read as
+    // nothing. Ink has to be opaque to be ink.
+    if (bleedBand > 0.5) {
+      vec2 bp = p * 0.042 + curl * 1.1 + vec2(uTime * 0.025, uTime * 0.14);
+      float bden = vnoise(bp) * 0.6 + vnoise(bp * 2.7 + vec2(2.2, uTime * 0.1)) * 0.4;
+      bden = clamp((bden - 0.5) * 2.2 + 0.5, 0.0, 1.0);
+      float bt = clamp((bd0 + bleedBand) / (bleedBand * 2.6), 0.0, 1.0);
+      // Noise-thresholded, not noise-nudged: the threshold rises with the
+      // distance and the ink is near-opaque wherever it passes. The previous
+      // additive form made alpha fall smoothly with distance, which is a
+      // gradient skirt with a straight rim — the boundary of THIS form is a
+      // contour line of the noise itself, which is what fingers look like.
+      float th = mix(0.30, 0.82, bt);
+      float a = smoothstep(th, th + 0.10, bden) * 0.92;
+      a *= smoothstep(-bleedBand, -bleedBand * 0.25, bd0);
+      a *= 1.0 - smoothstep(0.90, 1.0, bt);
+      if (a > 0.003) put(acc, uMass * 0.9, a);
     }
   }
 
@@ -848,24 +1246,20 @@ void main(void) {
   // Added to the premultiplied colour without raising alpha, which under
   // source-over is exactly an emissive glow: it lights whatever is behind it
   // rather than covering it.
-  for (int i = 0; i < MAX_WALLS; i++) {
-    if (i >= uWallCount) break;
-    float open = uWallState[i].x;
-    if (open <= 0.0) continue;
-    vec4 w = uWalls[i];
-    vec2 slot = w.z > w.w
-      ? vec2(w.z * open * 1.02, w.w * 4.0)
-      : vec2(w.z * 4.0, w.w * open * 1.02);
-    float sd = sdBox(p - w.xy, slot);
-    float within = 1.0 - smoothstep(-40.0, 90.0, sdBox(p - w.xy, w.zw));
-    // The heat of the cut is scored, not derived: a gate can flare before it
-    // moves and cool while it finishes, which no function of openness alone can
-    // express.
-    float heat = uWallState[i].z;
-    if (heat <= 0.0) continue;
-    float sweep = 0.55 + 0.45 * sin(p.y * 0.05 - uTime * 6.0);
-    acc.rgb += uCutColor * 0.62 * exp(-abs(sd) / 52.0) * within * 0.5 * heat;
-    acc.rgb += mix(uCutColor, vec3(1.0), 0.45) * exp(-abs(sd) / 8.0) * within * (0.5 + sweep * 0.7) * heat;
+  {
+    float ids[TILE_CAP];
+    tileIds(p, ids);
+    if (ids[0] > 253.5 && ids[0] < 254.5) {
+      for (int i = 0; i < MAX_WALLS; i++) {
+        if (i >= uWallCount) break;
+        gateCut(i, p, acc);
+      }
+    } else {
+      for (int j = 0; j < TILE_CAP; j++) {
+        if (ids[j] > 254.5) break;
+        gateCut(int(ids[j] + 0.5), p, acc);
+      }
+    }
   }
 
   // Surfaces catch light, mass included — see uMassLit for why it is small.
@@ -967,8 +1361,34 @@ export class StructurePass {
   readonly filter: Filter;
   private time = 0;
   private swell = 1;
+  /** The broadphase tile lists, and the source the shader samples them from. */
+  private readonly tileData = new Uint8Array(TILES * 3 * TILES * 4);
+  private readonly tileSource: BufferImageSource;
+  /** Per-tile fill counts, reused across builds. */
+  private readonly tileFill = new Int32Array(TILES * TILES);
+  /**
+   * How far a wall's influence can reach past its own box, from the style:
+   * its blocks' membership slack plus shadow and parallax offsets. Everything
+   * a tile must include to make the shader's tile-local answers exact.
+   */
+  private margin = 210;
+  /** The culled wall set last binned, so an unchanged frame skips the upload. */
+  private tileKey = '';
 
   constructor() {
+    this.tileSource = new BufferImageSource({
+      resource: this.tileData,
+      width: TILES * 3,
+      height: TILES,
+      format: 'rgba8unorm',
+      scaleMode: 'nearest',
+      // This is data, not a picture. Pixi's default alpha mode premultiplies
+      // RGB by alpha on upload — and the fourth wall index in a tile lives in
+      // the alpha channel, so any tile listing four or more walls came back
+      // with its first three indices scaled to garbage. Dense rooms lost
+      // random cells; sparse rooms (and every unit probe) looked fine.
+      alphaMode: 'no-premultiply-alpha',
+    });
     this.filter = new Filter({
       glProgram: new GlProgram({ vertex, fragment, name: 'overclock-shell' }),
       resources: {
@@ -1005,6 +1425,9 @@ export class StructurePass {
           uEdge: { value: 0.3, type: 'f32' },
           uOil: { value: 0, type: 'f32' },
           uFray: { value: 0, type: 'f32' },
+          uDecay: { value: 0, type: 'f32' },
+          uShred: { value: 0, type: 'f32' },
+          uDissolve: { value: 0, type: 'f32' },
           uZoneRect: { value: new Float32Array(MAX_ZONES * 4), type: 'vec4<f32>', size: MAX_ZONES },
           uZoneMat: { value: new Float32Array(MAX_ZONES * 4), type: 'vec4<f32>', size: MAX_ZONES },
           uZoneCount: { value: 0, type: 'i32' },
@@ -1027,8 +1450,12 @@ export class StructurePass {
           uScreenPx: { value: new Float32Array([1, 1]), type: 'vec2<f32>' },
           uVeil: { value: 0, type: 'f32' },
           uVeilRadius: { value: 110, type: 'f32' },
+          uTileOrigin: { value: new Float32Array([0, 0]), type: 'vec2<f32>' },
+          uTileInv: { value: new Float32Array([1, 1]), type: 'vec2<f32>' },
+          uTileMax: { value: new Float32Array([TILES - 1, TILES - 1]), type: 'vec2<f32>' },
         },
         uLight: Texture.EMPTY.source,
+        uTiles: this.tileSource,
       },
     });
   }
@@ -1085,6 +1512,14 @@ export class StructurePass {
     n.uMaxStretch = s.maxStretch;
     n.uVeil = s.veil;
     n.uVeilRadius = s.veilRadius;
+    // A wall reaches a tile through its largest block: half a cell of snap, the
+    // stretch, the jitter, the shadow offset. Sixty per cent of the big layer's
+    // size covers all of it with slack; the flat pad is the seal warp; the
+    // shred term is how far its flecks can drift past the silhouette — the
+    // cap has to stay accurate out to the farthest fleck or the outer fringe
+    // pops at tile seams.
+    this.margin = s.sizes[0] * 0.6 + 80 + s.shred * 130;
+    this.tileKey = '';
     n.uInsetPulse = s.insetPulse;
     n.uJitter = s.jitter;
     // `oil` and `fray` are deliberately NOT written here, and the omission is
@@ -1098,6 +1533,9 @@ export class StructurePass {
     n.uShadow = s.shadow;
     n.uBacking = s.backing;
     n.uShellReach = s.shellReach;
+    n.uDecay = s.decay;
+    n.uShred = s.shred;
+    n.uDissolve = s.dissolve;
   }
 
   /**
@@ -1134,7 +1572,10 @@ export class StructurePass {
    * gate is eighteen rects on its own: articulation costs slots, and a screen
    * that drops half a doorway is worse than one that pays for the loop.
    */
-  setWalls(walls: readonly ShellWall[]): void {
+  setWalls(
+    walls: readonly ShellWall[],
+    view: { x: number; y: number; width: number; height: number },
+  ): void {
     const u = this.u;
     const geo = u.uWalls as Float32Array;
     const state = u.uWallState as Float32Array;
@@ -1150,6 +1591,63 @@ export class StructurePass {
       state[i * 4 + 2] = w.glow;
     }
     (u as Record<string, number>).uWallCount = n;
+
+    // ---- the broadphase ---------------------------------------------------
+    //
+    // The grid is snapped to 64-unit steps so a drifting camera does not re-bin
+    // every frame: the origin only moves when the view crosses a step, and the
+    // extent carries one extra step so snapping never exposes an untiled strip.
+    // Openness and glow are deliberately not in the key — a gate animating is a
+    // state change on a wall the grid already lists.
+    const snap = 64;
+    const x0 = Math.floor((view.x - VIEW_PAD) / snap) * snap;
+    const y0 = Math.floor((view.y - VIEW_PAD) / snap) * snap;
+    const w = view.width + VIEW_PAD * 2 + snap;
+    const h = view.height + VIEW_PAD * 2 + snap;
+
+    let key = `${x0},${y0},${Math.ceil(w)}`;
+    for (let i = 0; i < n; i++) {
+      const wl = walls[i]!;
+      key += `|${wl.x},${wl.y},${wl.w},${wl.h},${wl.reach}`;
+    }
+    if (key === this.tileKey) return;
+    this.tileKey = key;
+
+    const tw = w / TILES;
+    const th = h / TILES;
+    const data = this.tileData;
+    const fill = this.tileFill;
+    data.fill(TILE_END);
+    fill.fill(0);
+    for (let i = 0; i < n; i++) {
+      const wl = walls[i]!;
+      const reach = this.margin + wl.reach;
+      const tx0 = Math.max(0, Math.floor((wl.x - reach - x0) / tw));
+      const ty0 = Math.max(0, Math.floor((wl.y - reach - y0) / th));
+      const tx1 = Math.min(TILES - 1, Math.floor((wl.x + wl.w + reach - x0) / tw));
+      const ty1 = Math.min(TILES - 1, Math.floor((wl.y + wl.h + reach - y0) / th));
+      for (let ty = ty0; ty <= ty1; ty++) {
+        for (let tx = tx0; tx <= tx1; tx++) {
+          const t = ty * TILES + tx;
+          const count = fill[t]!;
+          fill[t] = count + 1;
+          const base = (ty * TILES * 3 + tx * 3) * 4;
+          if (count >= TILE_CAP) {
+            data[base] = TILE_OVERFLOW;
+          } else {
+            data[base + count] = i;
+          }
+        }
+      }
+    }
+
+    const origin = u.uTileOrigin as Float32Array;
+    origin[0] = x0;
+    origin[1] = y0;
+    const inv = u.uTileInv as Float32Array;
+    inv[0] = 1 / tw;
+    inv[1] = 1 / th;
+    this.tileSource.update();
   }
 
   setWarp(sources: readonly ShellWarp[]): void {

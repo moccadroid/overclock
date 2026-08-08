@@ -1,15 +1,26 @@
 /**
- * The single bloom pass (§16.1).
+ * The emissive layer, and the mip chain its bloom is read from (§16.1).
  *
  * "Dark field, additive glow. Maximum chaos must resolve into *light*, not soup."
  * and "emissives bloom, structure doesn't" — so the scene is split in two. The
  * structure layer (grid, ruins, annotations) draws straight to the screen. The
- * emissive layer renders into a texture, which is then composited twice: once
- * flat, once blurred and additive.
+ * emissive layer renders into a texture, and everything that used to composite
+ * that texture — flat copy, hot copy, three blurred additive copies, two
+ * aberration fringes — now happens in the post pass, which reads the buffers
+ * this class maintains.
  *
- * The emissive layer is deliberately NOT a child of the stage. It is rendered
- * manually into the target each frame; adding it to the stage as well would draw
- * everything twice.
+ * The blurred copies were the expensive half. Three independent Gaussian
+ * `BlurFilter` chains re-blurred the full emissive texture at widening radii
+ * every frame — around eighteen full passes and seven full-screen composite
+ * quads before a single entity was drawn. A glow is low-frequency by
+ * definition, and the cheap way to make low frequencies is to *remove the high
+ * ones*: downsample. Each mip is a bilinear halving of the one before, so the
+ * chain costs a third of one half-resolution pass in total fill, and the wide
+ * mips come out smoother than a large Gaussian run at 0.4 resolution ever did.
+ *
+ * The emissive container is deliberately NOT a child of the stage. It is
+ * rendered manually into the target each frame; adding it to the stage as well
+ * would draw everything twice.
  */
 import {
   type Application,
@@ -18,49 +29,34 @@ import {
   RenderTexture,
   Sprite,
   type Texture,
-  type ColorSource,
 } from 'pixi.js';
-import { VISUAL } from '../visual';
+
+/** Mip levels: 1/2 down to 1/32 of the emissive buffer. */
+export const BLOOM_MIPS = 5;
 
 export class BloomPipeline {
   /** Put everything that should glow in here. */
   readonly emissive = new Container();
-  /** Composited output, in screen space. Add this to the stage. */
-  readonly output = new Container();
 
   private texture: RenderTexture;
-
+  private readonly mips: RenderTexture[] = [];
+  /** One sprite, re-pointed for every downsample. A pass is a draw, not a node. */
+  private readonly mipSprite = new Sprite();
   /**
-   * The raw emissive layer, before any blur. Everything that glows, once.
-   *
-   * Exposed so the shell's mass pass can be given a faint additive copy of it
-   * on top: standing under an overhang should occlude you, but vanishing
-   * completely while your own light carries on through is worse than either.
+   * A light blur at every halving. Plain bilinear downsampling leaves each mip
+   * with square box artefacts that read as smearing rather than glow; a small
+   * blur per level compounds down the chain into a properly smooth pyramid —
+   * the wide mips come out Gaussian-soft for the cost of two passes over
+   * textures that are already tiny.
    */
-  get source(): Texture {
-    return this.texture;
-  }
-  private readonly base = new Sprite();
-  /** An unblurred additive copy — see setGlow. */
-  private readonly hot = new Sprite();
+  private readonly mipBlur = new BlurFilter({ strength: 2, quality: 1 });
   /**
-   * Three additive glow copies at widening blur radii.
-   *
-   * One sprite could not get brighter than `alpha = 1`, so every bloom setting
-   * above 1x was silently doing nothing — the "more bloom" slider was a placebo.
-   * Stacking additive copies is how bloom actually escalates: the tight one
-   * gives edges their halo, and the wide ones are what turn a screen full of
-   * light into §16.1's "chaos resolving into light" rather than into soup.
+   * How many mips compose() refreshes — the bloom quality knob. Zero is bloom
+   * off: the emissive still renders (entities live in it), the glow just has
+   * no spread. The post pass masks the matching weights to zero, so a stale
+   * mip is never read.
    */
-  private readonly glow = new Sprite();
-  private readonly glowWide = new Sprite();
-  private readonly glowHuge = new Sprite();
-  private readonly blur = new BlurFilter();
-  private readonly blurWide = new BlurFilter();
-  private readonly blurHuge = new BlurFilter();
-  /** §16.7 step 2 — chromatic aberration, as two offset tinted copies. */
-  private readonly fringeR = new Sprite();
-  private readonly fringeB = new Sprite();
+  private active = BLOOM_MIPS;
 
   constructor(private readonly app: Application) {
     this.texture = RenderTexture.create({
@@ -68,56 +64,41 @@ export class BloomPipeline {
       height: Math.max(1, app.screen.height),
       resolution: 1,
     });
+    this.allocMips();
+    this.mipSprite.filters = [this.mipBlur];
+  }
 
-    for (const [filter, scale] of [
-      [this.blur, 1],
-      [this.blurWide, 3.2],
-      [this.blurHuge, 7],
-    ] as const) {
-      filter.strength = VISUAL.bloomStrength * scale;
-      filter.quality = 3;
-      filter.resolution = VISUAL.bloomResolution;
+  /**
+   * The raw emissive layer, before any spread. Everything that glows, once.
+   * The post pass composites it; the shell's ghost sprite additively revives
+   * whatever the mass occludes.
+   */
+  get source(): Texture {
+    return this.texture;
+  }
+
+  /** The mip chain, largest first. Length is always BLOOM_MIPS; see `active`. */
+  get mipTextures(): readonly Texture[] {
+    return this.mips;
+  }
+
+  get activeMips(): number {
+    return this.active;
+  }
+
+  /** Quality: how many mips are refreshed. Clamped to [0, BLOOM_MIPS]. */
+  setQuality(mips: number): void {
+    this.active = Math.max(0, Math.min(BLOOM_MIPS, Math.floor(mips)));
+  }
+
+  private allocMips(): void {
+    let w = Math.max(1, this.app.screen.width);
+    let h = Math.max(1, this.app.screen.height);
+    for (let i = 0; i < BLOOM_MIPS; i++) {
+      w = Math.max(1, Math.round(w / 2));
+      h = Math.max(1, Math.round(h / 2));
+      this.mips.push(RenderTexture.create({ width: w, height: h, resolution: 1 }));
     }
-
-    for (const sprite of [
-      this.base,
-      this.hot,
-      this.glow,
-      this.glowWide,
-      this.glowHuge,
-      this.fringeR,
-      this.fringeB,
-    ]) {
-      sprite.texture = this.texture;
-    }
-    this.hot.blendMode = 'add';
-    this.hot.alpha = 0;
-    this.glow.filters = [this.blur];
-    this.glowWide.filters = [this.blurWide];
-    this.glowHuge.filters = [this.blurHuge];
-    for (const sprite of [this.glow, this.glowWide, this.glowHuge]) {
-      sprite.blendMode = 'add';
-    }
-    this.glow.alpha = VISUAL.bloomIntensity;
-    this.glowWide.alpha = 0;
-    this.glowHuge.alpha = 0;
-
-    this.fringeR.blendMode = 'add';
-    this.fringeB.blendMode = 'add';
-    this.fringeR.tint = 0xff4040 as ColorSource;
-    this.fringeB.tint = 0x4080ff as ColorSource;
-    this.fringeR.alpha = 0;
-    this.fringeB.alpha = 0;
-
-    this.output.addChild(
-      this.base,
-      this.hot,
-      this.fringeR,
-      this.fringeB,
-      this.glow,
-      this.glowWide,
-      this.glowHuge,
-    );
   }
 
   resize(): void {
@@ -126,72 +107,26 @@ export class BloomPipeline {
     if (this.texture.width === width && this.texture.height === height) return;
     this.texture.destroy(true);
     this.texture = RenderTexture.create({ width, height, resolution: 1 });
-    for (const sprite of [
-      this.base,
-      this.hot,
-      this.glow,
-      this.glowWide,
-      this.glowHuge,
-      this.fringeR,
-      this.fringeB,
-    ]) {
-      sprite.texture = this.texture as Texture;
-    }
+    for (const mip of this.mips) mip.destroy(true);
+    this.mips.length = 0;
+    this.allocMips();
   }
 
-  /** Intensity of the aberration step, 0..1. Scaled by the photosensitivity setting. */
-  setAberration(amount: number): void {
-    const safe = amount * VISUAL.degradationIntensity;
-    const offset = safe * VISUAL.aberrationInstability2;
-    this.fringeR.alpha = safe * 0.5;
-    this.fringeB.alpha = safe * 0.5;
-    this.fringeR.position.set(-offset, 0);
-    this.fringeB.position.set(offset, 0);
-  }
-
-  /**
-   * Bloom past 1x spills into the wider copies rather than being thrown away.
-   * 1 is the tuned §16 baseline; 4 is a deliberate excess and looks like one.
-   */
-  /**
-   * How hot the emissive layer burns before any of it spreads.
-   *
-   * Applied as an extra additive copy of the *unblurred* scene rather than as
-   * alpha on the layer itself. Alpha can only ever make something dimmer — it
-   * was being used to make things brighter, which is why raising it faded the
-   * picture instead. Adding the scene to itself is what actually brightens it.
-   */
-  setGlow(amount: number): void {
-    this.base.alpha = 1;
-    this.hot.alpha = Math.max(0, amount - 1);
-  }
-
-  setBloom(intensity: number): void {
-    this.glow.alpha = Math.min(1.4, intensity);
-    this.glowWide.alpha = Math.max(0, Math.min(1.1, intensity - 1.2)) * 0.75;
-    this.glowHuge.alpha = Math.max(0, Math.min(1, intensity - 2.4)) * 0.6;
-  }
-
-  /**
-   * §16.7 step 4 — Overheat tears the frame. Approximated by displacing the
-   * composited scene horizontally; the real per-band tear wants a shader and can
-   * come with the Meltdown ladder.
-   */
-  setTear(amount: number): void {
-    const safe = amount * VISUAL.degradationIntensity;
-    const shift = safe * VISUAL.tearAmount;
-    this.base.position.x = shift;
-    for (const sprite of [this.glow, this.glowWide, this.glowHuge]) {
-      sprite.position.x = shift;
-    }
-  }
-
-  /** Render the emissive layer into the texture. Call once per frame. */
+  /** Render the emissive layer and refresh the mip chain. Call once per frame. */
   compose(): void {
     this.app.renderer.render({
       container: this.emissive,
       target: this.texture,
       clear: true,
     });
+    let src: Texture = this.texture;
+    for (let i = 0; i < this.active; i++) {
+      const target = this.mips[i]!;
+      this.mipSprite.texture = src;
+      this.mipSprite.width = target.width;
+      this.mipSprite.height = target.height;
+      this.app.renderer.render({ container: this.mipSprite, target, clear: true });
+      src = target;
+    }
   }
 }

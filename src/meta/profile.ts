@@ -93,8 +93,37 @@ export interface LibraryData {
      * from "never asked", so the sheet would either nag forever or never show.
      */
     calibrated: boolean;
+    /** Performance, not taste — see GraphicsSettings below. */
+    graphics: GraphicsSettings;
   };
 }
+
+/**
+ * §20.1b — the graphics quality settings. Performance, not taste: the `fx`
+ * list above is what the picture looks like, this is what it is allowed to
+ * cost. Semantics and the auto ladder live in `app/gfx/quality.ts`; the shape
+ * lives here because it is a preference, and preferences are the Library's.
+ */
+export interface GraphicsSettings {
+  /** 'auto' holds 60fps by walking a quality ladder; 'custom' obeys exactly. */
+  mode: 'auto' | 'custom';
+  /** MSAA on the canvas. A context attribute — applies when the arena next boots. */
+  msaa: boolean;
+  /** Canvas resolution cap on high-dpi displays: 1 or 2. */
+  renderScale: number;
+  /** Bloom mips refreshed per frame: 0 off, 3 tight glow only, 5 full. */
+  bloomMips: number;
+  /** Light sprites the field may submit per frame. */
+  lightBudget: number;
+}
+
+export const GRAPHICS_DEFAULTS: GraphicsSettings = {
+  mode: 'auto',
+  msaa: false,
+  renderScale: 2,
+  bloomMips: 5,
+  lightBudget: 512,
+};
 
 function emptyData(): LibraryData {
   return {
@@ -116,6 +145,7 @@ function emptyData(): LibraryData {
       scanlines: 0.3,
       gamma: 1,
       calibrated: false,
+      graphics: { ...GRAPHICS_DEFAULTS },
     },
   };
 }
@@ -163,6 +193,16 @@ export class Library {
           scanlines: number(parsed.settings?.scanlines) ?? base.settings.scanlines,
           gamma: number(parsed.settings?.gamma) ?? base.settings.gamma,
           calibrated: parsed.settings?.calibrated === true,
+          graphics: {
+            mode: parsed.settings?.graphics?.mode === 'custom' ? 'custom' : 'auto',
+            msaa: parsed.settings?.graphics?.msaa === true,
+            renderScale:
+              number(parsed.settings?.graphics?.renderScale) ?? base.settings.graphics.renderScale,
+            bloomMips:
+              number(parsed.settings?.graphics?.bloomMips) ?? base.settings.graphics.bloomMips,
+            lightBudget:
+              number(parsed.settings?.graphics?.lightBudget) ?? base.settings.graphics.lightBudget,
+          },
         },
       };
     } catch {
@@ -292,6 +332,15 @@ export class Library {
 
   setBeatSync(beatSync: boolean): void {
     this.data.settings = { ...this.data.settings, beatSync };
+    this.save();
+  }
+
+  /** §20.1b — the graphics quality knobs. See GraphicsSettings. */
+  setGraphics(g: Partial<GraphicsSettings>): void {
+    this.data.settings = {
+      ...this.data.settings,
+      graphics: { ...this.data.settings.graphics, ...g },
+    };
     this.save();
   }
 
