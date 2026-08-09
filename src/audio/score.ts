@@ -41,6 +41,9 @@ import type { ArrangeHue } from './arrange';
 import { validate, type CellLibrary, type Feel as CellFeel, type Mood, type Register, type Space } from './cells';
 import { current } from './scores/current';
 import { deep } from './scores/deep';
+import { industrial } from './scores/industrial';
+import { choir } from './scores/choir';
+import { vault } from './scores/vault';
 import type {
   BassVoice,
   KickVoice,
@@ -202,9 +205,90 @@ export interface FeelTuning {
   drive(size: number): number;
 }
 
+// -------------------------------------------------------------------- form
+
+/**
+ * Whether a layer plays in a section.
+ *
+ * `auto` is the entry rule this Score already has — the stab waits a quarter of
+ * the way in, the lead until halfway. `out` and `force` let a section overrule
+ * it, which is what a section *is*: a break is not "the quiet part of the
+ * curve", it is a decision that the hats are gone.
+ */
+export type LayerGate = 'auto' | 'out' | 'force';
+
+/**
+ * One section of the song.
+ *
+ * The form is the one thing here that is not derived from the player's Engine,
+ * and that is deliberate. §18.1 says the soundtrack *is* the engine, and it still
+ * is — every cell in every section is chosen by your build. What the form adds is
+ * *when*, which is the part a build cannot express: a build has no opinion about
+ * whether bar 48 should be a chorus.
+ */
+export interface Section {
+  id: string;
+  bars: number;
+
+  backbeat: LayerGate;
+  hats: LayerGate;
+  bass: LayerGate;
+  stab: LayerGate;
+  lead: LayerGate;
+  chord: LayerGate;
+  /** The Engine's own lines. Dropping these is what makes a break feel empty. */
+  parts: LayerGate;
+
+  /** Filter openness across the section, start to end. Replaces the phrase ramp. */
+  open: readonly [number, number];
+
+  /**
+   * Lay a hat on every Nth sixteenth, on top of whatever the cell plays.
+   * Undefined leaves the cell alone; 2 is eighths, 1 is sixteenths.
+   *
+   * This is how a section gets *denser* rather than merely louder, and it is a
+   * subdivision rather than a cell swap on purpose: asking for a busier cell
+   * would mean re-running `arrange()` at every section boundary, which fights
+   * the handover and would re-cut the track several times a form.
+   *
+   * It replaced a `drive` multiplier that turned out to do nothing. `drive`
+   * scaled the number the *auto* gate compares against — so in every section
+   * that actually wanted more hats, and therefore said `hats: 'force'`, it was
+   * multiplying a value nothing then read. The drop was declared at 2.2 and came
+   * out sparser than the build.
+   */
+  hatEvery?: number;
+
+  /**
+   * Play the *remembered* cells instead of the varying ones.
+   *
+   * This is the whole mechanism behind a chorus, and it is the exact opposite of
+   * what the arranger does everywhere else. `pick()` takes an `avoid` argument
+   * and every variation is told to move *off* what is currently playing — which
+   * is the right fix for a track that stopped developing, and precisely why
+   * nothing was ever memorable. A hook is a thing that comes back.
+   */
+  hook: boolean;
+
+  /** Where in the section the lead stops, overriding `phrase.restFrom`. */
+  restFrom?: number;
+}
+
 // --------------------------------------------------------------------- mix
 
 export interface MixTuning {
+  /**
+   * The song, as a list of sections, cycled.
+   *
+   * A single 16-bar section is the behaviour this replaced: one phrase, repeating
+   * forever, with cells reselected on a timer. That is still a legal form and it
+   * is what `current` declares.
+   */
+  form: readonly Section[];
+
+  /** The ask a remembered hook is selected at. Fixed, so the hook never drifts. */
+  hookIntensity: number;
+
   /** §18 — techno moves in 16-bar phrases. Everything automated rides this. */
   phraseBars: number;
   /** Bars before the melodic material is reselected. */
@@ -242,8 +326,6 @@ export interface MixTuning {
     floor: number;
     span: number;
     q: number;
-    opennessBase: number;
-    opennessSpan: number;
     /**
      * How much of the span is free, and how much intensity has to earn.
      *
@@ -514,10 +596,17 @@ export interface VoiceTuning {
  * knob on it.
  */
 export interface KickTuning {
+  /**
+   * Partial: a Score is only obliged to tune the kicks it actually selects, and
+   * some variants (the industrial `crush`) carry their own design in `voices.ts`
+   * the way the event voices always have.
+   */
   spec: Readonly<
-    Record<
-      KickVoice,
-      { from: number; to: number; drop: number; decay: number; click: number; clickHz: number }
+    Partial<
+      Record<
+        KickVoice,
+        { from: number; to: number; drop: number; decay: number; click: number; clickHz: number }
+      >
     >
   >;
   gain: number;
@@ -679,7 +768,7 @@ export interface Score {
 
 // ---------------------------------------------------------------- registry
 
-export const SCORES: Readonly<Record<string, Score>> = { current, deep };
+export const SCORES: Readonly<Record<string, Score>> = { current, deep, industrial, choir, vault };
 
 export const DEFAULT_SCORE = 'current';
 

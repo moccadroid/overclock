@@ -69,10 +69,13 @@ const CASES: readonly (readonly [string, (v: VoiceCtx) => void])[] = [
   ['kick.punch', (v) => kick(v, AT, 0.95, 'punch')],
   ['kick.tight', (v) => kick(v, AT, 0.95, 'tight')],
   ['kick.deep', (v) => kick(v, AT, 0.95, 'deep')],
+  ['kick.crush', (v) => kick(v, AT, 0.95, 'crush')],
+  ['kick.slam', (v) => kick(v, AT, 0.95, 'slam')],
 
   ['perc.clap', (v) => perc(v, AT, 0.8, 'clap')],
   ['perc.snare', (v) => perc(v, AT, 0.8, 'snare')],
   ['perc.rim', (v) => perc(v, AT, 0.8, 'rim')],
+  ['perc.anvil', (v) => perc(v, AT, 0.8, 'anvil')],
 
   ['hat.closed', (v) => hat(v, AT, 0.8, false)],
   ['hat.open', (v) => hat(v, AT, 0.8, true)],
@@ -91,14 +94,21 @@ const CASES: readonly (readonly [string, (v: VoiceCtx) => void])[] = [
     (v) => bass(v, AT, 55, 0.85, { voice: 'acid', q: 14, brightness: 1, glideFrom: 41 }),
   ],
 
+  ['bass.drone', (v) => bass(v, AT, 55, 0.85, { voice: 'drone', q: 7, brightness: 1 })],
+  ['bass.string', (v) => bass(v, AT, 55, 0.85, { voice: 'string', q: 7, brightness: 1 })],
+  ['bass.boom', (v) => bass(v, AT, 55, 0.85, { voice: 'boom', q: 7, brightness: 1 })],
+
   ['stab.organ', (v) => stab(v, AT, TONES, 0.9, 'organ')],
   ['stab.saw', (v) => stab(v, AT, TONES, 0.9, 'saw')],
   ['stab.dub', (v) => stab(v, AT, TONES, 0.9, 'dub')],
+  ['stab.hit', (v) => stab(v, AT, TONES, 0.9, 'hit')],
+  ['stab.choir', (v) => stab(v, AT, TONES, 0.9, 'choir')],
 
   ['motif.pluck', (v) => motif(v, AT, 440, 0.9, 'pluck')],
   ['motif.acid', (v) => motif(v, AT, 440, 0.9, 'acid')],
   ['motif.acid.glide', (v) => motif(v, AT, 440, 0.9, 'acid', 330)],
   ['motif.bell', (v) => motif(v, AT, 440, 0.9, 'bell')],
+  ['motif.voice', (v) => motif(v, AT, 440, 0.9, 'voice')],
 
   ['gatedChord', (v) => gatedChord(v, AT, TONES, 0.85, 0.24, 'sawtooth')],
   ['gatedChord.square', (v) => gatedChord(v, AT, TONES, 0.85, 0.24, 'square')],

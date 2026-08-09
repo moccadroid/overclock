@@ -518,6 +518,90 @@ describe('the schedule (goldens — a diff is a sound change)', () => {
     expect(dark.rec.voices.some((e) => e.bus === 'echoSend')).toBe(true);
   });
 
+  /**
+   * The chorus is the same chorus.
+   *
+   * Everything else in the arranger is built to *move* — `pick()` takes an
+   * `avoid` argument precisely so a variation pass cannot reselect what is
+   * already playing. That is why nothing was ever memorable, and a hook that
+   * quietly drifted back into varying would be the whole feature failing
+   * silently: it would still sound fine, and it would still not be a song.
+   */
+  it('deep plays the same hook every chorus', () => {
+    // A full form and a bit, defined here rather than added to SCRIPTS: it is
+    // 192 bars, and a golden that long would be noise nobody reads. The goldens
+    // exist to catch drift in `current`; this test asks a structural question.
+    const base = SCRIPTS.find((s) => s.name === 'run')!;
+    const rec = drive({ ...base, name: 'long', bars: 200 }, deep).rec;
+
+    // Which bar a scheduled time falls in, from the grid the clock emitted.
+    const marks = rec.steps;
+    const barOf = (at: number): number => {
+      let lo = 0;
+      let hi = marks.length - 1;
+      let best = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (marks[mid]!.time <= at + 1e-9) {
+          best = mid;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      return best < 0 ? -1 : Math.floor(marks[best]!.count / 16);
+    };
+
+    const form = deep.mix.form;
+    const total = form.reduce((n, s) => n + s.bars, 0);
+    const spanOf = (id: string): [number, number] => {
+      let acc = 0;
+      for (const s of form) {
+        if (s.id === id) return [acc, acc + s.bars];
+        acc += s.bars;
+      }
+      throw new Error(`no section ${id}`);
+    };
+
+    const pitchesIn = (id: string): string => {
+      const [from, to] = spanOf(id);
+      const hz = rec.voices
+        .filter((e) => e.name === 'motif')
+        .filter((e) => {
+          const bar = barOf(e.at);
+          return bar % total >= from && bar % total < to;
+        })
+        .map((e) => (e.args[2] as number).toFixed(2));
+      return [...new Set(hz)].sort().join(' ');
+    };
+
+    const first = pitchesIn('chorus');
+    const second = pitchesIn('chorus-2');
+    expect(first.length).toBeGreaterThan(0);
+    expect(second).toBe(first);
+
+    // And the verses are *not* the hook, or the feature is a no-op.
+    expect(pitchesIn('verse')).not.toBe(first);
+
+    // The sections that declared themselves empty are empty.
+    const namesIn = (id: string): string[] => {
+      const [from, to] = spanOf(id);
+      return [
+        ...new Set(
+          rec.voices
+            .filter((e) => {
+              const bar = barOf(e.at);
+              return bar % total >= from && bar % total < to;
+            })
+            .map((e) => e.name),
+        ),
+      ].sort();
+    };
+    expect(namesIn('break')).toEqual(['gatedChord', 'kick', 'sub']);
+    // A drop is rhythm and weight; a melody over it is a distraction.
+    expect(namesIn('drop')).not.toContain('motif');
+  });
+
   it('routes everything through the limiter', () => {
     const nodes = recordings.get('menu')!.rec.nodes;
     const limiter = nodes.find((n) => n.name === 'limiter');

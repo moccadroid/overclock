@@ -151,6 +151,31 @@ export const current: Score = {
   },
 
   mix: {
+    /**
+     * One section, sixteen bars, repeating. The behaviour the form system
+     * replaced, declared as a form so nothing about this Score moved.
+     *
+     * `open` is `[0.25, 1]` because the expression it stands in for was
+     * `0.25 + phrase * 0.75`, and every layer is `auto` because the entry
+     * thresholds below are what decided them.
+     */
+    form: [
+      {
+        id: 'phrase',
+        bars: 16,
+        backbeat: 'auto',
+        hats: 'auto',
+        bass: 'auto',
+        stab: 'auto',
+        lead: 'auto',
+        chord: 'auto',
+        parts: 'auto',
+        open: [0.25, 1],
+        hook: false,
+      },
+    ],
+    hookIntensity: 0.85,
+
     phraseBars: 16,
     // Two phrases at 112 BPM is a little over a minute — long enough that the
     // line is a hook rather than a tour of the library, short enough that nobody
@@ -171,8 +196,6 @@ export const current: Score = {
       floor: 420,
       span: 5200,
       q: 1.1,
-      opennessBase: 0.25,
-      opennessSpan: 0.75,
       intensityFloor: 0.5,
       intensitySpan: 0.5,
       glide: 0.08,

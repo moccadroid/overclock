@@ -189,6 +189,149 @@ export const deep: Score = {
   mix: {
     ...current.mix,
 
+    /**
+     * The song.
+     *
+     * 192 bars — about seven and a half minutes at 106 — after which it comes
+     * round. It is *meant* to come round: a form you can learn is the whole
+     * difference between a song and a generator, and the variety belongs inside
+     * the verses rather than in the order of the sections.
+     *
+     * The shape is the oldest one there is. State it, take it away, give it back
+     * bigger:
+     *
+     *   INTRO   kick, sub, bass and a held chord. Enough to establish the key
+     *           and nothing to hold on to yet — no backbeat, no hats, no tune.
+     *   VERSE   the engine arrives. Cells vary every 32 bars, so no two verses
+     *           are the same.
+     *   BUILD   filter climbs, hats double, the lead vanishes. Tension is the
+     *           absence of the thing you want.
+     *   CHORUS  the hook — the same cells every time it comes back. This is the
+     *           only section in the game that repeats on purpose.
+     *   BREAK   everything but the kick and the reverb tail. The room, empty.
+     *   DROP    the hardest the track gets: hats forced, filter wide, lead out,
+     *           stab hammering. Techno's actual payoff.
+     *
+     * The lead resting at the end of a section is what makes the next downbeat
+     * land, so most sections keep it; the chorus does not, because a hook that
+     * ducks out for its last eight bars is not a hook.
+     */
+    form: [
+      {
+        id: 'intro',
+        bars: 16,
+        backbeat: 'out',
+        hats: 'out',
+        bass: 'auto',
+        stab: 'out',
+        lead: 'out',
+        chord: 'force',
+        parts: 'out',
+        open: [0.16, 0.4],
+        hook: false,
+      },
+      {
+        id: 'verse',
+        bars: 32,
+        backbeat: 'auto',
+        hats: 'auto',
+        bass: 'auto',
+        stab: 'auto',
+        lead: 'auto',
+        chord: 'auto',
+        parts: 'auto',
+        open: [0.3, 0.62],
+        hook: false,
+      },
+      {
+        id: 'build',
+        bars: 16,
+        backbeat: 'auto',
+        hats: 'force',
+        bass: 'auto',
+        stab: 'force',
+        // The lead is the thing being withheld. Everything else climbs.
+        lead: 'out',
+        chord: 'auto',
+        parts: 'auto',
+        open: [0.45, 1],
+        hatEvery: 2,
+        hook: false,
+      },
+      {
+        id: 'chorus',
+        bars: 32,
+        backbeat: 'auto',
+        hats: 'force',
+        bass: 'force',
+        stab: 'force',
+        lead: 'force',
+        chord: 'force',
+        parts: 'auto',
+        open: [0.72, 0.9],
+        hook: true,
+        // It plays all the way to the end. This is the part you are meant to
+        // remember.
+        restFrom: 1,
+      },
+      {
+        id: 'verse-2',
+        bars: 32,
+        backbeat: 'auto',
+        hats: 'auto',
+        bass: 'auto',
+        stab: 'auto',
+        lead: 'auto',
+        chord: 'auto',
+        parts: 'auto',
+        open: [0.34, 0.66],
+        hook: false,
+      },
+      {
+        id: 'break',
+        bars: 16,
+        backbeat: 'out',
+        hats: 'out',
+        bass: 'out',
+        stab: 'out',
+        lead: 'out',
+        chord: 'force',
+        parts: 'out',
+        // Closing rather than opening — the one section that goes backwards.
+        open: [0.5, 0.14],
+        hook: false,
+      },
+      {
+        id: 'drop',
+        bars: 16,
+        backbeat: 'force',
+        hats: 'force',
+        bass: 'force',
+        stab: 'force',
+        // No tune. A drop is rhythm and weight; a melody over it is a distraction.
+        lead: 'out',
+        chord: 'out',
+        parts: 'force',
+        open: [1, 0.85],
+        hatEvery: 1,
+        hook: false,
+      },
+      {
+        id: 'chorus-2',
+        bars: 32,
+        backbeat: 'auto',
+        hats: 'force',
+        bass: 'force',
+        stab: 'force',
+        lead: 'force',
+        chord: 'force',
+        parts: 'auto',
+        open: [0.78, 0.94],
+        hook: true,
+        restFrom: 1,
+      },
+    ],
+
     // Slower. Not much — six BPM — but tempo is felt as weight before it is heard
     // as speed, and 106 sits under the pulse rather than pushing it.
     tempo: { base: 106, meltdown: 12 },

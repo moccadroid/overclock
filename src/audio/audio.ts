@@ -61,7 +61,14 @@ import {
 } from './cells';
 import { arrange, openingArrangement, type ArrangeInput, type Arrangement } from './arrange';
 import type { Part } from './parts';
-import { DEFAULT_SCORE, SCORES, resolveScore, type Score } from './score';
+import {
+  DEFAULT_SCORE,
+  SCORES,
+  resolveScore,
+  type LayerGate,
+  type Score,
+  type Section,
+} from './score';
 
 // The constants that used to live here — the chord table, the polyphony cap, the
 // hue colours, the phrase and variation lengths, and the siege's line — are now
@@ -348,6 +355,13 @@ export class Audio {
   /** The last Engine handed over, so the variation timer can re-arrange it. */
   private lastInput: ArrangeInput | null = null;
   private cells = compile(openingArrangement('ignition', SCORES[DEFAULT_SCORE]!));
+  /**
+   * The chorus's cells. Same shape as `cells`, but chosen once and kept.
+   *
+   * Equal to `cells` for a Score whose form has no hook section, so nothing pays
+   * for a feature it does not use.
+   */
+  private hook = compile(openingArrangement('ignition', SCORES[DEFAULT_SCORE]!));
   /** Bars elapsed, for walking the progression. */
   private bar = 0;
   private silenced = false;
@@ -842,7 +856,37 @@ export class Audio {
   private adopt(plan: Arrangement): void {
     this.plan = plan;
     this.cells = compile(plan);
+    this.hook = this.hookFor(plan);
     this.pendingPlan = null;
+  }
+
+  /**
+   * The hook: the cells a chorus comes back to.
+   *
+   * Selected from the *same Engine* as everything else — so it is still your
+   * build's melody, not an authored one — but at a fixed ask and with the
+   * variation counter pinned to zero. That is what makes it stable: the varying
+   * selection moves every 32 bars by design, and something that moves cannot be
+   * a hook.
+   *
+   * Recomputed only when the arrangement is adopted, which means it changes when
+   * your Engine does. That is correct and it is the good version of the feature:
+   * take a Draft that rewrites your build and the chorus you have been hearing
+   * all run is replaced by the one your new build implies.
+   */
+  private hookFor(plan: Arrangement): CompiledCells {
+    if (!this.lastInput || !this.score.mix.form.some((s) => s.hook)) return compile(plan);
+    return compile(
+      arrange(
+        {
+          ...this.lastInput,
+          variation: 0,
+          intensity: this.score.mix.hookIntensity,
+          meltdown: this.state.meltdown,
+        },
+        this.score,
+      ),
+    );
   }
 
   /**
@@ -918,10 +962,27 @@ export class Audio {
     return shape.map((t) => base + t);
   }
 
-  /** 0..1 across a phrase. The genre's actual sense of going somewhere. */
-  private get phrase(): number {
-    const bars = this.score.mix.phraseBars;
-    return (this.bar % bars) / bars;
+  /**
+   * Where the song is: which section, and how far through it.
+   *
+   * The form is cycled, so a run never runs out of song — but it is a *form*
+   * rather than a shuffle, which is the point. You are meant to learn it. A
+   * single-section form (which is what `current` declares) reduces to exactly the
+   * repeating 16-bar phrase this replaced, and `at` is then identical to
+   * `phrase`.
+   */
+  private get section(): { section: Section; at: number; bar: number } {
+    const form = this.score.mix.form;
+    const total = form.reduce((n, s) => n + s.bars, 0);
+    let left = ((this.bar % total) + total) % total;
+    for (const section of form) {
+      if (left < section.bars) {
+        return { section, at: left / section.bars, bar: left };
+      }
+      left -= section.bars;
+    }
+    const last = form[form.length - 1]!;
+    return { section: last, at: 0, bar: 0 };
   }
 
   /** Called each frame with the run's mood and the cues it produced. */
@@ -1143,8 +1204,10 @@ export class Audio {
 
     if (index === 0) {
       this.bar = Math.floor(count / 16);
-      // A new arrangement lands on a phrase boundary and nowhere else.
-      if (this.pendingPlan && (this.pendingUrgent || this.bar % M.phraseBars === 0)) {
+      // A new arrangement lands where the ear expects a change: the top of a
+      // section. For a single-section form that is the 16-bar phrase boundary
+      // this rule has always used.
+      if (this.pendingPlan && (this.pendingUrgent || this.section.bar === 0)) {
         this.pendingUrgent = false;
         this.adopt(this.pendingPlan);
       }
@@ -1153,11 +1216,15 @@ export class Audio {
     const tones = this.chordTones();
     this.tones = tones;
 
-    // §18 — the phrase. Techno does not build with chords, it builds by opening
-    // a filter and adding layers over sixteen bars, then dropping them and doing
-    // it again. This is the number that makes a loop feel like an arrangement.
-    const phrase = this.phrase;
-    const openness = M.filter.opennessBase + phrase * M.filter.opennessSpan;
+    // §18 — the section. Techno does not build with chords, it builds by opening
+    // a filter and adding layers, then dropping them and doing it again. This is
+    // what makes a loop feel like an arrangement.
+    const { section, at: phrase, bar: barInSection } = this.section;
+    // A layer plays if the section says so, or if the section defers and the
+    // Score's own entry rule says so.
+    const gate = (g: LayerGate, auto: boolean): boolean =>
+      g === 'force' ? true : g === 'out' ? false : auto;
+    const openness = section.open[0] + phrase * (section.open[1] - section.open[0]);
     const colour = M.hueColour[this.state.dominant];
     this.musicFilter.frequency.setTargetAtTime(
       M.filter.floor +
@@ -1190,7 +1257,9 @@ export class Audio {
     // drops for the last bar of a phrase, which is what makes the next downbeat
     // land.
     const percStep = step(cells.backbeat, count);
-    if (percStep && this.bar % M.phraseBars !== M.phraseBars - 1) {
+    // Drops for the last bar of the section, which is what makes the next
+    // downbeat land.
+    if (percStep && gate(section.backbeat, barInSection !== section.bars - 1)) {
       // Scaled by intensity, unlike before. The backbeat was the one loud voice
       // that ignored how much was happening, so the menu — an arrangement at
       // near-zero intensity with almost nothing else playing — got the same clap
@@ -1216,14 +1285,21 @@ export class Audio {
 
     const hatStep = step(cells.hats, count);
     const drive = i * plan.drive;
-    if (hatStep && drive > M.entry.hatDrive && (!bleak || index % 8 === 4)) {
-      hat(music, swung, (bleak ? M.gains.hatBleak : M.gains.hat) * hatStep.gain, hatStep.open);
+    // A section may lay its own subdivision under the cell — the difference
+    // between a section that is louder and one that is genuinely driving.
+    const forced =
+      section.hatEvery !== undefined && index % section.hatEvery === 0
+        ? ({ gain: 0.75, open: false } as const)
+        : null;
+    const hatNow = hatStep ?? forced;
+    if (hatNow && gate(section.hats, drive > M.entry.hatDrive) && (!bleak || index % 8 === 4)) {
+      hat(music, swung, (bleak ? M.gains.hatBleak : M.gains.hat) * hatNow.gain, hatNow.open);
     }
 
     // The bassline walks the chord: cell values index into its tones, so the
     // bass is always playing the harmony rather than a line beside it.
     const bassStep = step(cells.bass, count);
-    if (bassStep && !bassStep.hold && i > M.entry.bass && !claimed) {
+    if (bassStep && !bassStep.hold && gate(section.bass, i > M.entry.bass) && !claimed) {
       const hz = semiHz(tone(tones, bassStep) + M.register.bass);
       bass(music, swung, hz, M.gains.bass, {
         voice: plan.bassVoice,
@@ -1243,8 +1319,15 @@ export class Audio {
 
     // The stab. Enters a quarter of the way into a phrase and is most of what
     // reads as melody in this genre.
-    const stabStep = step(cells.stab, count);
-    if (stabStep && !bleak && (phrase > M.entry.stabPhrase || i > M.entry.stabIntensity)) {
+    // The remembered cells, in a section that asks for them. This is the chorus.
+    const voiceCells = section.hook ? this.hook : cells;
+
+    const stabStep = step(voiceCells.stab, count);
+    if (
+      stabStep &&
+      !bleak &&
+      gate(section.stab, phrase > M.entry.stabPhrase || i > M.entry.stabIntensity)
+    ) {
       stab(music, swung, tones, M.gains.stab * stabStep.gain, plan.stabVoice);
       if (plan.echo > 0.01) {
         stab(this.voice(this.echoSend), swung, tones, M.gains.stab * stabStep.gain, plan.stabVoice);
@@ -1259,13 +1342,14 @@ export class Audio {
     // lead entirely. Same line, three shapes: statement, answer, silence. That
     // is the smallest amount of arrangement that stops a hook from wearing out,
     // and it costs nothing but a transposition.
-    const answering = phrase >= M.phrase.answerFrom && phrase < M.phrase.restFrom;
-    const resting = phrase >= M.phrase.restFrom;
-    const motifStep = resting || bleak ? null : step(cells.motif, count);
+    const restFrom = section.restFrom ?? M.phrase.restFrom;
+    const answering = phrase >= M.phrase.answerFrom && phrase < restFrom;
+    const resting = phrase >= restFrom;
+    const motifStep = resting || bleak ? null : step(voiceCells.motif, count);
     if (
       motifStep &&
       !motifStep.hold &&
-      (phrase > M.entry.motifPhrase || i > M.entry.motifIntensity)
+      gate(section.lead, phrase > M.entry.motifPhrase || i > M.entry.motifIntensity)
     ) {
       const hz = semiHz(
         tone(tones, motifStep) + (answering ? M.register.motifAnswer : M.register.motif),
@@ -1293,14 +1377,14 @@ export class Audio {
           gatedChord(v, swung, tones, M.gains.chordBleak, beat * M.length.chordBleak, plan.padWave),
         );
       }
-    } else if (i > M.entry.chordIntensity && index % 8 === 4) {
+    } else if (gate(section.chord, i > M.entry.chordIntensity) && index % 8 === 4) {
       gatedChord(music, swung, tones, M.gains.chord, beat * M.length.chord, plan.padWave);
       this.send(reverb, (v) =>
         gatedChord(v, swung, tones, M.gains.chord, beat * M.length.chord, plan.padWave),
       );
     }
 
-    this.playParts(music, swung, index, tones);
+    if (gate(section.parts, true)) this.playParts(music, swung, index, tones);
     this.siegeStep(at, index, beat);
     this.flush(at, i);
   }

@@ -164,21 +164,101 @@ export function playHue(v: VoiceCtx, hue: Hue, at: number, hz: number, gain: num
   HUE_VOICE[hue](v, at, hz, gain);
 }
 
-export type PercVoice = 'clap' | 'snare' | 'rim';
+export type PercVoice = 'clap' | 'snare' | 'rim' | 'anvil';
 
 /**
- * The backbeat, on 2 and 4. Three instruments, because this is the loudest
- * recurring sound after the kick and reusing one clap across every track is
- * most of why they sounded alike.
+ * The backbeat. Four instruments, because this is the loudest recurring sound
+ * after the kick and reusing one clap across every track is most of why they
+ * sounded alike.
  *
  *   clap   many hands not quite together — three bursts a few ms apart.
  *   snare  noise over a tuned body. Harder, more forward, rock-adjacent.
  *   rim    a short woody tick. Almost nothing, which is the dub move.
+ *   anvil  struck metal. Inharmonic and long — see below.
  */
 export function perc(v: VoiceCtx, at: number, gain: number, voice: PercVoice = 'clap'): void {
   if (voice === 'snare') return snare(v, at, gain);
   if (voice === 'rim') return rim(v, at, gain);
+  if (voice === 'anvil') return anvil(v, at, gain);
   return clap(v, at, gain);
+}
+
+/**
+ * Struck metal, and the single voice that decides whether a score sounds
+ * industrial.
+ *
+ * A clap and a snare are *noise* shaped by a filter, which is why every kit
+ * built from them lands somewhere between house and rock however it is tuned.
+ * Metal is not noise: it is a small number of loud, **inharmonic** partials that
+ * ring at different rates, and the inharmonicity is the whole thing. The ratios
+ * below are deliberately not integers — an integer stack is a musical note, and
+ * a musical note is exactly what an anvil is not.
+ *
+ * Long, too. It rings for the best part of a second and gets *out of the way* of
+ * nothing, which is the point: this is a sound that damages the room rather than
+ * marking a beat inside it.
+ *
+ * The grit is ring modulation, not distortion, and that is not a stylistic
+ * choice — §18.4 bans anything that can raise RMS. A ring modulator multiplies,
+ * so it can only ever move energy around; it cannot turn the game up.
+ */
+function anvil(v: VoiceCtx, at: number, gain: number): void {
+  const { ctx } = v;
+
+  const bus = ctx.createGain();
+  bus.gain.value = gain * 0.13;
+
+  // A ceiling, because inharmonic partials throw energy high and the top of
+  // this would otherwise be the harshest thing in the game.
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 5200;
+  lp.Q.value = 0.6;
+  bus.connect(lp).connect(v.out);
+
+  // Ring modulation at a low, slightly detuned rate — the sidebands land
+  // between the partials and read as the metal being *struck badly*.
+  const ring = ctx.createGain();
+  ring.gain.value = 0;
+  const mod = osc(ctx, 'sine', 63, at, at + 1.2);
+  const depth = ctx.createGain();
+  depth.gain.value = 1;
+  mod.connect(depth).connect(ring.gain);
+  ring.connect(bus);
+
+  // Five partials at non-integer ratios, each ringing at its own rate: the high
+  // ones die first, which is what makes a struck object sound struck.
+  for (const [ratio, level, decay] of [
+    [1, 1, 0.9],
+    [2.37, 0.62, 0.62],
+    [3.41, 0.44, 0.4],
+    [4.83, 0.3, 0.26],
+    [6.19, 0.2, 0.17],
+  ] as const) {
+    const g = env(ctx, at, 0.001, decay, level * 0.5);
+    const o = osc(ctx, 'sine', 210 * ratio, at, at + decay + 0.1);
+    o.connect(g).connect(ring);
+  }
+
+  // The strike itself: a very short noise transient, band-limited so it reads as
+  // impact rather than as a click.
+  const frames = Math.ceil(ctx.sampleRate * 0.05);
+  const buf = ctx.createBuffer(1, frames, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < frames; i++) {
+    data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / frames, 4);
+  }
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = 2600;
+  bp.Q.value = 1.1;
+  const hitGain = ctx.createGain();
+  hitGain.gain.value = gain * 0.3;
+  src.connect(bp).connect(hitGain).connect(lp);
+  src.start(at);
+  src.stop(at + 0.07);
 }
 
 function snare(v: VoiceCtx, at: number, gain: number): void {
@@ -289,7 +369,112 @@ function clap(v: VoiceCtx, at: number, gain: number): void {
   }
 }
 
-export type StabVoice = 'organ' | 'saw' | 'dub';
+/**
+ * Vowels. The second synthesis method the game did not have.
+ *
+ * A lowpass filter says "how bright"; it cannot say "what". A bank of narrow
+ * resonators at fixed absolute frequencies says *what* — because that is
+ * physically what a throat is, and the ear has a dedicated, unmissable response
+ * to it. Three bandpasses at the right frequencies and a sawtooth stops sounding
+ * like a synthesiser and starts sounding like somebody.
+ *
+ * Crucially the formants do **not** track the pitch. That is the whole trick and
+ * the thing that separates this from every other voice here: sing higher and your
+ * mouth stays the same shape, so the resonances stay put while the source moves
+ * under them. Track them with the note and it collapses back into a filter sweep.
+ *
+ * The vowel morphs across the note, which is what makes it read as a word rather
+ * than a chord — and unsettling rather than pretty, which is the point.
+ */
+const VOWELS = {
+  // f1, f2, f3 — the standard measured formants, near enough.
+  ah: [800, 1150, 2900],
+  oh: [450, 800, 2830],
+  oo: [325, 700, 2530],
+  ee: [270, 2290, 3010],
+} as const;
+
+function formantVoice(
+  v: VoiceCtx,
+  at: number,
+  hz: number,
+  gain: number,
+  seconds: number,
+  from: keyof typeof VOWELS,
+  to: keyof typeof VOWELS,
+): void {
+  const { ctx } = v;
+  const a = VOWELS[from];
+  const b = VOWELS[to];
+
+  /**
+   * A fast onset, and this is the fix for "half the song is playing in reverse".
+   *
+   * The first version faded in over 18% of the note — 288ms on the chord voice.
+   * A slow fade-in *is* what a reversed sound is; the ear identifies a sound by
+   * its attack, and if the attack is a swell then every note arrives backwards.
+   * Stacked on an offbeat stab pattern with a five-second reverb behind it, the
+   * whole mix became a wash with no front edge.
+   *
+   * This is also a mistake this codebase had already made and already fixed —
+   * `gatedChord` exists because the old pad "swelled with no relationship to the
+   * grid, which is exactly what 'ethereal, no connection' describes". A voice
+   * needs a consonant, not a crescendo.
+   */
+  const g = env(ctx, at, 0.012, seconds, gain);
+  g.connect(v.out);
+
+  // The consonant: a very short noise transient through the same formants, so
+  // the note has a front edge without stopping sounding like a throat.
+  const conFrames = Math.ceil(ctx.sampleRate * 0.035);
+  const conBuf = ctx.createBuffer(1, conFrames, ctx.sampleRate);
+  const conData = conBuf.getChannelData(0);
+  for (let i = 0; i < conFrames; i++) {
+    conData[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / conFrames, 3);
+  }
+  const con = ctx.createBufferSource();
+  con.buffer = conBuf;
+  const conGain = ctx.createGain();
+  conGain.gain.value = 0.5;
+  con.start(at);
+  con.stop(at + 0.05);
+
+  // The source: two saws a few cents apart. The beating between them is what
+  // makes one voice sound like several, which is what makes it a choir.
+  const bus = ctx.createGain();
+  bus.gain.value = 0.5;
+  for (const cents of [-8, 8]) {
+    const o = osc(ctx, 'sawtooth', hz * Math.pow(2, cents / 1200), at, at + seconds + 0.15);
+    o.connect(bus);
+  }
+  // A slow, shallow wobble. Nothing human holds a pitch perfectly still, and the
+  // absence of that is most of what makes a synth pad sound synthetic.
+  const lfo = osc(ctx, 'sine', 4.6, at, at + seconds + 0.15);
+  const lfoDepth = ctx.createGain();
+  lfoDepth.gain.value = hz * 0.006;
+  lfo.connect(lfoDepth);
+
+  for (let i = 0; i < 3; i++) {
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(a[i]!, at);
+    bp.frequency.linearRampToValueAtTime(b[i]!, at + seconds * 0.7);
+    // Narrow, and narrower for the lower formants, which is what makes the vowel
+    // legible rather than merely coloured.
+    bp.Q.value = 9 - i * 2.2;
+    lfoDepth.connect(bp.frequency);
+
+    const level = ctx.createGain();
+    // The first formant carries the vowel; the third is air.
+    level.gain.value = [1, 0.55, 0.24][i]!;
+    bus.connect(bp).connect(level).connect(g);
+    // The consonant goes through the same throat, so the front edge belongs to
+    // the voice rather than sitting on top of it as a click.
+    con.connect(conGain).connect(bp);
+  }
+}
+
+export type StabVoice = 'organ' | 'saw' | 'dub' | 'hit' | 'choir';
 
 /**
  * The stab: a short, hard chord hit on an offbeat. Detroit's whole personality
@@ -310,6 +495,89 @@ export function stab(
 ): void {
   const { ctx } = v;
   const S = v.tuning.stab;
+
+  /**
+   * Not a chord. A press.
+   *
+   * The other three are all *harmony delivered rhythmically* — the genre's usual
+   * trick, and the reason the stab reads as "the melody" in a techno track. This
+   * one keeps the pitch (it still takes the chord's root, so it cannot clash)
+   * but delivers it as a **hydraulic impact**: a short inharmonic ring over a
+   * noise burst that closes fast.
+   *
+   * It is the one melodic slot in the mix, spent on something that is barely
+   * melodic. That is the trade a genuinely industrial score makes.
+   */
+  /**
+   * The chord, sung.
+   *
+   * Every note of it gets its own throat, and each one lands on a different
+   * vowel — so the "chord" is three voices holding three different sounds rather
+   * than one instrument playing three notes. Long, because a voice that stops
+   * dead is a synth again.
+   */
+  if (voice === 'choir') {
+    const dur = 1.6;
+    const shapes = [
+      ['oh', 'ah'],
+      ['oo', 'oh'],
+      ['ah', 'ee'],
+    ] as const;
+    for (let i = 0; i < semitones.length; i++) {
+      const [from, to] = shapes[i % shapes.length]!;
+      formantVoice(
+        v,
+        at,
+        semiHz(semitones[i]! + 12),
+        gain * 0.055,
+        dur,
+        from,
+        to,
+      );
+    }
+    return;
+  }
+
+  if (voice === 'hit') {
+    const dur = 0.26;
+    const g = env(ctx, at, 0.002, dur, gain * 0.11);
+
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(1800, at);
+    bp.frequency.exponentialRampToValueAtTime(430, at + dur);
+    bp.Q.value = 1.4;
+    bp.connect(g).connect(v.out);
+
+    const root = semiHz((semitones[0] ?? 0) + 24);
+    // Two partials a tritone-ish apart, which is the interval that refuses to
+    // resolve, over the chord root so it still belongs to the harmony.
+    for (const [ratio, level] of [
+      [1, 0.5],
+      [1.414, 0.34],
+      [2.83, 0.2],
+    ] as const) {
+      const o = osc(ctx, 'square', root * ratio, at, at + dur + 0.05);
+      const og = ctx.createGain();
+      og.gain.value = level;
+      o.connect(og).connect(bp);
+    }
+
+    const frames = Math.ceil(ctx.sampleRate * dur);
+    const buf = ctx.createBuffer(1, frames, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < frames; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / frames, 3.4);
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const ng = ctx.createGain();
+    ng.gain.value = 0.7;
+    src.connect(ng).connect(bp);
+    src.start(at);
+    src.stop(at + dur + 0.02);
+    return;
+  }
 
   if (voice === 'organ') {
     const O = S.organ;
@@ -350,7 +618,7 @@ export function stab(
   }
 }
 
-export type LeadVoice = 'pluck' | 'acid' | 'bell';
+export type LeadVoice = 'pluck' | 'acid' | 'bell' | 'voice';
 
 /**
  * One note of the repeating motif — the closest this game has to a tune.
@@ -370,6 +638,20 @@ export function motif(
   glideFrom = 0,
 ): void {
   const { ctx } = v;
+
+  /**
+   * The melody, sung.
+   *
+   * The one slot in the mix the ear is already listening to for a tune, spent on
+   * a throat instead of an oscillator. Because the formants stay put while the
+   * pitch moves, a line played through this reads as *one voice singing several
+   * notes* rather than as a synth being transposed — and that is a categorically
+   * different thing to hear, not a differently-filtered version of the same one.
+   */
+  if (voice === 'voice') {
+    formantVoice(v, at, hz, gain * 0.085, 0.68, 'oo', 'ah');
+    return;
+  }
 
   if (voice === 'bell') {
     // Orbital. Softened, and the reason it was harsh is worth writing down.
@@ -452,7 +734,7 @@ export function motif(
 
 // -------------------------------------------------------------- the backing
 
-export type KickVoice = 'punch' | 'tight' | 'deep';
+export type KickVoice = 'punch' | 'tight' | 'deep' | 'crush' | 'slam';
 
 /**
  * Kicks. Three parts each — a click transient so it cuts a busy mix, a fast
@@ -465,9 +747,13 @@ export type KickVoice = 'punch' | 'tight' | 'deep';
  *   deep   dub. Long, soft, almost no click. Felt more than heard.
  */
 export function kick(v: VoiceCtx, at: number, gain: number, voice: KickVoice = 'punch'): void {
+  if (voice === 'crush') return crushKick(v, at, gain);
+  if (voice === 'slam') return slamKick(v, at, gain);
   const { ctx } = v;
   const K = v.tuning.kick;
-  const spec = K.spec[voice];
+  // Falls back rather than asserting: a Score is only obliged to tune the kicks
+  // it actually selects, and the industrial one carries its own design below.
+  const spec = K.spec[voice] ?? K.spec.punch!;
 
   const body = env(ctx, at, K.attack, spec.decay, gain * K.gain);
   const o = ctx.createOscillator();
@@ -486,7 +772,407 @@ export function kick(v: VoiceCtx, at: number, gain: number, voice: KickVoice = '
   t.connect(hp).connect(tick).connect(v.out);
 }
 
-export type BassVoice = 'pluck' | 'acid' | 'sub';
+/**
+ * A bass drum with weight and a room around it.
+ *
+ * The three original kicks are all *dry by construction* — a body, a click, and
+ * nothing else. That is correct for a track where the kick's job is to mark time
+ * cleanly, and it is why they sound small the moment the kick is supposed to be
+ * the loudest thing in the room instead.
+ *
+ * Two things are missing from them and both are added here.
+ *
+ * **Harmonics.** A kick landing at 45Hz has the same problem the bass had: a
+ * laptop cannot move air at 45Hz, so a pure sine simply vanishes and only the
+ * click survives — which is exactly "weak and clicky". A quiet partial an octave
+ * up and a short mid knock give the ear something to reconstruct the fundamental
+ * *from*, so the same hit reads as deep on a big system and still lands on a
+ * small one.
+ *
+ * **A room.** This is the whole of "dry". A real bass drum is heard in a space:
+ * a short, dark burst of reflected energy arriving a few milliseconds behind the
+ * hit. Fifteen milliseconds of predelay and a couple of hundred of dark noise is
+ * the difference between a drum and a sample of a drum — and unlike a reverb
+ * send it stays *inside* the voice, so it cannot smear the rest of the mix the
+ * way a tail on the whole low end would.
+ */
+function slamKick(v: VoiceCtx, at: number, gain: number): void {
+  const { ctx } = v;
+
+  /**
+   * Peaks, and why they matter more here than anywhere else in the graph.
+   *
+   * The first version of this stacked a 1.3 body, a 0.3 octave, a 0.4 knock, a
+   * 0.3 click and a 0.34 room — all inside about ten milliseconds, for a
+   * combined transient near twice `punch`'s. The limiter has a 3ms attack, so a
+   * spike that size gets *through* before the compressor reacts and is then
+   * clamped hard the moment it does. That is not loudness, it is overload, and
+   * it was reported as exactly that.
+   *
+   * Four layers now, summing to about 1.8 — comparable to `punch` — and the
+   * impact comes from *where* the energy sits rather than from how much of it
+   * there is.
+   */
+
+  // 1 — the body. Lands at 58 rather than 45, and decays in a third of a second
+  // rather than three quarters. Weight is not the same as length: a long tail
+  // down here is boom, and boom is what a gut punch is not.
+  const body = env(ctx, at, 0.002, 0.3, gain * 0.9);
+  const o = ctx.createOscillator();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(190, at);
+  o.frequency.exponentialRampToValueAtTime(58, at + 0.045);
+  o.start(at);
+  o.stop(at + 0.36);
+  o.connect(body).connect(v.out);
+
+  /**
+   * 2 — the knock, and this is the punch.
+   *
+   * The ear does not locate impact at the fundamental. It locates it between
+   * roughly 150 and 250Hz, which is why a kick can be *felt* on a speaker that
+   * cannot reproduce a single cycle of its bottom octave. Making this the
+   * loudest thing after the body — rather than reaching for more sub — is the
+   * whole difference between a drum that hits you and one that merely rumbles.
+   */
+  const knock = env(ctx, at, 0.001, 0.085, gain * 0.55);
+  const k = ctx.createOscillator();
+  k.type = 'triangle';
+  k.frequency.setValueAtTime(260, at);
+  k.frequency.exponentialRampToValueAtTime(100, at + 0.045);
+  k.start(at);
+  k.stop(at + 0.1);
+  k.connect(knock).connect(v.out);
+
+  // 3 — a click for definition only. `tight` puts this at 0.85, which is the
+  // sound of a kick with nothing underneath it; this one has plenty.
+  const tick = env(ctx, at, 0.0008, 0.012, gain * 0.2);
+  const t = osc(ctx, 'triangle', 1400, at, at + 0.03);
+  const hp = ctx.createBiquadFilter();
+  hp.type = 'highpass';
+  hp.frequency.value = 600;
+  t.connect(hp).connect(tick).connect(v.out);
+
+  // 4 — the room, short. Twelve milliseconds late so it reads as a reflection
+  // rather than as part of the attack, and gone in a tenth of a second so it
+  // adds a space rather than a tail.
+  const pre = 0.012;
+  const seconds = 0.11;
+  const frames = Math.ceil(ctx.sampleRate * seconds);
+  const buf = ctx.createBuffer(1, frames, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  const rise = Math.max(1, Math.round(ctx.sampleRate * 0.008));
+  for (let i = 0; i < frames; i++) {
+    data[i] =
+      (Math.random() * 2 - 1) * Math.pow(1 - i / frames, 2.6) * Math.min(1, i / rise);
+  }
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const dark = ctx.createBiquadFilter();
+  dark.type = 'lowpass';
+  dark.frequency.value = 380;
+  dark.Q.value = 0.7;
+  const room = ctx.createGain();
+  room.gain.value = gain * 0.15;
+  src.connect(dark).connect(room).connect(v.out);
+  src.start(at + pre);
+  src.stop(at + pre + seconds);
+}
+
+/**
+ * A kick that does not mark time.
+ *
+ * The three above are all the same idea at three weights: a fast pitch drop and
+ * a click, sitting on a quarter. That is a *metronome*, and a metronome is what
+ * makes every four-on-the-floor track sound like the last one however it is
+ * filtered.
+ *
+ * This one is built to be heard as an *impact* instead. It falls further and
+ * much slower (140 down to 26 over a fifth of a second, against 190→35 in
+ * 75ms), so the ear tracks the fall rather than reading it as a single thud, and
+ * it rings for over a second — long enough that on a sparse pattern the previous
+ * hit is still decaying under the next.
+ *
+ * Instead of a click it has a *scrape*: ring-modulated noise, band-limited low.
+ * Ring modulation again rather than distortion, for §18.4's reason — it
+ * multiplies, so it cannot raise RMS. Nothing in this graph is allowed to turn
+ * the game up, least of all the loudest voice in it.
+ */
+function crushKick(v: VoiceCtx, at: number, gain: number): void {
+  const { ctx } = v;
+
+  // The body. Three things were wrong with the first version of this and all
+  // three made it *weaker*, which is the opposite of what it was reaching for:
+  //
+  //   - it decayed for 1.15s. At 96 BPM that is longer than the gap between
+  //     hits, so consecutive kicks overlapped into a continuous low wall. The
+  //     limiter is driven 12x into a -34dB threshold, so a wall down there does
+  //     not sound big, it pins the compressor and ducks *everything else*.
+  //   - it landed at 26Hz, under most speakers. Inaudible, and still spending
+  //     all of that headroom.
+  //   - it had no transient at all. Punch is an attack, not a decay.
+  //
+  // So: land at 41 where the cone can still move, fall fast enough to be heard
+  // as a hit, and get out of the way.
+  const body = env(ctx, at, 0.002, 0.5, gain * 1.2);
+  const o = ctx.createOscillator();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(210, at);
+  o.frequency.exponentialRampToValueAtTime(41, at + 0.055);
+  o.start(at);
+  o.stop(at + 0.58);
+  o.connect(body).connect(v.out);
+
+  // The knock: a short mid-range thud that survives a laptop speaker. This is
+  // most of what "weight" is on any system that cannot reproduce 40Hz.
+  const knock = env(ctx, at, 0.001, 0.055, gain * 0.55);
+  const k = ctx.createOscillator();
+  k.type = 'triangle';
+  k.frequency.setValueAtTime(320, at);
+  k.frequency.exponentialRampToValueAtTime(110, at + 0.05);
+  k.start(at);
+  k.stop(at + 0.08);
+  k.connect(knock).connect(v.out);
+
+  // The scrape, now an *attack* rather than a smear: high, ring-modulated, and
+  // over in 40ms. Ring modulation rather than distortion, for §18.4's reason —
+  // it multiplies, so it cannot raise RMS.
+  const frames = Math.ceil(ctx.sampleRate * 0.05);
+  const buf = ctx.createBuffer(1, frames, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < frames; i++) {
+    data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / frames, 3.2);
+  }
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.setValueAtTime(2400, at);
+  bp.frequency.exponentialRampToValueAtTime(700, at + 0.045);
+  bp.Q.value = 1.2;
+
+  const ring = ctx.createGain();
+  ring.gain.value = 0;
+  const mod = osc(ctx, 'square', 147, at, at + 0.06);
+  const depth = ctx.createGain();
+  depth.gain.value = 1;
+  mod.connect(depth).connect(ring.gain);
+
+  const scrape = ctx.createGain();
+  scrape.gain.value = gain * 0.62;
+  src.connect(bp).connect(ring).connect(scrape).connect(v.out);
+  src.start(at);
+  src.stop(at + 0.06);
+}
+
+/**
+ * A plucked string, by physical model. Karplus-Strong.
+ *
+ * **This is the first voice in the game that is not subtractive synthesis**, and
+ * that is the entire reason it exists. Every other instrument here — all fifty-odd
+ * of them — is oscillators into a lowpass into an envelope. Different oscillators
+ * and different corners give you different *settings* of one synthesiser, which
+ * is why new cells and new variants kept arriving as "the same song with
+ * different instruments". You cannot get a genuinely new timbre out of the same
+ * method.
+ *
+ * This one is a short burst of noise fired into a delay line that feeds back on
+ * itself through a damper. The delay length *is* the pitch; the damper is what
+ * makes the high partials die before the low ones, which is what every real
+ * struck or plucked object does and what no envelope can imitate. The result
+ * decays by itself, unevenly, the way a physical thing does.
+ *
+ * Two practical notes. The excitation buffer runs for the whole note rather than
+ * just the burst — it is silent after the first few milliseconds, but a live
+ * source keeps the feedback loop from being collected while it is still ringing.
+ * And a feedback loop through a `DelayNode` cannot go below one render quantum,
+ * which caps this at roughly 375Hz; that is fine, because everything it is used
+ * for lives underneath that.
+ */
+function pluckString(
+  v: VoiceCtx,
+  at: number,
+  hz: number,
+  gain: number,
+  seconds: number,
+  damp: number,
+  bright: number,
+): void {
+  const { ctx } = v;
+  const period = 1 / Math.max(40, Math.min(370, hz));
+
+  const frames = Math.ceil(ctx.sampleRate * (seconds + 0.05));
+  const buf = ctx.createBuffer(1, frames, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  // The pluck: a couple of milliseconds of noise, then silence. Everything after
+  // this is the string, not the source.
+  const burst = Math.max(1, Math.round(ctx.sampleRate * 0.004));
+  for (let i = 0; i < burst; i++) {
+    data[i] = (Math.random() * 2 - 1) * (1 - i / burst);
+  }
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+
+  // Brightness of the *attack*, before the string gets hold of it.
+  const pre = ctx.createBiquadFilter();
+  pre.type = 'lowpass';
+  pre.frequency.value = Math.min(9000, hz * bright);
+
+  const delay = ctx.createDelay(0.05);
+  delay.delayTime.value = period;
+
+  const loss = ctx.createGain();
+  loss.gain.value = 0.5;
+
+  const damper = ctx.createBiquadFilter();
+  damper.type = 'lowpass';
+  damper.frequency.value = damp;
+  damper.Q.value = 0.4;
+
+  const out = env(ctx, at, 0.001, seconds, gain);
+
+  src.connect(pre).connect(delay);
+  // The loop. `loss` under 1 is what makes it decay rather than howl; the damper
+  // inside the loop is what makes it decay *unevenly*.
+  delay.connect(damper).connect(loss).connect(delay);
+  delay.connect(out).connect(v.out);
+
+  src.start(at);
+  src.stop(at + seconds + 0.05);
+}
+
+/**
+ * Booming bass.
+ *
+ * The existing three all failed to boom for the same two reasons, and neither
+ * was the voice's fault.
+ *
+ * **One: they were being played too low to hear.** The bass is pitched at
+ * `chordRoot + register.bass`, and `register.bass` is -12. A Score that also
+ * drops its key for darkness stacks the two: `choir`'s feedback Axiom sat at
+ * key -12, so the bass fundamental was `semiHz(-24)` — **13.75 Hz**. Not quiet.
+ * *Inaudible*, on any speaker ever made, while still spending every bit of the
+ * limiter's headroom and ducking the rest of the mix through it. Darkness is not
+ * altitude, and the fix is in the Scores as much as here.
+ *
+ * **Two: a sine has nothing to be loud with.** Small speakers cannot reproduce
+ * 50Hz at all — what you hear as bass on a laptop is the *harmonics*, and your
+ * ear reconstructs the missing fundamental from them. A pure sine has no
+ * harmonics to reconstruct from, so it vanishes. `sub` was the quietest voice in
+ * the game on exactly the hardware most people play on.
+ *
+ * So: a sine that drops into pitch for the boom, a triangle for body, and a
+ * resonant saw an octave up whose entire job is to be the thing a small speaker
+ * can actually move. On a big system you feel the first; on a laptop you hear
+ * the third; both read as the same note.
+ */
+function boomBass(
+  v: VoiceCtx,
+  at: number,
+  hz: number,
+  gain: number,
+  dur: number,
+  brightness: number,
+): void {
+  const { ctx } = v;
+  const long = dur * 5.5;
+
+  // 1 — the boom. A short fall into the fundamental is what makes a low note
+  // land rather than simply begin.
+  const low = env(ctx, at, 0.004, long, gain * 1.15);
+  const o = ctx.createOscillator();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(hz * 2.2, at);
+  o.frequency.exponentialRampToValueAtTime(hz, at + 0.06);
+  o.start(at);
+  o.stop(at + long + 0.1);
+  o.connect(low).connect(v.out);
+
+  // 2 — body. Odd harmonics, quiet, so the note has a shape between the sub and
+  // the growl above it.
+  const bodyOsc = osc(ctx, 'triangle', hz, at, at + long + 0.1);
+  const body = ctx.createGain();
+  body.gain.value = 0.34;
+  bodyOsc.connect(body).connect(low);
+
+  /**
+   * 3 — the growl. This is where "oomph" actually lives, and it is a *spectrum*
+   * problem rather than a level one.
+   *
+   * The obvious way to make a bass sound bigger is to drive it, and that is
+   * banned here for a good reason (§18.4 — a soft-clip curve raises RMS, which
+   * turns the game up). But what a listener hears as "driven" is mostly the
+   * *presence of harmonics*, and harmonics can be added by addition rather than
+   * by distortion: a detuned saw pair an octave up, a square at the twelfth for
+   * the hollow midrange a clipped bass gets, all through one resonant lowpass.
+   * Every level is set by hand, so nothing can run away.
+   */
+  const growl = env(ctx, at, 0.005, long * 0.7, gain * 0.42);
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.Q.value = 11;
+  const open = Math.min(2600, hz * 13 * brightness);
+  filter.frequency.setValueAtTime(open, at);
+  filter.frequency.exponentialRampToValueAtTime(
+    Math.max(90, hz * 3.2 * brightness),
+    at + long * 0.62,
+  );
+  filter.connect(growl).connect(v.out);
+
+  /**
+   * And this is the answer to "dry": the cutoff never sits still.
+   *
+   * A filter that only follows its envelope produces the same note every time,
+   * and a bass that is identical on every hit stops being an instrument and
+   * becomes a sample. A slow sub-audio wobble under the envelope means no two
+   * notes have quite the same edge — the movement is well below the pitch, so it
+   * reads as the sound *breathing* rather than as vibrato.
+   *
+   * It sums with the scheduled ramp above rather than replacing it, which is how
+   * AudioParams combine automation with connected inputs.
+   */
+  const wob = osc(ctx, 'sine', 0.7, at, at + long + 0.1);
+  const wobDepth = ctx.createGain();
+  wobDepth.gain.value = open * 0.3;
+  wob.connect(wobDepth).connect(filter.frequency);
+
+  for (const cents of [-7, 7]) {
+    const s = osc(ctx, 'sawtooth', hz * 2 * Math.pow(2, cents / 1200), at, at + long * 0.8 + 0.1);
+    const sg = ctx.createGain();
+    sg.gain.value = 0.4;
+    s.connect(sg).connect(filter);
+  }
+  // The twelfth. A square here is what gives a clipped bass its hollow middle,
+  // and it is the single cheapest way to sound driven without driving anything.
+  const twelfth = osc(ctx, 'square', hz * 3, at, at + long * 0.7 + 0.1);
+  const twelfthGain = ctx.createGain();
+  twelfthGain.gain.value = 0.16;
+  twelfth.connect(twelfthGain).connect(filter);
+
+  // 4 — the thud. Twenty milliseconds of band-limited noise so the note has an
+  // edge the ear can place in time. Without this a long low note has no onset
+  // and reads as a swell.
+  const frames = Math.ceil(ctx.sampleRate * 0.03);
+  const buf = ctx.createBuffer(1, frames, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < frames; i++) {
+    data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / frames, 3.5);
+  }
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = 240;
+  bp.Q.value = 1.1;
+  const thud = ctx.createGain();
+  thud.gain.value = gain * 0.32;
+  src.connect(bp).connect(thud).connect(v.out);
+  src.start(at);
+  src.stop(at + 0.05);
+}
+
+export type BassVoice = 'pluck' | 'acid' | 'sub' | 'drone' | 'string' | 'boom';
 
 export interface BassSpec {
   voice: BassVoice;
@@ -520,6 +1206,59 @@ export function bass(
 ): void {
   const { ctx } = v;
   const B = v.tuning.bass;
+
+  /**
+   * A bass that is a *surface* rather than a line.
+   *
+   * The three below all articulate — they play notes, with attacks, and the ear
+   * follows them as a part. This one is meant to be the floor: two saws beating
+   * against each other a few cents apart, an octave-down square underneath, and
+   * a resonant filter crawling across the whole length of the note instead of
+   * snapping. Nothing about it is plucked, so nothing about it counts time.
+   *
+   * The slow beating between the detuned pair is doing most of the work. It is
+   * unease you cannot name, which lasts far better than a dissonance you can.
+   */
+  if (spec.voice === 'boom') {
+    boomBass(v, at, hz, gain, dur, spec.brightness);
+    return;
+  }
+
+  // A struck string, low. `dur` is a sixteenth, so this rings for about a bar —
+  // long enough that the previous note is still sounding under the next, which
+  // is what a plucked instrument does and a bass synth never does.
+  if (spec.voice === 'string') {
+    pluckString(v, at, hz, gain * 0.85, dur * 9, 900 + hz * spec.brightness * 6, 14);
+    return;
+  }
+
+  if (spec.voice === 'drone') {
+    const long = dur * 7;
+    const g = env(ctx, at, 0.06, long, gain * 0.5);
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.Q.value = Math.max(6, spec.q);
+    filter.frequency.setValueAtTime(Math.max(70, hz * 2.2 * spec.brightness), at);
+    filter.frequency.exponentialRampToValueAtTime(
+      Math.min(2400, hz * 9 * spec.brightness),
+      at + long * 0.45,
+    );
+    filter.frequency.exponentialRampToValueAtTime(Math.max(60, hz * 1.6), at + long);
+    filter.connect(g).connect(v.out);
+
+    for (const cents of [-9, 9]) {
+      const o = osc(ctx, 'sawtooth', hz * Math.pow(2, cents / 1200), at, at + long + 0.2);
+      const og = ctx.createGain();
+      og.gain.value = 0.34;
+      o.connect(og).connect(filter);
+    }
+    const low = osc(ctx, 'square', hz / 2, at, at + long + 0.2);
+    const lowGain = ctx.createGain();
+    lowGain.gain.value = 0.3;
+    low.connect(lowGain).connect(filter);
+    return;
+  }
 
   if (spec.voice === 'sub') {
     const long = dur * B.sub.length;
