@@ -265,6 +265,63 @@ function place(steps: readonly StepMark[], at: number): string {
   return `${String(bar).padStart(3)}:${String(mark.index).padStart(2, '0')} ${tail.padEnd(6)}`;
 }
 
+/**
+ * The same 192 bars, as something a person can actually read.
+ *
+ * `formatVoices` on a saved Score's full form is 12,482 lines. That is not a
+ * review artifact, it is a wall — and a golden whose diff nobody reads has
+ * stopped being a golden and become a tripwire with a very large footprint.
+ *
+ * This keeps the guarantee and drops the volume. Every argument of every call
+ * still feeds a checksum, so **any** change to any note fails this file; the
+ * checksum is per *bar*, so a failure tells you where to look; and the voice
+ * table above it says whether a layer appeared, vanished, or merely moved. When
+ * it does fail, `formatVoices` regenerates the note-by-note detail locally — the
+ * information was never lost, it was just never worth committing.
+ */
+function digestVoices(rec: Recorder): string {
+  const full = formatVoices(rec);
+  // FNV-1a, 32-bit. Local on purpose: a golden's checksum must not change
+  // because a production hash function was retuned for some unrelated reason.
+  const fnv = (text: string): string => {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < text.length; i++) {
+      h ^= text.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h.toString(16).padStart(8, '0');
+  };
+
+  const bars = new Map<number, string[]>();
+  for (const line of full.split('\n')) {
+    const m = /^\s*(\d+):/.exec(line);
+    if (!m) continue;
+    const bar = Number(m[1]);
+    const list = bars.get(bar) ?? [];
+    list.push(line);
+    bars.set(bar, list);
+  }
+
+  const perVoice = new Map<string, number>();
+  for (const e of rec.voices) perVoice.set(e.name, (perVoice.get(e.name) ?? 0) + 1);
+
+  const out = [
+    '# a saved Score, digested — see digestVoices() for why this is not the note log',
+    `# ${rec.voices.length} calls over ${bars.size} bars, and the whole log hashes to ${fnv(full)}`,
+    '',
+    '## voices',
+  ];
+  for (const [name, n] of [...perVoice.entries()].sort((a, b) => b[1] - a[1])) {
+    out.push(`  ${name.padEnd(12)} ${String(n).padStart(5)}`);
+  }
+  out.push('', '## bars', '#  bar  calls  checksum');
+  for (const bar of [...bars.keys()].sort((a, b) => a - b)) {
+    const list = bars.get(bar)!;
+    out.push(`  ${String(bar).padStart(4)}  ${String(list.length).padStart(5)}  ${fnv(list.join('\n'))}`);
+  }
+  return out.join('\n') + '\n';
+}
+
 function formatVoices(rec: Recorder): string {
   const lines = [
     '# voice calls — every note the sequencer asked for',
@@ -426,7 +483,7 @@ describe('the schedule (goldens — a diff is a sound change)', () => {
     it(`${name} is saved, note for note`, async () => {
       const base = SCRIPTS.find((s) => s.name === 'run')!;
       const rec = drive({ ...base, name, bars: 192 }, score).rec;
-      await expect(formatVoices(rec)).toMatchFileSnapshot(`goldens/saved.${name}.voices.txt`);
+      await expect(digestVoices(rec)).toMatchFileSnapshot(`goldens/saved.${name}.digest.txt`);
     });
 
     /**

@@ -42,13 +42,7 @@ import type { PartTuning, PartVoice } from './parts';
 import { validate, type CellLibrary, type Feel as CellFeel, type Mood, type Register, type Space } from './cells';
 import { current } from './scores/current';
 import { deep } from './scores/deep';
-import { industrial } from './scores/industrial';
-import { choir } from './scores/choir';
 import { vault } from './scores/vault';
-import { pulse } from './scores/pulse';
-import { rust } from './scores/rust';
-import { spire } from './scores/spire';
-import { anthem } from './scores/anthem';
 import { basin, furnace, lattice, marrow } from './scores/playlist';
 import type {
   BassVoice,
@@ -941,14 +935,8 @@ export const SCORES: Record<string, Score> = {
   basin,
   marrow,
   current,
-  anthem,
   deep,
   vault,
-  spire,
-  rust,
-  pulse,
-  choir,
-  industrial,
 };
 
 /**
