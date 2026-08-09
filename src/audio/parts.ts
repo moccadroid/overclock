@@ -41,6 +41,28 @@ export type PartVoice =
   | 'riser'
   | 'organ';
 
+/**
+ * The four tables that decide what a live Program sounds like.
+ *
+ * These were module constants, and that made this — the **densest layer in the
+ * whole mix** — identical in every Score. Measured over 64 bars, the parts fire
+ * around 576 notes against the motif's 63; nine Scores produced three distinct
+ * part patterns between them. Whatever else changed, the loudest continuous
+ * thing you were listening to was the same music every time.
+ */
+export interface PartTuning {
+  /** Which sixteenths a Trigger fires on. */
+  rhythm: Readonly<Record<string, readonly number[]>>;
+  /** Which instrument and register an Action primitive gets. */
+  voice: Readonly<Record<string, { voice: PartVoice; register: number }>>;
+  /** How each voice moves across the bar, as chord degrees. */
+  contour: Readonly<Record<string, readonly (readonly number[])[]>>;
+  /** §16.3 — hue moves a part up or down a register. */
+  hueRegister: Readonly<Record<string, number>>;
+  /** Density cap. A part with no gaps is not a part, it is a drone. */
+  maxSteps: number;
+}
+
 export interface ProgramShape {
   triggerId: string | null;
   modifierIds: readonly (string | null)[];
@@ -155,10 +177,11 @@ const CONTOURS: Record<PartVoice, readonly (readonly number[])[]> = {
   noise: [[0]],
 };
 
-function contourFor(voice: PartVoice, index: number): readonly number[] {
-  const options = CONTOURS[voice] ?? [[0]];
+function contourFor(tuning: PartTuning, voice: PartVoice, index: number): readonly number[] {
+  const options = tuning.contour[voice] ?? [[0]];
   return options[index % options.length] ?? [0];
 }
+
 
 /** Hue moves a part up or down a register, keeping the three colours apart. */
 const HUE_REGISTER: Record<string, number> = { thermal: -12, voltaic: 12, void: 0 };
@@ -173,11 +196,13 @@ export function derivePart(
   shape: ProgramShape,
   action: { primitive: string; hue: string } | null,
   index: number,
+  /** The Score's tables. Defaults to the authored ones. */
+  tuning: PartTuning = DEFAULT_PARTS,
 ): Part | null {
   if (!shape.live || !shape.triggerId || !action) return null;
 
-  const steps = TRIGGER_RHYTHM[shape.triggerId] ?? [0, 8];
-  const instrument = ACTION_VOICE[action.primitive] ?? { voice: 'pluck' as const, register: 0 };
+  const steps = tuning.rhythm[shape.triggerId] ?? [0, 8];
+  const instrument = tuning.voice[action.primitive] ?? { voice: 'pluck' as const, register: 0 };
 
   const pattern = new Array(16).fill(false);
   for (const s of steps) pattern[s % 16] = true;
@@ -185,11 +210,11 @@ export function derivePart(
   const part: Part = {
     pattern,
     voice: instrument.voice,
-    register: instrument.register + (HUE_REGISTER[action.hue] ?? 0),
+    register: instrument.register + (tuning.hueRegister[action.hue] ?? 0),
     // Rows fan out across the chord so two rows never play the same note. This
     // is what turns four parts into harmony rather than four copies.
     tone: index % 3,
-    contour: contourFor(instrument.voice, index),
+    contour: contourFor(tuning, instrument.voice, index),
     gain: 1,
     echo: 0,
     bite: 0,
@@ -200,7 +225,7 @@ export function derivePart(
   for (const id of shape.modifierIds) {
     if (id) applyModifier(part, id);
   }
-  thin(part);
+  thin(part, tuning.maxSteps);
   return part;
 }
 
@@ -308,3 +333,12 @@ function applyModifier(part: Part, id: string): void {
 export function isSilent(parts: readonly (Part | null)[]): boolean {
   return parts.every((p) => p === null || p.pattern.every((x) => !x));
 }
+
+/** The authored tables, as a Score-shaped bundle. `current` points at this. */
+export const DEFAULT_PARTS: PartTuning = {
+  rhythm: TRIGGER_RHYTHM,
+  voice: ACTION_VOICE,
+  contour: CONTOURS,
+  hueRegister: HUE_REGISTER,
+  maxSteps: 12,
+};

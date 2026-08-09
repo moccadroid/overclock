@@ -618,7 +618,7 @@ export function stab(
   }
 }
 
-export type LeadVoice = 'pluck' | 'acid' | 'bell' | 'voice';
+export type LeadVoice = 'pluck' | 'acid' | 'bell' | 'voice' | 'blip';
 
 /**
  * One note of the repeating motif — the closest this game has to a tune.
@@ -650,6 +650,59 @@ export function motif(
    */
   if (voice === 'voice') {
     formantVoice(v, at, hz, gain * 0.085, 0.68, 'oo', 'ah');
+    return;
+  }
+
+  /**
+   * Cold, and mostly a click.
+   *
+   * The other four leads are all *expressive* — a pluck decays like a string, an
+   * acid line slides, a bell rings, the formant sings. That is the wrong register
+   * for minimal techno, where the melodic part is closer to a percussion
+   * instrument that happens to have a pitch: you are meant to hear the placement
+   * first and the note second.
+   *
+   * So: a square with a half-millisecond attack and a fifty-millisecond decay,
+   * band-limited at both ends, one octave partial for the metallic edge a click
+   * needs in order to cut, and *nothing that moves* — no detune, no glide, no
+   * filter envelope, no resonance. Every one of those is what makes a synth sound
+   * like it is performing. This does not perform; it lands.
+   *
+   * Deliberately unaffected by `glideFrom`. A blip that slid would be an acid
+   * line with a shorter envelope, which the playlist already has.
+   */
+  if (voice === 'blip') {
+    const dur = 0.05;
+    // 1.6ms rather than 0.6. A half-millisecond edge on a square is a *transient*
+    // — it puts energy well above the note, which is heard as sharpness rather
+    // than as attack. This is still an order of magnitude faster than any other
+    // lead here, so it still reads as a click; it just stops stinging.
+    const g = env(ctx, at, 0.0016, dur, gain * 0.2);
+
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 380;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    // 2800, down from 5200. A square already has energy at every odd harmonic;
+    // letting the ninth and eleventh through is what made it bright rather than
+    // percussive.
+    lp.frequency.value = 2800;
+    lp.Q.value = 0.5;
+    hp.connect(lp).connect(g).connect(v.out);
+
+    const o = osc(ctx, 'square', hz, at, at + dur + 0.02);
+    const og = ctx.createGain();
+    og.gain.value = 0.5;
+    o.connect(og).connect(hp);
+
+    // Half the length, so it reads as the attack of one note rather than as a
+    // second note an octave up.
+    const o2 = osc(ctx, 'square', hz * 2, at, at + dur * 0.5 + 0.02);
+    const o2g = ctx.createGain();
+    // Halved. Enough octave to define the click, not enough to whistle.
+    o2g.gain.value = 0.08;
+    o2.connect(o2g).connect(hp);
     return;
   }
 

@@ -38,6 +38,7 @@ import {
   kick,
   meltdown,
   motif,
+  pad,
   perc,
   playHue,
   playPart,
@@ -60,7 +61,9 @@ import {
   type PercStep,
 } from './cells';
 import { arrange, openingArrangement, type ArrangeInput, type Arrangement } from './arrange';
-import type { Part } from './parts';
+import { derivePart, type Part } from './parts';
+import { resolveGroove, type Groove } from './grooves';
+
 import {
   DEFAULT_SCORE,
   SCORES,
@@ -192,8 +195,22 @@ function impulse(ctx: AudioContext, seconds: number, damp: number): AudioBuffer 
   return buffer;
 }
 
-/** Which absolute semitone a melodic step lands on, over the current chord. */
-function tone(tones: number[], s: MelodicStep): number {
+/**
+ * Which absolute semitone a melodic step lands on.
+ *
+ * Two resolutions, and the difference between them is the difference between an
+ * arpeggio and a tune. A **chord** step indexes the three or four notes sounding
+ * underneath it, so it can never be wrong and can never be interesting. A
+ * **scale** step indexes the key's seven degrees and wraps into the octave above
+ * as it climbs, so it can pass through notes the chord does not contain — which
+ * is what melody is.
+ */
+function tone(tones: number[], scaleTones: number[], s: MelodicStep): number {
+  if (s.scale && scaleTones.length > 0) {
+    const n = s.tone;
+    const octave = Math.floor(n / scaleTones.length) + s.octave;
+    return scaleTones[n % scaleTones.length]! + octave * 12;
+  }
   return tones[s.tone % tones.length]! + s.octave * 12;
 }
 
@@ -345,6 +362,8 @@ export class Audio {
    * arrangement is built from it in a field initialiser, which runs first.
    */
   private score: Score = SCORES[DEFAULT_SCORE]!;
+  /** §18 — the drums, overriding the Score's. Null is the Score's own. */
+  private groove: Groove | null = null;
   private plan: Arrangement = openingArrangement('ignition', SCORES[DEFAULT_SCORE]!);
   private pendingPlan: Arrangement | null = null;
   /** Set by `beginRun`; makes the next `setEngine` skip the phrase boundary. */
@@ -364,6 +383,18 @@ export class Audio {
   private hook = compile(openingArrangement('ignition', SCORES[DEFAULT_SCORE]!));
   /** Bars elapsed, for walking the progression. */
   private bar = 0;
+  /**
+   * Which step counts as bar zero.
+   *
+   * The clock's step count never resets — it runs for the life of the
+   * AudioContext — so `bar` used to be an absolute position in the session
+   * rather than in the *song*. Picking a new track dropped you wherever that
+   * session happened to be: two thirds through a form, mid-phrase, with the
+   * filter already open. A track you choose should start.
+   */
+  private barZero = 0;
+  /** Set when a new song should begin at the next bar line. */
+  private restartWanted = false;
   private silenced = false;
   /** The chord currently sounding. Accents snap to it. */
   private tones: number[] = [0, 3, 7];
@@ -408,6 +439,31 @@ export class Audio {
     return this.score;
   }
 
+  /** The Groove overriding the Score's drums, or null for the Score's own. */
+  get activeGroove(): Groove | null {
+    return this.groove;
+  }
+
+  /**
+   * Change the base rhythm without changing the song.
+   *
+   * The second dial. `null` — or the id `'score'` — hands the drums back to
+   * whatever the Score authored, which is the default and is why a Score nobody
+   * has pointed a Groove at is bit-for-bit what it always was.
+   *
+   * Re-arranges immediately rather than at the next phrase, because unlike a
+   * Draft this is somebody turning a knob and watching for the result.
+   */
+  setGroove(id: string | null): void {
+    const next = resolveGroove(id);
+    if (next?.id === this.groove?.id) return;
+    this.groove = next;
+    if (this.lastInput) {
+      this.setEngine(this.lastInput, false);
+      this.pendingUrgent = true;
+    }
+  }
+
   /**
    * Switch Score.
    *
@@ -427,8 +483,31 @@ export class Audio {
     const next = typeof score === 'string' ? resolveScore(score) : score;
     if (next.id === this.score.id) return;
     this.score = next;
-    if (this.lastInput) {
-      this.setEngine(this.lastInput);
+    // From the top. See `barZero`.
+    this.restartWanted = true;
+    if (this.demoOn) {
+      const engine = next.demo;
+      this.demoT = 0;
+      this.variation = engine.from;
+      this.setEngine({ axiomId: engine.axiomId, rows: [...engine.rows], intensity: 0.55 }, false);
+      this.setParts(
+        engine.rows.map((row, i) =>
+          derivePart(
+            {
+              triggerId: row.triggerId,
+              modifierIds: row.modifiers,
+              actionId: row.primitive,
+              live: true,
+            },
+            { primitive: row.primitive, hue: row.hue },
+            i,
+            next.feel.parts,
+          ),
+        ),
+      );
+      this.pendingUrgent = true;
+    } else if (this.lastInput) {
+      this.setEngine(this.lastInput, false);
       this.pendingUrgent = true;
     } else {
       this.adopt(openingArrangement('ignition', next));
@@ -660,7 +739,18 @@ export class Audio {
     this.reverbSend.gain.value = G.reverb.send;
     const reverbDelay = ctx.createDelay(1);
     reverbDelay.delayTime.value = G.reverb.predelay;
-    this.reverbSend.connect(reverbDelay).connect(this.reverb).connect(this.musicFilter);
+    // Optional highpass on the send. Built only when a Score asks for one, so a
+    // Score that does not is bit-for-bit the graph it always had.
+    if (G.reverb.highpass > 0) {
+      const hp = ctx.createBiquadFilter();
+      hp.type = 'highpass';
+      hp.frequency.value = G.reverb.highpass;
+      hp.Q.value = 0.7;
+      this.reverbSend.connect(hp);
+      hp.connect(reverbDelay).connect(this.reverb).connect(this.musicFilter);
+    } else {
+      this.reverbSend.connect(reverbDelay).connect(this.reverb).connect(this.musicFilter);
+    }
 
     this.clock = new Clock(ctx);
     this.clock.onStep((step) => this.onStep(step.time, step.index, step.count));
@@ -783,7 +873,20 @@ export class Audio {
    * called whenever the build changes without any bookkeeping about whether it
    * really did.
    */
-  setEngine(input: ArrangeInput): void {
+  setEngine(
+    input: ArrangeInput,
+    /**
+     * Whether this counts as a *variation*.
+     *
+     * `avoid` tells `pick()` to move off the cells that are already playing, and
+     * it exists for the variation timer — a pass whose whole job is to find a
+     * different line. A Score or Groove change is not that: it is one dial being
+     * turned, and the other dial should hold still. Without this, picking a new
+     * rhythm also reshuffled the motif, the bassline and the stab, so "change the
+     * beat" quietly meant "change everything".
+     */
+    vary = true,
+  ): void {
     // Remembered so the variation timer can re-arrange the same Engine without
     // the caller having to hand it over again.
     this.lastInput = input;
@@ -794,14 +897,18 @@ export class Audio {
         // §13.2 — the phase is not the caller's business to remember. The audio
         // layer already has it every frame, so it merges it in here.
         meltdown: this.state.meltdown,
+        // Same argument for the Groove: the caller picked a song, not a kit.
+        groove: this.groove,
         // What is playing right now, so a variation pass moves off it rather than
         // reselecting the same cell and calling it a change.
-        avoid: {
-          motif: this.plan.motif.id,
-          bass: this.plan.bass.id,
-          stab: this.plan.stab.id,
-          hats: this.plan.hats.id,
-        },
+        avoid: vary
+          ? {
+              motif: this.plan.motif.id,
+              bass: this.plan.bass.id,
+              stab: this.plan.stab.id,
+              hats: this.plan.hats.id,
+            }
+          : undefined,
       },
       this.score,
     );
@@ -849,6 +956,14 @@ export class Audio {
    * "it stopped, then weirdly came back" this was reported as.
    */
   beginRun(): void {
+    // A run takes the instrument back. Without this, starting a shift with the
+    // Music window still open would leave the audition driving `update` against
+    // the game every frame, and the two would fight over the intensity.
+    if (this.demoOn && this.demoFrame !== null) {
+      cancelAnimationFrame(this.demoFrame);
+      this.demoFrame = null;
+      this.demoOn = false;
+    }
     this.freshRun = true;
     this.resumeBusses();
   }
@@ -883,6 +998,7 @@ export class Audio {
           variation: 0,
           intensity: this.score.mix.hookIntensity,
           meltdown: this.state.meltdown,
+          groove: this.groove,
         },
         this.score,
       ),
@@ -1180,6 +1296,134 @@ export class Audio {
     }
   }
 
+  // ------------------------------------------------------------------- demo
+
+  /**
+   * Preview a Score as a *run*, not as a bed.
+   *
+   * Outside a run nothing calls `update`, so `intensity` sits at zero and the
+   * entry thresholds keep almost everything switched off: no hats, no bass, no
+   * chord, no parts, no accents. What you hear is a kick, a sub, a rim and an
+   * occasional stab — the thinnest possible version of any Score, and identical
+   * across most of them. Auditioning eight songs that way tells you nothing,
+   * because the arrangement is the half that was missing.
+   *
+   * More than that: **the engine layer is where the life is.** A run's music is
+   * the arrangement *plus* one sequenced part per live Program plus an accent on
+   * every hit, kill and pickup, snapped to the grid. That interplay is the whole
+   * §18.1 claim, and it is exactly what a silent menu cannot demonstrate.
+   *
+   * So this drives a plausible one: four live rows across the three hues, an
+   * intensity that wanders so layers arrive and leave, and a trickle of cues at a
+   * rate tied to it. Not a recording — the real sequencer, doing what it does in
+   * play, with the numbers coming from here instead of from a game.
+   */
+  demo(on: boolean): void {
+    if (!on) {
+      this.demoOn = false;
+      if (this.demoFrame !== null) cancelAnimationFrame(this.demoFrame);
+      this.demoFrame = null;
+      // Back to the bed, so closing the window does not leave a phantom Engine
+      // playing under a menu.
+      if (this.ctx) {
+        this.lastInput = null;
+        this.setParts([]);
+        this.adopt(openingArrangement('ignition', this.score));
+        this.smoothed = 0;
+      }
+      return;
+    }
+    if (this.demoOn) return;
+    this.start();
+    if (!this.ctx) return;
+    // Before the flag is set, because `beginRun` cancels a running audition and
+    // relying on the frame handle being null to dodge that would be a trap for
+    // whoever reorders these next.
+    this.beginRun();
+    this.demoOn = true;
+    this.demoT = 0;
+    // The Score's own build, and its own place in its own variation space, so
+    // two Scores opened back to back are playing different material rather than
+    // the same four Programs treated differently.
+    const engine = this.score.demo;
+    this.variation = engine.from;
+    this.lastVaryBar = 0;
+    this.setEngine({ axiomId: engine.axiomId, rows: [...engine.rows], intensity: 0.55 });
+    this.setParts(
+      engine.rows.map((row, i) =>
+        derivePart(
+          { triggerId: row.triggerId, modifierIds: row.modifiers, actionId: row.primitive, live: true },
+          { primitive: row.primitive, hue: row.hue },
+          i,
+          this.score.feel.parts,
+        ),
+      ),
+    );
+    this.demoFrame = requestAnimationFrame(this.demoTick);
+  }
+
+  /** True while the Music window is auditioning. */
+  get demoing(): boolean {
+    return this.demoOn;
+  }
+
+  private demoOn = false;
+  private demoFrame: number | null = null;
+  private demoT = 0;
+
+  private readonly demoTick = (): void => {
+    if (!this.demoOn || !this.ctx) return;
+    this.demoT += 1 / 60;
+    const t = this.demoT;
+
+    /**
+     * A wandering intensity, on two periods that do not divide each other.
+     *
+     * A fixed level would only ever demonstrate the layers above it, and a
+     * sawtooth would be heard as a ramp rather than as a game. Nine and
+     * twenty-seven seconds beat against each other for four minutes before they
+     * repeat, which is longer than anybody auditions for.
+     */
+    const wander = 0.55 + 0.3 * Math.sin(t / 9) + 0.15 * Math.sin(t / 2.7 + 1.3);
+    const intensity = Math.max(0.08, Math.min(1, wander));
+
+    // The hue drifts, so the timbre colour and the kit move too.
+    const hues: Hue[] = ['thermal', 'voltaic', 'void'];
+    const dominant = hues[Math.floor(t / 17) % 3]!;
+
+    // Accents, at a rate that follows the intensity. `flush` quantises and caps
+    // these, so the exact arrival time does not matter and randomness here reads
+    // as playing rather than as noise.
+    const cues: AudioCue[] = [];
+    const rate = intensity * 0.55;
+    if (Math.random() < rate) {
+      cues.push({ kind: 'fire', hue: dominant, depth: 0, weight: 0.3 + Math.random() * 0.4 });
+    }
+    if (Math.random() < rate * 0.7) {
+      cues.push({
+        kind: 'kill',
+        hue: hues[Math.floor(Math.random() * 3)]!,
+        // A cascade climbs the chord, which is the best thing the accent layer
+        // does and is invisible at a fixed depth.
+        depth: Math.floor(Math.random() * Math.max(1, intensity * 6)),
+        weight: 0.5 + Math.random() * 0.5,
+      });
+    }
+    if (Math.random() < rate * 0.12) {
+      cues.push({ kind: 'pickup', hue: 'void', depth: 2, weight: 0.7 });
+    }
+    // A level-up now and then, so the occasion chord is in the audition too.
+    if (Math.random() < 0.0025) {
+      cues.push({ kind: 'level', hue: dominant, depth: 0, weight: 1 });
+    }
+
+    this.update(
+      { intensity, dominant, heat: 0.4 + 0.3 * Math.sin(t / 13), stalled: false, meltdown: 0, siege: 0 },
+      cues,
+    );
+    this.demoFrame = requestAnimationFrame(this.demoTick);
+  };
+
   /** For the occasions the sim does not model as cues — Discovery, Recompile. */
   celebrate(): void {
     if (!this.ctx) return;
@@ -1203,7 +1447,21 @@ export class Audio {
     const beat = 60 / (this.clock?.bpm ?? M.tempo.base);
 
     if (index === 0) {
-      this.bar = Math.floor(count / 16);
+      // A requested restart lands here rather than the instant it was asked for:
+      // a track that cut in mid-bar reads as a glitch, and the longest anyone
+      // waits is one bar.
+      if (this.restartWanted) {
+        this.restartWanted = false;
+        this.barZero = count;
+        this.lastVaryBar = 0;
+        // The variation is *not* touched here. `demo()` and `setScore()` set it
+        // when an audition starts; doing it again from the Score's demo config
+        // would apply an audition setting to a run, which is how `vault` — whose
+        // audition starts at variation 2 — quietly stopped playing the song its
+        // golden holds.
+        if (this.pendingPlan) this.adopt(this.pendingPlan);
+      }
+      this.bar = Math.floor((count - this.barZero) / 16);
       // A new arrangement lands where the ear expects a change: the top of a
       // section. For a single-section form that is the 16-bar phrase boundary
       // this rule has always used.
@@ -1215,6 +1473,9 @@ export class Audio {
     }
     const tones = this.chordTones();
     this.tones = tones;
+    // Absolute, from the key rather than the chord — a melody stays in the key
+    // while the harmony moves under it, which is the whole point of having one.
+    const scaleTones = this.score.tonality.scale.map((t) => plan.key + t);
 
     // §18 — the section. Techno does not build with chords, it builds by opening
     // a filter and adding layers, then dropping them and doing it again. This is
@@ -1300,7 +1561,7 @@ export class Audio {
     // bass is always playing the harmony rather than a line beside it.
     const bassStep = step(cells.bass, count);
     if (bassStep && !bassStep.hold && gate(section.bass, i > M.entry.bass) && !claimed) {
-      const hz = semiHz(tone(tones, bassStep) + M.register.bass);
+      const hz = semiHz(tone(tones, scaleTones, bassStep) + M.register.bass);
       bass(music, swung, hz, M.gains.bass, {
         voice: plan.bassVoice,
         q: plan.bassQ,
@@ -1313,7 +1574,7 @@ export class Audio {
       this.lastBassHz = 0;
     }
 
-    if (index === 0) {
+    if (index === 0 && gate(section.sub ?? 'auto', true)) {
       sub(punch, at, semiHz(tones[0]! + M.register.sub), M.gains.sub, beat * M.length.sub);
     }
 
@@ -1352,7 +1613,8 @@ export class Audio {
       gate(section.lead, phrase > M.entry.motifPhrase || i > M.entry.motifIntensity)
     ) {
       const hz = semiHz(
-        tone(tones, motifStep) + (answering ? M.register.motifAnswer : M.register.motif),
+        tone(tones, scaleTones, motifStep) +
+          (answering ? M.register.motifAnswer : M.register.motif),
       );
       motif(music, swung, hz, M.gains.motif, plan.leadVoice, this.lastLeadHz);
       if (plan.echo > 0.01) {
@@ -1370,21 +1632,26 @@ export class Audio {
     // Under Meltdown it stops being chopped and is held across the bar instead.
     // A gated chord is a rhythm part; the same notes sustained are a drone, and
     // with the lead gone that is the only thing left carrying the harmony.
+    // A chopped chord is a rhythm part; a held one is a drone. Which of the two
+    // the harmony arrives as is the Score's call — see `feel.chordVoice`.
+    const chordAs = this.score.feel.chordVoice === 'pad' ? pad : gatedChord;
     if (bleak) {
       if (index === 0) {
-        gatedChord(music, swung, tones, M.gains.chordBleak, beat * M.length.chordBleak, plan.padWave);
+        chordAs(music, swung, tones, M.gains.chordBleak, beat * M.length.chordBleak, plan.padWave);
         this.send(reverb, (v) =>
-          gatedChord(v, swung, tones, M.gains.chordBleak, beat * M.length.chordBleak, plan.padWave),
+          chordAs(v, swung, tones, M.gains.chordBleak, beat * M.length.chordBleak, plan.padWave),
         );
       }
     } else if (gate(section.chord, i > M.entry.chordIntensity) && index % 8 === 4) {
-      gatedChord(music, swung, tones, M.gains.chord, beat * M.length.chord, plan.padWave);
+      chordAs(music, swung, tones, M.gains.chord, beat * M.length.chord, plan.padWave);
       this.send(reverb, (v) =>
-        gatedChord(v, swung, tones, M.gains.chord, beat * M.length.chord, plan.padWave),
+        chordAs(v, swung, tones, M.gains.chord, beat * M.length.chord, plan.padWave),
       );
     }
 
-    if (gate(section.parts, true)) this.playParts(music, swung, index, tones);
+    // The Engine's layer builds with the fight like everything else. See
+    // `entry.parts` — a negative threshold means always on.
+    if (gate(section.parts, i > M.entry.parts)) this.playParts(music, swung, index, tones);
     this.siegeStep(at, index, beat);
     this.flush(at, i);
   }
@@ -1563,22 +1830,44 @@ export class Audio {
       // in the chord; the contour moves it around inside that chord across the
       // bar. Both are chord degrees, so a part cannot step onto a wrong note.
       const degree = part.tone + (part.contour[index % part.contour.length] ?? 0);
+      /**
+       * A contour is allowed to walk *down*.
+       *
+       * `tones[degree % n]` looks total and is not: in JavaScript `-1 % 3` is
+       * `-1`, so any negative degree indexed off the front of the array, got
+       * `undefined`, and produced a NaN pitch. The `!` told the type checker
+       * otherwise. That NaN then reached an `AudioParam`, which throws — and
+       * because this runs inside the sequencer's step, the throw took **every
+       * remaining note of that sixteenth** with it. A song whose contours mostly
+       * descend spent its life killing its own steps.
+       *
+       * Wrapping down a chord is an octave down, so that is what it does.
+       * Non-negative degrees keep the old fold exactly.
+       */
+      const n = tones.length;
+      const octave = degree < 0 ? Math.floor(degree / n) : 0;
       const hz = semiHz(
-        tones[degree % tones.length]! + this.score.mix.register.part + part.register,
+        tones[(degree - octave * n) % n]! +
+          octave * 12 +
+          this.score.mix.register.part +
+          part.register,
       );
+      // `gains.part` is the balance between the Engine's accompaniment and the
+      // written song. See the field for why it has to exist.
+      const partGain = part.gain * this.score.mix.gains.part;
       playPart(
         music,
         part.voice,
         swung,
         hz,
-        part.gain,
+        partGain,
         part.length,
         part.bite,
         part.glide ? (this.lastPartHz[p] ?? 0) : 0,
       );
       if (part.echo > 0.01) {
         const send = this.voice(this.echoSend);
-        playPart(send, part.voice, swung, hz, part.gain * part.echo, part.length, part.bite);
+        playPart(send, part.voice, swung, hz, partGain * part.echo, part.length, part.bite);
       }
       this.lastPartHz[p] = hz;
     }
@@ -1678,7 +1967,14 @@ export class Audio {
       // being hammered, and cannot clash with the track by construction - which
       // is the only way forty simultaneous notes were ever going to work.
       const base = A.base[cue.kind] ?? 0;
-      playHue(voice, cue.hue, at, this.chordNote(base + cue.depth), gain);
+      const hz = this.chordNote(base + cue.depth);
+      // A Score may name its own accent instruments; `null` keeps the three
+      // hardcoded hue voices. See `feel.accentVoice`.
+      const accent = this.score.feel.accentVoice;
+      // Short and bright: an accent is a highlight, not another part note. The
+      // hardcoded hue voices are blips and this has to sit in the same hole.
+      if (accent) playPart(voice, accent[cue.hue], at, hz, gain, 0.6, 0.7, 0);
+      else playHue(voice, cue.hue, at, hz, gain);
       played++;
     }
   }

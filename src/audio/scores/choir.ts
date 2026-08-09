@@ -41,6 +41,7 @@ export const choir: Score = {
   ...deep,
   id: 'choir',
   name: 'Choir',
+  blurb: 'Sung. Plucked strings and formant voices.',
 
   feel: {
     ...deep.feel,
@@ -118,7 +119,20 @@ export const choir: Score = {
     ...deep.graph,
     // A church, near enough. Long, and bright enough to keep the vowels legible —
     // damping a choir into the dark is how it stops sounding like people.
-    reverb: { send: 0.4, seconds: 5.2, damp: 4200, predelay: 0.04 },
+    reverb: { send: 0.4, seconds: 5.2, damp: 4200, predelay: 0.04, highpass: 0 },
     delay: { ...deep.graph.delay, feedback: 0.48, damp: 2400 },
+  },
+
+  /**
+   * Two rows: a bell twice a bar and one long organ. A choir needs room and
+     * four sequencers is not room.
+   */
+  demo: {
+    axiomId: 'feedback',
+    from: 9,
+    rows: [
+      { triggerId: 'on_crit', primitive: 'orbital', hue: 'thermal', modifiers: ['enlarge'] },
+      { triggerId: 'clock', primitive: 'convert', hue: 'void', modifiers: ['sustain'] },
+    ],
   },
 };

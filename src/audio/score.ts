@@ -38,12 +38,18 @@
  */
 import type { Hue } from '../sim/types';
 import type { ArrangeHue } from './arrange';
+import type { PartTuning, PartVoice } from './parts';
 import { validate, type CellLibrary, type Feel as CellFeel, type Mood, type Register, type Space } from './cells';
 import { current } from './scores/current';
 import { deep } from './scores/deep';
 import { industrial } from './scores/industrial';
 import { choir } from './scores/choir';
 import { vault } from './scores/vault';
+import { pulse } from './scores/pulse';
+import { rust } from './scores/rust';
+import { spire } from './scores/spire';
+import { anthem } from './scores/anthem';
+import { basin, furnace, lattice, marrow } from './scores/playlist';
 import type {
   BassVoice,
   KickVoice,
@@ -69,6 +75,14 @@ export interface Tonality {
    * missing.
    */
   chords: Readonly<Record<string, readonly number[]>>;
+  /**
+   * The scale, in semitones from the key, for cells that ask for degrees.
+   *
+   * Seven entries. This is what a melody moves through *between* the chord tones
+   * — the passing notes, the leading note, the step that makes a line a line
+   * rather than a broken chord. Chord-relative cells never touch it.
+   */
+  scale: readonly number[];
 }
 
 // -------------------------------------------------------------------- feel
@@ -151,7 +165,31 @@ export interface FeelTuning {
      * silent, occasional change to which bassline a build gets.
      */
     jitterScale: number;
+    /**
+     * How much worse than the best a cell may score and still be considered.
+     *
+     * `0` is a plain argmax — always the single highest — which is what this was
+     * and why a twelve-motif library only ever yielded three. Anything above zero
+     * turns selection from "the best" into "one of the plausible ones", chosen by
+     * the seed, which is what lets a Score's vocabulary actually be heard.
+     *
+     * Preference still wins: nothing outside the band is reachable at all. Two is
+     * about one step of energy, which is the difference between a cell that fits
+     * and one that nearly does.
+     */
+    spread: number;
   };
+
+  /**
+   * Whether the drums reselect as the track develops.
+   *
+   * `false` keeps the kit fixed for as long as the Engine is, which is the
+   * original behaviour and a defensible one — techno keeps its drum machine and
+   * changes what is over the top. It also means exactly *one* kick pattern for a
+   * whole run: measured at 1 of 9 available, in every Score, because the kick is
+   * seeded from the build alone and never sees the variation counter.
+   */
+  kitVaries: boolean;
 
   /**
    * The section-to-section energy nudge, indexed by variation.
@@ -174,6 +212,48 @@ export interface FeelTuning {
 
   bassVoice(ctx: RegisterContext): BassVoice;
   leadVoice(ctx: RegisterContext): LeadVoice;
+
+  /**
+   * How the harmony is delivered.
+   *
+   * `gated` is the genre's answer and the one this engine was built on: a chord
+   * chopped onto the sixteenths, because harmony in techno is carried
+   * rhythmically. `pad` is the other one — held, slow-swelling, no relationship
+   * to the grid at all.
+   *
+   * That was deliberately impossible before. `gatedChord` exists *because* the
+   * old pad "swelled with no relationship to the beat", and the pad voice has
+   * sat unused in `voices.ts` ever since. It is the right sound for a Score with
+   * no drums under it, and the wrong one for every Score that has them.
+   */
+  chordVoice: 'gated' | 'pad';
+
+  /**
+   * What an engine event sounds like — the accents the *battle* fires.
+   *
+   * `null` uses the three hardcoded hue voices in `voices.ts`, which is what
+   * every Score did until now: a saw blip for thermal, a square for voltaic, an
+   * FM tone for void, identical in every song. Those are the densest thing in
+   * the mix during play and they never changed, so however different two Scores
+   * were, the noise your shooting made was the same noise.
+   *
+   * Naming a part voice per hue moves that. The hue stays distinguishable
+   * *within* a song, which is what §16.3 asks for; it just stops being the same
+   * three sounds across all of them.
+   */
+  accentVoice: Readonly<Record<Hue, PartVoice>> | null;
+
+  /**
+   * The Engine's own lines — which Trigger fires on which sixteenths, which
+   * instrument an Action primitive gets, how each moves across the bar.
+   *
+   * See `PartTuning`. These were module constants in `parts.ts`, which made the
+   * **densest layer in the mix** identical in every Score: measured over 64 bars
+   * the parts fire about 576 notes against the motif's 63, and nine Scores
+   * produced three distinct part patterns between them. Whatever else changed,
+   * the loudest continuous thing in the audition was the same music every time.
+   */
+  parts: PartTuning;
 
   /**
    * What each group is asked for.
@@ -238,6 +318,15 @@ export interface Section {
   chord: LayerGate;
   /** The Engine's own lines. Dropping these is what makes a break feel empty. */
   parts: LayerGate;
+  /**
+   * The downbeat sub. Optional, defaulting to `auto`, because until now it was
+   * not a decision at all — `onStep` fired one on every bar unconditionally.
+   *
+   * That is correct for every Score built on a drum kit and wrong for one built
+   * without: a track with no kick still had a low thud on every downbeat, which
+   * is a kick by another name.
+   */
+  sub?: LayerGate;
 
   /** Filter openness across the section, start to end. Replaces the phrase ramp. */
   open: readonly [number, number];
@@ -357,10 +446,36 @@ export interface MixTuning {
     sub: number;
     chord: number;
     chordBleak: number;
+
+    /**
+     * How loud the Engine's parts are against the written song.
+     *
+     * The parts layer fires an order of magnitude more notes than the melody —
+     * measured over 36 bars, 2,133 part notes against 768 of motif in one Score
+     * — so at equal level it is not an accompaniment, it *is* the song, and the
+     * written music plays underneath where nobody can hear it. That is what
+     * buried a choir under an organ, and what made two songs with completely
+     * different melodies sound like the same song.
+     *
+     * 1 is the historical behaviour, and what `current` keeps.
+     */
+    part: number;
   };
 
   /** What each layer has to earn before it is heard. */
   entry: {
+    /**
+     * How much has to be happening before the Engine's own layer is heard.
+     *
+     * The other six thresholds existed; this one did not, because `parts` was
+     * gated on the literal `true`. That made the densest layer in the mix the one
+     * layer that could not build — it arrived at full strength on bar one whether
+     * you had fired a shot or not.
+     *
+     * A **negative** value means no threshold at all, which is the historical
+     * behaviour: `intensity` is 0..1, so `i > -1` is always true.
+     */
+    parts: number;
     hatDrive: number;
     bass: number;
     stabPhrase: number;
@@ -556,7 +671,18 @@ export interface GraphTuning {
    * lands and is reviewable, and the sound does not move until somebody turns it
    * up on purpose.
    */
-  reverb: { send: number; seconds: number; damp: number; predelay: number };
+  /**
+   * `highpass` is the corner of a filter on the *send*, not the return.
+   *
+   * A reverb fed low frequencies smears them: the tail of a bass note arrives
+   * under the next one and the low end stops having edges. In a Score with a
+   * sustained pad and a five-second room it reads as reverb on the bass even
+   * though the bass is never sent — the pad's own fundamentals do it.
+   *
+   * 0 means no filter and no node in the graph at all, which is what every
+   * Score did before this existed.
+   */
+  reverb: { send: number; seconds: number; damp: number; predelay: number; highpass: number };
 }
 
 // ------------------------------------------------------------------ voices
@@ -754,21 +880,96 @@ export interface ChordTuning {
 
 // ------------------------------------------------------------------- score
 
+/** The Engine a Score auditions with. See `Score.demo`. */
+export interface DemoEngine {
+  axiomId: string;
+  rows: { triggerId: string; primitive: string; hue: Hue; modifiers: string[] }[];
+  /** Where in its own variation space to start, so no two open on the same pass. */
+  from: number;
+}
+
 export interface Score {
   id: string;
   /** Shown in the Lab and when `?score=` names something that does not exist. */
   name: string;
+  /** One line, for the list on the desk. What it is, not how it works. */
+  blurb: string;
+  /**
+   * Whether this appears in the MUSIC window.
+   *
+   * The registry holds everything the build can play, which by now includes a
+   * transcription and nine abandoned experiments. A player is not a changelog:
+   * the list shows the songs, and everything else stays reachable by `?score=`
+   * for comparison without cluttering the thing somebody actually uses.
+   */
+  listed?: boolean;
   cells: CellLibrary;
   tonality: Tonality;
   feel: FeelTuning;
   mix: MixTuning;
   graph: GraphTuning;
   voices: VoiceTuning;
+  /**
+   * The Engine the Music window plays this Score with.
+   *
+   * Every Score auditioned with the *same* four Programs and always from
+   * variation zero, so clicking down the list compared nine parameter sets
+   * arranging one piece of material from one starting point. The differences
+   * were real and almost entirely inaudible in the first minute, which is all
+   * anybody listens for.
+   *
+   * A Score picks its own build instead. Row count moves the mood and the
+   * density, the Triggers move every part rhythm, the primitives move the
+   * instruments, the hues move the kit — so two Scores now differ in what they
+   * are *playing*, not only in how it is treated.
+   */
+  demo: DemoEngine;
 }
 
 // ---------------------------------------------------------------- registry
 
-export const SCORES: Readonly<Record<string, Score>> = { current, deep, industrial, choir, vault };
+/**
+ * Every Score this build can play.
+ *
+ * Mutable rather than frozen because saved documents join it at boot — see
+ * `scorestore.ts`. The authored ones are written here; anything a player saved
+ * is layered on top by `registerScores` before the first lookup.
+ */
+export const SCORES: Record<string, Score> = {
+  lattice,
+  furnace,
+  basin,
+  marrow,
+  current,
+  anthem,
+  deep,
+  vault,
+  spire,
+  rust,
+  pulse,
+  choir,
+  industrial,
+};
+
+/**
+ * Add Scores built from saved documents.
+ *
+ * Refuses to overwrite an authored Score. A saved document that shadowed
+ * `current` would break the one guarantee this whole system rests on — that
+ * `?score=` with nothing set plays the transcription — and it would do it
+ * invisibly, from a blob in local storage.
+ */
+export function registerScores(scores: readonly Score[]): void {
+  for (const score of scores) {
+    if (AUTHORED.has(score.id)) {
+      console.warn(`[audio] saved score "${score.id}" ignored — that name is built in`);
+      continue;
+    }
+    SCORES[score.id] = score;
+  }
+}
+
+const AUTHORED = new Set(Object.keys(SCORES));
 
 export const DEFAULT_SCORE = 'current';
 

@@ -41,6 +41,7 @@ export const industrial: Score = {
   ...deep,
   id: 'industrial',
   name: 'Industrial',
+  blurb: 'Broken. Nothing on the quarters. Struck metal.',
 
   cells: {
     /**
@@ -280,10 +281,24 @@ export const industrial: Score = {
 
   graph: {
     ...deep.graph,
-    reverb: { send: 0.34, seconds: 4.6, damp: 1500, predelay: 0.045 },
+    reverb: { send: 0.34, seconds: 4.6, damp: 1500, predelay: 0.045, highpass: 0 },
     delay: { ...deep.graph.delay, feedback: 0.62, damp: 900 },
     // A touch more shelf: this Score lives almost entirely in the bottom two
     // octaves and the limiter is what stops that becoming loud rather than big.
     lowShelf: { hz: 95, gain: 6 },
+  },
+
+  /**
+   * Rare Triggers — on_wound twice a bar, on_overheat twice — so the Engine
+     * punctuates rather than plays. All low, all void and thermal.
+   */
+  demo: {
+    axiomId: 'circuit',
+    from: 4,
+    rows: [
+      { triggerId: 'on_wound', primitive: 'burst', hue: 'void', modifiers: ['ground'] },
+      { triggerId: 'on_overheat', primitive: 'knockback', hue: 'thermal', modifiers: [] },
+      { triggerId: 'clock', primitive: 'delayed', hue: 'void', modifiers: ['sustain'] },
+    ],
   },
 };

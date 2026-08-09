@@ -30,6 +30,7 @@ import {
   type Space,
   type StabCell,
 } from './cells';
+import type { Groove } from './grooves';
 import type { FeelTuning, Score } from './score';
 import type { BassVoice, KickVoice, LeadVoice, PercVoice, StabVoice } from './voices';
 
@@ -75,6 +76,14 @@ export interface ArrangeInput {
    * this file only chooses the material.
    */
   meltdown?: number;
+  /**
+   * The drums, overriding whatever the Score brought. `undefined` keeps them.
+   *
+   * A separate axis because it *is* one: eight Scores had barely moved the beat,
+   * since a Score that spreads another inherits every cell it does not replace.
+   * Rhythm and sound are two questions and this is the second dial.
+   */
+  groove?: Groove | null;
 }
 
 export interface Arrangement {
@@ -156,7 +165,7 @@ function pick<T extends { id: string; energy: number }>(
    */
   avoid?: string,
 ): T {
-  let best = candidates[0]!;
+  const scored: { cell: T; score: number }[] = [];
   let bestScore = -Infinity;
 
   for (const cell of candidates) {
@@ -173,12 +182,34 @@ function pick<T extends { id: string; energy: number }>(
     // way for every build in the game.
     score += (hash(cell.id + seed) % 100) / weights.jitterScale;
 
-    if (score > bestScore) {
-      bestScore = score;
-      best = cell;
-    }
+    scored.push({ cell, score });
+    if (score > bestScore) bestScore = score;
   }
-  return best;
+  if (scored.length === 0) return candidates[0]!;
+
+  /**
+   * Everything close enough to the winner, not just the winner.
+   *
+   * This used to be a plain argmax, and that is why a library of twelve motifs
+   * only ever produced three. The scorer is *decisive* — a cell one step off the
+   * wanted energy loses two points and the jitter tops out below one, so for a
+   * fixed build the answer is fixed, and no amount of authoring more cells
+   * changes it. Measured: one build heard 3 of 12 motifs over seventeen minutes,
+   * and 1 of 9 kicks.
+   *
+   * `spread` says how much worse than the best a cell may be and still be
+   * *plausible*. Everything inside that band goes on a shortlist and the seed —
+   * which moves with the variation counter — decides between them. So preference
+   * still rules (nothing outside the band is ever reachable), the choice is still
+   * deterministic for a given build and pass, and the library actually gets used.
+   *
+   * `spread: 0` reduces to the old argmax exactly, because the per-cell jitter
+   * makes true ties vanishingly unlikely. That is what `current` sets, and it is
+   * why nothing about it moved.
+   */
+  const band = scored.filter((s) => s.score >= bestScore - weights.spread);
+  if (band.length === 1) return band[0]!.cell;
+  return band[hash(`pick:${seed}:${band.length}`) % band.length]!.cell;
 }
 
 /** Which hue the Engine mostly speaks in. */
@@ -218,11 +249,24 @@ export function arrange(input: ArrangeInput, score: Score): Arrangement {
   const build =
     `${input.axiomId}|v${vary}|${input.meltdown ? 'm' : ''}` +
     rows.map((r) => `${r.triggerId}:${r.primitive}:${r.hue}:${r.modifiers.join(',')}`).join(';');
-  const signature = `${score.id}|${build}`;
+  // The Groove joins the *signature* and not the `build` above, for exactly the
+  // reason the Score id does: `build` feeds `hash()`, so mixing a groove into it
+  // would reshuffle the melodic selection as well and changing the drums would
+  // silently change the tune.
+  const groove = input.groove ?? null;
+  const signature = `${score.id}|${groove ? `${groove.id}|` : ''}${build}`;
   const seed = hash(build);
   // The drums keep the *build's* seed, so the kit and the groove are stable for
   // as long as the Engine is. Everything melodic moves with the variation.
-  const kitSeed = hash(`${input.axiomId}|` + rows.map((r) => `${r.triggerId}:${r.primitive}:${r.hue}`).join(';'));
+  // The drums keep the *build's* seed, so the kit is stable for as long as the
+  // Engine is — unless the Score asks otherwise, in which case the variation
+  // counter folds in and the beat develops with everything else. One kick
+  // pattern for a whole run is stability; it is also monotony, and which of the
+  // two it reads as is a taste call rather than a law.
+  const kitSeed = hash(
+    `${input.axiomId}|${T.kitVaries ? `v${vary}|` : ''}` +
+      rows.map((r) => `${r.triggerId}:${r.primitive}:${r.hue}`).join(';'),
+  );
 
   // The Score's cells plus whatever the player has written. Read once, so a cell
   // added mid-audition cannot change the arrangement halfway through building it.
@@ -276,23 +320,23 @@ export function arrange(input: ArrangeInput, score: Score): Arrangement {
   );
 
   // ---- drums --------------------------------------------------------------
-  const feel: Feel = T.chooseFeel(count, bias.feel);
+  const feel: Feel = T.chooseFeel(count, groove ? groove.feel : bias.feel);
 
   const kick = pick(
     T.weights,
-    CELLS.kicks,
+    groove ? groove.kicks : CELLS.kicks,
     { energy: T.ask.kickEnergy(size), feel, space: 'sparse' },
     kitSeed,
   );
   const backbeat = pick(
     T.weights,
-    CELLS.backbeats,
+    groove ? groove.backbeats : CELLS.backbeats,
     { energy: T.ask.backbeatEnergy(i), feel },
     kitSeed + 1,
   );
   const hats = pick(
     T.weights,
-    CELLS.hats,
+    groove ? groove.hats : CELLS.hats,
     { energy: T.ask.hatEnergy(i, lift), feel, space: shiftSpace(T.ask.hatSpace(i)) },
     seed + 2,
     input.avoid?.hats,
@@ -359,7 +403,7 @@ export function arrange(input: ArrangeInput, score: Score): Arrangement {
     bass,
     motif,
     stab,
-    swing: bias.swing,
+    swing: groove ? groove.swing : bias.swing,
     kickVoice: T.hueKick[hue],
     percVoice: size === 0 ? T.emptyPercVoice : T.huePerc[hue],
     bassVoice,

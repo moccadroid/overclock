@@ -157,6 +157,12 @@ class StubParam {
   }
 
   private write(op: Op, value: number | null, time: number, tc?: number): StubParam {
+    // Checked for every param on every node, not just the named graph: a NaN in
+    // a voice-internal envelope is exactly as fatal as one in the bus.
+    if ((value !== null && !Number.isFinite(value)) || !Number.isFinite(time)) {
+      const where = `${this.node.name ?? this.node.kind}.${this.name}`;
+      this.node.rec.nonFinite.push(`${where} ${op}(value=${value}, time=${time})`);
+    }
     // Only the named graph is logged. See the header: voice-internal nodes are
     // covered by their call arguments, and logging them here would bury the
     // signal under thousands of per-note envelopes.
@@ -313,6 +319,17 @@ export class StubContext {
 // -------------------------------------------------------------- the recorder
 
 export class Recorder {
+  /**
+   * Every non-finite value that reached an AudioParam.
+   *
+   * A real `AudioParam` throws `TypeError: The provided float value is
+   * non-finite` on NaN or Infinity, and because the sequencer runs from a
+   * `setInterval`, the throw is uncaught: the whole step is abandoned and the
+   * console fills with a stack that points at the timer rather than at the
+   * voice. Nothing in the goldens could see it — a stub that quietly stores NaN
+   * records a schedule that the browser would have refused to play.
+   */
+  readonly nonFinite: string[] = [];
   readonly voices: VoiceEvent[] = [];
   readonly params: ParamEvent[] = [];
   readonly nodes: StubNode[] = [];

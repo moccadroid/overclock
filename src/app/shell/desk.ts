@@ -46,6 +46,10 @@ import {
 import {
   CONFIG_ROW,
   CONFIG_SHEET,
+  MUSIC_ROW,
+  MUSIC_SHEET,
+  musicLines,
+  type MusicEntry,
   configFields,
   configLines,
   fileBody,
@@ -55,6 +59,7 @@ import {
 import { classificationOf, filename, tree, type Entry } from './filetree';
 import { Explorer } from './explorer';
 import { rungOf } from '../../story/arc';
+import { SCORES } from '../../audio/score';
 import { BEGIN_LABEL, ORDER_SHEET, orderCols, orderLines, orderRows } from './order';
 import { adjustSetting } from './settings';
 
@@ -77,7 +82,7 @@ export interface DeskResult {
  * with something moving into it is the one picture that says both "begin" and
  * "leave the desk". The arrow inside it is what keeps it legible as an action.
  */
-type Glyph = 'folder' | 'shift' | 'cog';
+type Glyph = 'folder' | 'shift' | 'cog' | 'speaker';
 
 function drawGlyph(g: Graphics, kind: Glyph, x: number, y: number): void {
   const ink = C.paper;
@@ -88,6 +93,24 @@ function drawGlyph(g: Graphics, kind: Glyph, x: number, y: number): void {
     g.rect(x, y + 6, 1, 22).fill(ink);
     g.rect(x + 29, y + 6, 1, 22).fill(ink);
     g.rect(x + 4, y + 2, 12, 4).fill(ink);
+    return;
+  }
+
+  if (kind === 'speaker') {
+    // A cabinet and a cone, in three rectangles and a triangle. The obvious
+    // glyph is a quaver, and it is wrong for the same reason the play triangle
+    // was wrong for SHIFT: this machine predates the icon. A speaker is a piece
+    // of furniture, which is what everything else on this desk is.
+    g.rect(x + 4, y + 3, 13, 24).fill({ color: 0x080b12, alpha: 1 });
+    g.rect(x + 4, y + 3, 13, 1).fill(ink);
+    g.rect(x + 4, y + 26, 13, 1).fill(ink);
+    g.rect(x + 4, y + 3, 1, 24).fill(ink);
+    g.rect(x + 16, y + 3, 1, 24).fill(ink);
+    g.circle(x + 10, y + 11, 3).stroke({ color: ink, width: 1 });
+    g.circle(x + 10, y + 20, 1.5).stroke({ color: ink, width: 1 });
+    // Two arcs of output, as stepped blocks — no curves in this dialect.
+    g.rect(x + 21, y + 12, 1, 6).fill(ink);
+    g.rect(x + 24, y + 9, 1, 12).fill(ink);
     return;
   }
 
@@ -125,6 +148,7 @@ function drawGlyph(g: Graphics, kind: Glyph, x: number, y: number): void {
 const W_FILES = 'files';
 const W_SHIFT = 'shift';
 const W_CONFIG = 'config';
+const W_MUSIC = 'music';
 const readerId = (ref: string): string => `read:${ref}`;
 
 /** Every reader shares one size, under this key. */
@@ -142,6 +166,7 @@ const WANT: Record<string, { cols: number; rows: number }> = {
   [W_FILES]: { cols: 70, rows: 24 },
   [W_SHIFT]: { cols: 62, rows: 22 },
   [W_CONFIG]: { cols: 52, rows: 18 },
+  [W_MUSIC]: { cols: 78, rows: 28 },
   [W_READER]: { cols: 72, rows: 26 },
 };
 
@@ -168,6 +193,7 @@ export class Desk {
     [W_FILES, { x: 96, y: 96 }],
     [W_SHIFT, { x: 700, y: 128 }],
     [W_CONFIG, { x: 340, y: 240 }],
+    [W_MUSIC, { x: 280, y: 120 }],
   ]);
 
   private axioms: AxiomDef[] = [];
@@ -176,6 +202,11 @@ export class Desk {
   private fields: ConfigField[] = [];
   private configCursor = 0;
   private configRows: Rows | null = null;
+
+  private songs: MusicEntry[] = [];
+  private musicCursor = 0;
+  private musicRows: Rows | null = null;
+  private transport: Button | null = null;
 
   /**
    * A file being dragged out of the explorer, and the label following the
@@ -526,6 +557,134 @@ export class Desk {
     this.paintConfig();
   }
 
+  /**
+   * MUSIC — the playlist.
+   *
+   * Songs and nothing else. It had a second column of rhythms beside it, and
+   * side by side the two read as one list of twelve rather than as two dials.
+   * Rhythm is still a real axis and still switchable; it does not belong in the
+   * window somebody opens to pick a song.
+   */
+  private openMusic(): void {
+    if (this.desktop.has(W_MUSIC)) {
+      this.desktop.focus(W_MUSIC);
+      return;
+    }
+    const win = new Win({
+      id: W_MUSIC,
+      title: 'MUSIC',
+      ref: MUSIC_SHEET.ref,
+      ...this.sizes.get(W_MUSIC)!,
+      ...this.homes.get(W_MUSIC)!,
+    });
+    this.desktop.add(win);
+
+    /**
+     * Audition with an Engine running under it.
+     *
+     * Chained rather than replaced: `Desktop.add` installs its own `onClose` to
+     * take the window off the desk, and overwriting that would leave a window
+     * that stops the music and then refuses to shut.
+     */
+    const dismiss = win.onClose;
+    win.onClose = () => {
+      this.audio.demo(false);
+      dismiss?.();
+    };
+    this.audio.demo(true);
+
+    // The playlist, not the registry. See `Score.listed`.
+    this.songs = Object.values(SCORES)
+      .filter((s) => s.listed === true)
+      .map((s) => ({ id: s.id, name: s.name, blurb: s.blurb }));
+    this.musicCursor = Math.max(0, this.songs.findIndex((s) => s.id === this.audio.activeScore.id));
+
+    this.musicRows = new Rows(win.grid, {
+      row: MUSIC_ROW,
+      count: this.songs.length,
+      col: 0,
+      cols: this.sizes.get(W_MUSIC)!.cols,
+      onMove: (i) => {
+        this.musicCursor = i;
+        // Deferred: a repaint rebuilds the hit areas, and rebuilding them inside
+        // the event that moved the cursor is what made one click commit five rows.
+        requestAnimationFrame(() => this.paintMusic());
+      },
+      onCommit: (i) => this.playSong(i),
+      commitOnClick: true,
+    });
+    win.controls.addChild(this.musicRows.view);
+    this.buildTransport();
+    this.paintMusic();
+  }
+
+  /**
+   * STOP and PLAY.
+   *
+   * Rebuilt rather than relabelled because `Button` measures its own box from
+   * the label at construction — a four-character word in a five-character box
+   * would sit off-centre, which is the exact bug its own comment describes.
+   */
+  private buildTransport(): void {
+    const win = this.desktop.get(W_MUSIC);
+    if (!win) return;
+    if (this.transport) {
+      this.transport.view.destroy();
+      this.transport = null;
+    }
+    const stopped = !this.audio.playing;
+    this.transport = new Button(win.grid, stopped ? 'PLAY' : 'STOP', {
+      col: 2,
+      row: this.sizes.get(W_MUSIC)!.rows - 2,
+      onPress: () => {
+        if (this.audio.playing) {
+          // Both halves: `silence` parks the clock and zeroes the busses, and
+          // without stopping the audition as well its frame loop would go on
+          // driving an engine nobody can hear.
+          this.audio.demo(false);
+          this.audio.silence();
+        } else {
+          this.audio.demo(true);
+        }
+        this.buildTransport();
+        this.paintMusic();
+      },
+    });
+    win.controls.addChild(this.transport.view);
+  }
+
+  /**
+   * Put a song on.
+   *
+   * **Repainting is deferred a frame, and that is not a nicety.** `paintMusic`
+   * re-lays the sheet, which rebuilds `Rows`' hit areas — and doing that from
+   * inside a `pointertap` handler destroys the containers Pixi's event boundary
+   * is still walking, so it carries on notifying the *new* ones and each of them
+   * commits in turn. One click on DEEP was landing five commits and leaving
+   * CHOIR playing. The click is the event; the redraw is a consequence, and a
+   * consequence must not run inside the thing that caused it.
+   *
+   * The early return is the second half: `setScore` already ignores a Score that
+   * is playing, so without this the repaint-and-rebuild would still fire for a
+   * click that changed nothing.
+   */
+  private playSong(i: number): void {
+    const song = this.songs[i];
+    if (!song || song.id === this.audio.activeScore.id) return;
+    this.musicCursor = i;
+    this.audio.setScore(song.id);
+    this.audio.chrome('confirm');
+    requestAnimationFrame(() => this.paintMusic());
+  }
+
+  private paintMusic(): void {
+    const win = this.desktop.get(W_MUSIC);
+    if (!win) return;
+    win.setLines(
+      musicLines(this.songs, this.musicCursor, this.audio.activeScore.id, !this.audio.playing),
+    );
+  }
+
   private paintConfig(): void {
     const win = this.desktop.get(W_CONFIG);
     if (!win) return;
@@ -548,6 +707,7 @@ export class Desk {
       { label: 'FILES', glyph: 'folder', open: () => this.openFiles() },
       { label: 'SHIFT', glyph: 'shift', open: () => this.openShift() },
       { label: 'CONFIG', glyph: 'cog', open: () => this.openConfig() },
+      { label: 'MUSIC', glyph: 'speaker', open: () => this.openMusic() },
     ];
 
     for (let i = 0; i < items.length; i++) {

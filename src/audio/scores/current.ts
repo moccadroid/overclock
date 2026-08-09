@@ -13,11 +13,13 @@
  * not an edit to this one.
  */
 import { CELLS, type Space } from '../cells';
+import { DEFAULT_PARTS } from '../parts';
 import type { Score } from '../score';
 
 export const current: Score = {
   id: 'current',
   name: 'Current',
+  blurb: 'Bright modal techno. Four on the floor.',
 
   cells: CELLS,
 
@@ -31,6 +33,9 @@ export const current: Score = {
       sus: [0, 5, 7],
       min7: [0, 3, 7, 10],
     },
+    // Natural minor. Unused by this Score — every cell it owns is chord-relative
+    // — but a Score that inherits from it can write tunes with it.
+    scale: [0, 2, 3, 5, 7, 8, 10],
   },
 
   feel: {
@@ -77,7 +82,13 @@ export const current: Score = {
       // Small enough never to beat a real preference, large enough that two
       // equally good cells do not always resolve the same way for every build.
       jitterScale: 120,
+      // A plain argmax — always the single best cell. This is the transcription,
+      // so it keeps the behaviour that made a twelve-motif library yield three.
+      spread: 0,
     },
+
+    // The kit is fixed for as long as the Engine is: one kick pattern per run.
+    kitVaries: false,
 
     lift: [0, 1, 0, -1],
 
@@ -120,6 +131,15 @@ export const current: Score = {
     bassVoice: ({ lowest, hue }) => (lowest === 0 ? 'sub' : hue === 'voltaic' ? 'acid' : 'pluck'),
     leadVoice: ({ hasOrbital, hue }) =>
       hasOrbital ? 'bell' : hue === 'voltaic' ? 'acid' : 'pluck',
+
+    // The authored tables, verbatim. See parts.ts.
+    parts: DEFAULT_PARTS,
+
+    // The three hardcoded hue voices. This Score is the transcription.
+    accentVoice: null,
+
+    // Chopped onto the grid. Harmony in this genre is carried rhythmically.
+    chordVoice: 'gated',
 
     ask: {
       kickEnergy: (size) => 1 + Math.min(4, size),
@@ -217,9 +237,14 @@ export const current: Score = {
       sub: 0.7,
       chord: 0.85,
       chordBleak: 0.6,
+      // The historical level: parts as loud as everything else.
+      part: 1,
     },
 
     entry: {
+      // No threshold. The transcription's parts have always played from bar one
+      // and this file is a record of what the game used to do, not a preference.
+      parts: -1,
       hatDrive: 0.08,
       bass: 0.03,
       stabPhrase: 0.24,
@@ -407,7 +432,14 @@ export const current: Score = {
      * Score which wants distance has somewhere to send to; `current` sends
      * nothing, so the schedule is unchanged and these three numbers are inert.
      */
-    reverb: { send: 0, seconds: 2.6, damp: 3200, predelay: 0.02 },
+    reverb: {
+      send: 0,
+      seconds: 2.6,
+      damp: 3200,
+      predelay: 0.02,
+      // No filter, and so no node in the graph: the transcription is unchanged.
+      highpass: 0,
+    },
   },
 
   voices: {
@@ -553,5 +585,19 @@ export const current: Score = {
       level: 0.3,
       register: 24,
     },
+  },
+
+  /**
+   * Four rows across three hues — the original audition build.
+   */
+  demo: {
+    axiomId: 'circuit',
+    from: 0,
+    rows: [
+      { triggerId: 'clock', primitive: 'projectile', hue: 'thermal', modifiers: ['split'] },
+      { triggerId: 'on_hit', primitive: 'chain', hue: 'voltaic', modifiers: ['echo'] },
+      { triggerId: 'on_kill', primitive: 'burst', hue: 'void', modifiers: [] },
+      { triggerId: 'on_crit', primitive: 'orbital', hue: 'voltaic', modifiers: ['amplify'] },
+    ],
   },
 };

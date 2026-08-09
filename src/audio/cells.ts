@@ -66,6 +66,26 @@ export interface PercCell {
 export interface MelodicCell {
   id: string;
   steps: string;
+  /**
+   * Read the digits as **scale degrees** rather than chord tones.
+   *
+   * This is the difference between a melody and an arpeggio, and until now the
+   * engine could only make the second one. A chord-relative cell can only ever
+   * play the three or four notes of the chord underneath it, so every "tune" in
+   * the game was the current triad in some order — which is exactly why eight
+   * Scores kept sounding like one.
+   *
+   * A scale cell reads `0123456` as the seven degrees of the Score's scale
+   * (`abcdefg` an octave up), in the *key*, independent of the chord. That buys
+   * passing tones, leading tones, stepwise motion and a line that moves against
+   * the harmony instead of spelling it — the whole of what makes something
+   * hummable.
+   *
+   * Off by default, and the accent layer never uses it: forty simultaneous
+   * cascade notes snapping to chord tones is the thing that keeps a busy run from
+   * sounding like a mistake, and that guarantee is not on the table.
+   */
+  scale?: boolean;
   /** Acid only: opens the filter further and hits harder on these steps. */
   accent?: string;
   /** Acid only: glides pitch from the previous note. */
@@ -116,6 +136,8 @@ export interface MelodicStep {
   accent: boolean;
   slide: boolean;
   hold: boolean;
+  /** Resolve `tone` against the key's scale rather than the chord. */
+  scale: boolean;
 }
 
 const PERC_GAIN: Record<string, number> = { x: 1, X: 1.4, o: 0.45, '-': 1 };
@@ -127,19 +149,26 @@ export function parsePerc(pattern: string): (PercStep | null)[] {
   );
 }
 
+/** Chord tones: root, third, fifth, seventh. */
 const TONE_CHARS = '0123';
 const HIGH_CHARS = 'abcd';
+/** Scale degrees, when a cell asks for them. Seven, plus the octave above. */
+const SCALE_CHARS = '0123456';
+const SCALE_HIGH = 'abcdefg';
 
 export function parseMelodic(cell: MelodicCell): (MelodicStep | null)[] {
   const accent = cell.accent ?? '';
   const slide = cell.slide ?? '';
+  const inScale = cell.scale === true;
+  const lows = inScale ? SCALE_CHARS : TONE_CHARS;
+  const highs = inScale ? SCALE_HIGH : HIGH_CHARS;
   return [...cell.steps].map((c, i) => {
     if (c === '.') return null;
     if (c === '~') {
-      return { tone: -1, octave: 0, accent: false, slide: false, hold: true };
+      return { tone: -1, octave: 0, accent: false, slide: false, hold: true, scale: inScale };
     }
-    const low = TONE_CHARS.indexOf(c);
-    const high = HIGH_CHARS.indexOf(c);
+    const low = lows.indexOf(c);
+    const high = highs.indexOf(c);
     if (low < 0 && high < 0) return null;
     return {
       tone: low >= 0 ? low : high,
@@ -147,6 +176,7 @@ export function parseMelodic(cell: MelodicCell): (MelodicStep | null)[] {
       accent: accent[i] === 'x' || accent[i] === 'X',
       slide: slide[i] === '~',
       hold: false,
+      scale: inScale,
     };
   });
 }
@@ -190,12 +220,15 @@ export function validate(
   for (const group of [library.basslines, library.motifs]) {
     for (const cell of group) {
       lengths(cell.id, cell.steps);
-      if (!/^[.0123abcd~]+$/.test(cell.steps)) {
-        throw new Error(`cell "${cell.id}": bad melodic characters`);
+      const ok = cell.scale === true ? /^[.0-6a-g~]+$/ : /^[.0-3a-d~]+$/;
+      if (!ok.test(cell.steps)) {
+        throw new Error(
+          `cell "${cell.id}": bad melodic characters for a ${cell.scale ? 'scale' : 'chord'} cell`,
+        );
       }
       // The seventh only exists on a min7, and a cell that reaches for one it
       // does not have wraps back to the root without complaining.
-      const usesSeventh = /[3d]/.test(cell.steps);
+      const usesSeventh = cell.scale !== true && /[3d]/.test(cell.steps);
       if (usesSeventh && !cell.needsSeventh) {
         throw new Error(`cell "${cell.id}": uses the seventh but does not declare needsSeventh`);
       }
@@ -208,14 +241,24 @@ export function validate(
   }
 
   for (const cell of library.harmonies) {
-    if (cell.chords.length === 0 || cell.chords.length > 2) {
-      throw new Error(`harmony "${cell.id}": techno is modal — one or two chords`);
+    /**
+     * Four chords, and one bar each if it wants.
+     *
+     * This used to be "one or two chords, held at least two bars, opening on the
+     * tonic", with the reason given as *techno is modal*. Techno is; music is
+     * not, and the rule was quietly deciding that nothing this engine ever plays
+     * could have a progression in it. The fastest harmony could possibly move was
+     * one change every two bars, which is why every Score sat on the same chord
+     * for so long that the tune had nowhere to go.
+     *
+     * Still bounded: four is a loop you can learn, and eight would be a song
+     * somebody wrote rather than a vocabulary the arranger can choose from.
+     */
+    if (cell.chords.length === 0 || cell.chords.length > 4) {
+      throw new Error(`harmony "${cell.id}": one to four chords`);
     }
-    if (cell.chords[0]!.root !== 0) {
-      throw new Error(`harmony "${cell.id}": must open on its tonic`);
-    }
-    if (cell.barsPerChord < 2) {
-      throw new Error(`harmony "${cell.id}": chords must be held at least two bars`);
+    if (cell.barsPerChord < 1) {
+      throw new Error(`harmony "${cell.id}": chords must be held at least a bar`);
     }
     if (chords) {
       for (const chord of cell.chords) {

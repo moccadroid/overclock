@@ -43,6 +43,7 @@ export const deep: Score = {
   ...current,
   id: 'deep',
   name: 'Deep',
+  blurb: 'Dark and wide. Phrygian harmony, long reverb.',
 
   cells: {
     ...current.cells,
@@ -128,6 +129,19 @@ export const deep: Score = {
 
   feel: {
     ...current.feel,
+
+    /**
+     * Use the library instead of the top of it.
+     *
+     * `pick()` was an argmax, so a fixed build got a fixed answer and a
+     * twelve-motif library produced three lines over seventeen minutes. A spread
+     * of 2 — about one step of energy — puts every cell that genuinely fits on a
+     * shortlist and lets the variation counter choose between them. And the kit
+     * develops now, because one kick pattern for a whole run is not stability,
+     * it is the thing you were hearing as sameness.
+     */
+    weights: { ...current.feel.weights, spread: 2 },
+    kitVaries: true,
 
     /**
      * Inverted. **More rows means darker.**
@@ -412,7 +426,7 @@ export const deep: Score = {
      * Long and dark: three and a half seconds with the tail rolled off hard, so
      * late reflections arrive as a wash rather than as an echo you could count.
      */
-    reverb: { send: 0.26, seconds: 3.4, damp: 2200, predelay: 0.03 },
+    reverb: { send: 0.26, seconds: 3.4, damp: 2200, predelay: 0.03, highpass: 0 },
 
     // A touch more feedback and a darker repeat, since the delay is now always
     // audible rather than being a modifier's reward.
@@ -447,5 +461,19 @@ export const deep: Score = {
     // Darker, and detuned wider: slow beating between the two voices is unease
     // you cannot name, which is worth more here than another dissonance you can.
     chord: { ...current.voices.chord, open: 2200, close: 600, detune: 9 },
+  },
+
+  /**
+   * Three void-heavy rows: drones and ticks, no orbital, so no bell. Size 3
+     * with a cascade lands it on `driving` and the deep kick.
+   */
+  demo: {
+    axiomId: 'feedback',
+    from: 5,
+    rows: [
+      { triggerId: 'on_hit', primitive: 'beam', hue: 'void', modifiers: ['sustain'] },
+      { triggerId: 'on_kill', primitive: 'zone', hue: 'void', modifiers: [] },
+      { triggerId: 'clock', primitive: 'mine', hue: 'thermal', modifiers: ['ground'] },
+    ],
   },
 };

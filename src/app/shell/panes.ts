@@ -818,3 +818,66 @@ export function configLines(fields: readonly ConfigField[], cursor: number, lib:
   out.push(blank());
   return out;
 }
+
+// ------------------------------------------------------------------- music
+
+export const MUSIC_SHEET = {
+  head: 'AUDIO PROGRAMME INDEX',
+  ref: 'OC-1147-M',
+  stamp: 'INTERNAL USE',
+  stampInk: C.dim,
+};
+
+/** Where the list starts. Header, standing text, blank. */
+export const MUSIC_ROW = 6;
+
+export interface MusicEntry {
+  id: string;
+  name: string;
+  blurb: string;
+}
+
+/**
+ * The playlist. One column, nothing else.
+ *
+ * It had a second list of rhythms beside it, and side by side the two read as
+ * one confusing list of twelve rather than as two dials — which is exactly what
+ * a player does not need. Rhythm is still a real axis and still switchable, it
+ * just does not belong in the window somebody opens to choose a song.
+ *
+ * The cursor says where you are looking; the mark says what you are hearing.
+ * Those stop being the same question the moment you browse while something is
+ * playing, which is most of the time.
+ */
+export function musicLines(
+  songs: readonly MusicEntry[],
+  cursor: number,
+  playing: string,
+  stopped: boolean,
+): Line[] {
+  const out: Line[] = [
+    [['Programme material is selected per shift.', C.ink]],
+    [['Selection is logged. Preference is not.', C.ink]],
+    blank(),
+    blank(),
+    blank(),
+    blank(),
+  ];
+
+  for (let i = 0; i < songs.length; i++) {
+    const s = songs[i]!;
+    const on = i === cursor;
+    const live = s.id === playing && !stopped;
+    out.push([
+      [on ? ' ▸ ' : '   ', on ? C.bright : C.faint],
+      [live ? '▪ ' : '  ', live ? C.bright : C.faint],
+      [s.name.toUpperCase().padEnd(12), on ? C.bright : live ? C.paper : C.ink],
+      [s.blurb, on ? C.ink : C.faint],
+    ]);
+  }
+
+  out.push(blank());
+  out.push(blank());
+  out.push([['   ', C.faint], [stopped ? 'Stopped.' : 'Playing.', stopped ? C.faint : C.ink]]);
+  return out;
+}

@@ -18,6 +18,7 @@ import { applyEffects } from './app/visual';
 import { setGamma } from './app/gfx/display';
 import { installUserCells } from './meta/cellstore';
 import { validateScores } from './audio/score';
+import { installUserScores } from './meta/scorestore';
 import { describeRun, loadRuns, recoverPartial } from './meta/runstore';
 import { sealAbandoned } from './meta/outbox';
 import { StoryStore } from './story/store';
@@ -40,6 +41,10 @@ const audio = new Audio();
 // throw, it silently falls back — and `?score=` must be switched *before*
 // `start()`, since the bus graph is built once from `score.graph`.
 validateScores();
+// §18 — Scores the player saved join the registry before anything asks for one
+// by id, so ?score=<saved> works exactly like a built-in. A document whose base
+// is missing is skipped with a warning rather than taking the others with it.
+installUserScores();
 if (params.has('score')) audio.setScore(params.get('score')!);
 // §20.1 — a player's visual preferences apply before the first frame, not after
 // they have already seen the wrong one.

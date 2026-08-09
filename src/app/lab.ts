@@ -157,6 +157,7 @@ export class MusicLab {
         { triggerId: r.trigger, modifierIds: r.modifiers, actionId: r.action, live: true },
         action ? { primitive: action.primitive, hue: action.hue } : null,
         i,
+        this.audio.activeScore.feel.parts,
       );
     });
   }

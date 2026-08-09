@@ -63,7 +63,9 @@ import { arrange } from './arrange';
 import { derivePart, type Part } from './parts';
 import { current } from './scores/current';
 import { deep } from './scores/deep';
-import type { Score } from './score';
+import { vault } from './scores/vault';
+import { SCORES, validateScores, type Score } from './score';
+import { fromScoreData, parseScoreData, stringifyScoreData, toScoreData } from './scoredata';
 import {
   installStubAudio,
   SCRIPTS,
@@ -127,7 +129,7 @@ function drive(script: Script, score?: Score): Recording {
       rows: script.rows,
       intensity: script.frame(0).intensity,
     });
-    audio.setParts(partsFor(script));
+    audio.setParts(partsFor(script, score));
 
     const wanted = script.bars * 16;
     let frame = 0;
@@ -151,7 +153,7 @@ function drive(script: Script, score?: Score): Recording {
   }
 }
 
-function partsFor(script: Script): (Part | null)[] {
+function partsFor(script: Script, score?: Score): (Part | null)[] {
   return script.rows.map((row, i) =>
     derivePart(
       {
@@ -164,6 +166,10 @@ function partsFor(script: Script): (Part | null)[] {
       },
       { primitive: row.primitive, hue: row.hue },
       i,
+      // The Score's own tables. Without this the harness drove every Score
+      // through the *default* parts, so a Score with its own could schedule a
+      // NaN all day and every test here would pass.
+      score?.feel.parts,
     ),
   );
 }
@@ -391,6 +397,71 @@ describe('the schedule (goldens — a diff is a sound change)', () => {
   const recordings = new Map<string, Recording>();
   for (const script of SCRIPTS) recordings.set(script.name, drive(script));
 
+  /**
+   * SAVED SCORES — frozen, note for note.
+   *
+   * `current` was golden-locked from the start because it is a transcription and
+   * had to be provable. Everything else was left unfrozen on the grounds that it
+   * was a proposal, and that stopped being the right call the moment one of them
+   * was worth keeping: `vault` shares its sequencer, its voices and its whole
+   * inheritance chain with Scores that are still being edited, so an adjustment
+   * to `deep` — which it spreads from — moves it with nothing to say so.
+   *
+   * **It takes both goldens to hold a Score, and they cover different halves.**
+   * This one records what the sequencer *asks for* — every note, its time, its
+   * pitch, its gain, its bus — so it catches anything that changes the
+   * arrangement. It does not and cannot catch a retune *inside* a voice, because
+   * voice internals never reach a call site; `voices.test.ts` is what freezes
+   * those. Verified in both directions: dropping `boomBass`'s growl from 0.42 to
+   * 0.40 fails the voice golden and passes this one, and dropping `vault`'s bass
+   * gain from 1.05 to 1.02 fails this one.
+   *
+   * The whole form is covered, so the intro, both verses, the build, the drop and
+   * *both* choruses are in the record — a hook that quietly stopped repeating
+   * would otherwise be invisible.
+   */
+  const SAVED: readonly (readonly [string, Score])[] = [['vault', vault]];
+
+  for (const [name, score] of SAVED) {
+    it(`${name} is saved, note for note`, async () => {
+      const base = SCRIPTS.find((s) => s.name === 'run')!;
+      const rec = drive({ ...base, name, bars: 192 }, score).rec;
+      await expect(formatVoices(rec)).toMatchFileSnapshot(`goldens/saved.${name}.voices.txt`);
+    });
+
+    /**
+     * The document is the Score, and this is what makes that claim true rather
+     * than hopeful.
+     *
+     * Serialising to JSON and back is only worth anything if the Score that comes
+     * out plays *the same song* — a format that loses a filter corner or a
+     * section boundary is a format that quietly changes the music every time
+     * somebody saves. So the round-tripped Score is driven through the same 192
+     * bars and held to the same golden as the original: not "equivalent", not
+     * "close enough", the same notes.
+     */
+    it(`${name} survives a round trip through JSON`, () => {
+      const authored = SCORES[name]!;
+      const document = toScoreData(score, SCORES['deep']!, SCORES, 'deep');
+      const text = stringifyScoreData(document);
+
+      const parsed = parseScoreData(text);
+      expect('data' in parsed, 'error' in parsed ? parsed.error : '').toBe(true);
+      if (!('data' in parsed)) return;
+
+      const reloaded = fromScoreData(parsed.data, (id) => SCORES[id]);
+      expect(reloaded.id).toBe(authored.id);
+
+      // Compared against the original directly rather than against the golden
+      // file: two tests cannot share one `toMatchFileSnapshot` path, and note-for-
+      // note equality with the Score it came from is the stronger claim anyway.
+      const base = SCRIPTS.find((s) => s.name === 'run')!;
+      const before = formatVoices(drive({ ...base, name, bars: 192 }, score).rec);
+      const after = formatVoices(drive({ ...base, name, bars: 192 }, reloaded).rec);
+      expect(after).toBe(before);
+    });
+  }
+
   // The graph is built once by `start()` and does not depend on the script, so
   // one golden covers it. Asserted from the first recording only; the others
   // would be byte-identical and three copies of one fact is three places to
@@ -449,6 +520,44 @@ describe('the schedule (goldens — a diff is a sound change)', () => {
    * in the arrangement signature or `setEngine` dedupes the switch away, and it
    * must *not* be in the selection seed or it reshuffles which cells a build gets.
    */
+  /**
+   * The class of bug no golden can catch.
+   *
+   * A real `AudioParam` throws on NaN, and the sequencer runs from a
+   * `setInterval`, so the throw is uncaught and takes the whole sixteenth with
+   * it — the console reports it against the timer in `clock.ts`, which is the
+   * one file that cannot be at fault. The stub stores NaN happily, so a
+   * schedule the browser refuses to play still writes a perfectly clean golden.
+   *
+   * Every Score in the playlist, through every script.
+   */
+  /**
+   * The check the game does at boot, done here instead.
+   *
+   * `validateScores()` throws on a malformed library and `main.ts` calls it
+   * before anything else, so a bad cell is not a subtly wrong song — it is a
+   * blank page. Nothing in this file called it, so every test could pass on a
+   * playlist that could not start.
+   */
+  it('every registered Score has a valid cell library', () => {
+    expect(() => validateScores()).not.toThrow();
+  });
+
+  it('never sends a non-finite value to an AudioParam', () => {
+    // Every registered Score, not just the listed ones: the boot default and
+    // the saved presets go through the same sequencer.
+    const listed = Object.values(SCORES);
+    expect(listed.length).toBeGreaterThan(0);
+    const faults: string[] = [];
+    for (const score of listed) {
+      for (const script of SCRIPTS) {
+        const { rec } = drive(script, score);
+        for (const f of rec.nonFinite.slice(0, 3)) faults.push(`${score.id}/${script.name}: ${f}`);
+      }
+    }
+    expect(faults).toEqual([]);
+  });
+
   it('a different Score plays a different schedule', () => {
     const darker: Score = {
       ...current,

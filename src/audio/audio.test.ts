@@ -457,24 +457,71 @@ describe('the cell library (GDD §18)', () => {
     ).toThrow(/needsSeventh/);
   });
 
-  it('rejects a harmony that is secretly a pop song', () => {
-    expect(() =>
+  /**
+   * The rule moved, deliberately, and this is the record of it.
+   *
+   * It used to be "one or two chords, held at least two bars, opening on the
+   * tonic", justified as *techno is modal*. Techno is; this engine is not only
+   * for techno, and the rule was quietly deciding that nothing it ever played
+   * could contain a progression — the fastest harmony could move was one change
+   * every two bars, which is a large part of why eight Scores sounded like one.
+   *
+   * Now one to four chords, a bar minimum, starting wherever it likes. Still
+   * bounded: four is a loop you can learn, and the bound is what keeps the
+   * arranger choosing between phrases rather than replaying a song somebody
+   * wrote.
+   */
+  it('allows a real progression, and still bounds it', () => {
+    const progression = (chords: { root: number; quality: string }[], barsPerChord: number) =>
       validate({
         ...CELLS,
-        harmonies: [
-          {
-            id: 'too-many',
-            chords: [
-              { root: 0, quality: 'min' },
-              { root: 8, quality: 'maj' },
-              { root: 3, quality: 'maj' },
-            ],
-            barsPerChord: 1,
-            mood: 'lifting',
-          },
+        harmonies: [{ id: 'p', chords, barsPerChord, mood: 'lifting' }],
+      });
+
+    // Four chords, one bar each, not opening on the tonic: all legal now.
+    expect(() =>
+      progression(
+        [
+          { root: 8, quality: 'maj' },
+          { root: 10, quality: 'maj' },
+          { root: 0, quality: 'min' },
+          { root: 5, quality: 'min' },
         ],
-      }),
-    ).toThrow();
+        1,
+      ),
+    ).not.toThrow();
+
+    // Five is a song rather than a vocabulary.
+    expect(() =>
+      progression(
+        [
+          { root: 0, quality: 'min' },
+          { root: 3, quality: 'maj' },
+          { root: 5, quality: 'min' },
+          { root: 7, quality: 'min' },
+          { root: 10, quality: 'maj' },
+        ],
+        1,
+      ),
+    ).toThrow(/one to four/);
+
+    // And a chord that changes inside a bar is a chord nobody hears.
+    expect(() => progression([{ root: 0, quality: 'min' }], 0)).toThrow(/at least a bar/);
+  });
+
+  /**
+   * Scale cells widen the alphabet; chord cells must not get it by accident.
+   *
+   * A `5` in a chord-relative cell is not a scale degree, it is a typo that would
+   * wrap silently back into the triad — the same failure mode `needsSeventh`
+   * exists to catch.
+   */
+  it('keeps the two melodic alphabets apart', () => {
+    const melodic = (cell: Record<string, unknown>) =>
+      validate({ ...CELLS, motifs: [{ register: 'mid', space: 'mid', energy: 2, ...cell } as never] });
+
+    expect(() => melodic({ id: 'scaley', steps: '0246a.c.........', scale: true })).not.toThrow();
+    expect(() => melodic({ id: 'chordy', steps: '0246a.c.........' })).toThrow(/chord cell/);
   });
 
   it('parses percussion weights and melodic octaves', () => {

@@ -1,7 +1,18 @@
 /**
  * VAULT — dark synths, booming bass. `?score=vault`.
  *
- * **Not approved.**
+ * **SAVED.** Approved 2026-08-09 and frozen note for note.
+ *
+ * Two goldens hold it and they cover different halves.
+ * `schedule.test.ts > vault is saved, note for note` records every note the
+ * sequencer asks for across the full 192-bar form — both choruses included, so a
+ * hook that stopped repeating cannot slip past. `voices.test.ts` records what
+ * each instrument then builds, which is the half a call-site log can never see.
+ *
+ * So: **changing anything in this file, or any voice it plays, or `deep` (which
+ * it spreads from), or the sequencer, fails a test.** That is deliberate and it
+ * is not a formality to clear on the way past — a diff here is a change to a
+ * song somebody signed off, and it needs their ears before `vitest -u`.
  *
  * ---
  *
@@ -35,9 +46,16 @@ export const vault: Score = {
   ...deep,
   id: 'vault',
   name: 'Vault',
+  blurb: 'Booming. The bass where you can feel it.',
 
   feel: {
     ...deep.feel,
+
+    // Pinned. This Score is frozen note-for-note, so it keeps the argmax and the
+    // fixed kit rather than inheriting `deep`'s wider selection — otherwise a
+    // change made two files away would rewrite a song somebody signed off.
+    weights: { ...deep.feel.weights, spread: 0 },
+    kitVaries: false,
 
     /**
      * Keys near the middle, not the floor.
@@ -157,11 +175,25 @@ export const vault: Score = {
      * in reverse". Reverb is a *depth* control, and past a certain point it stops
      * adding depth and starts removing the front of every sound.
      */
-    reverb: { send: 0.18, seconds: 2.2, damp: 2600, predelay: 0.018 },
+    reverb: { send: 0.18, seconds: 2.2, damp: 2600, predelay: 0.018, highpass: 0 },
     delay: { ...deep.graph.delay, feedback: 0.5, damp: 1500 },
 
     // The shelf comes down: with the bass finally in the right octave, boosting
     // 110Hz on top of it is how the limiter ends up doing all the work.
     lowShelf: { hz: 80, gain: 3 },
+  },
+
+  /**
+   * Low registers only — burst, zone, knockback — so the boom bass and the
+     * slam kick carry it and nothing competes above them.
+   */
+  demo: {
+    axiomId: 'ignition',
+    from: 2,
+    rows: [
+      { triggerId: 'clock', primitive: 'burst', hue: 'thermal', modifiers: ['overdrive'] },
+      { triggerId: 'on_kill', primitive: 'zone', hue: 'void', modifiers: ['ground'] },
+      { triggerId: 'on_hit', primitive: 'knockback', hue: 'thermal', modifiers: [] },
+    ],
   },
 };

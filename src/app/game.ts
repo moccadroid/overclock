@@ -910,7 +910,8 @@ export class Game {
           },
           action ? { primitive: action.primitive, hue: action.hue } : null,
           i,
-        );
+        this.audio.activeScore.feel.parts,
+      );
       }),
     );
   }
