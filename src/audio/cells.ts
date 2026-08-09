@@ -39,7 +39,20 @@ export type Feel = 'straight' | 'swung' | 'broken' | 'rolling';
 export type Space = 'sparse' | 'mid' | 'busy';
 export type Register = 'low' | 'mid' | 'high';
 export type Mood = 'driving' | 'suspended' | 'dark' | 'lifting';
-export type ChordQuality = 'min' | 'maj' | 'sus' | 'min7';
+
+/**
+ * The name of a chord shape, resolved against the active Score's chord table.
+ *
+ * A string rather than the union `'min' | 'maj' | 'sus' | 'min7'` it replaced,
+ * because a Score may define shapes this file has never heard of — and adding a
+ * Phrygian ♭2 is the cheapest real change to the mood there is.
+ *
+ * The union was doing real work, so its guarantee moves rather than disappearing:
+ * `validate` rejects a cell naming a shape the Score does not define. That is
+ * strictly stronger, because it also catches a shape that is spelled correctly
+ * and simply missing from the table.
+ */
+export type ChordQuality = string;
 
 export interface PercCell {
   id: string;
@@ -146,7 +159,17 @@ export function parseMelodic(cell: MelodicCell): (MelodicStep | null)[] {
  * *drifts*: a 15-step bar slips a sixteenth every bar and takes twenty minutes
  * of listening to notice. Failing loudly at boot is the only humane option.
  */
-export function validate(library: CellLibrary): void {
+export function validate(
+  library: CellLibrary,
+  /**
+   * The active Score's chord table. When given, every harmony's quality must
+   * name a shape in it — the check that replaced `ChordQuality`'s union.
+   *
+   * Optional because this file is loaded before any Score exists, and the
+   * pattern checks below are worth running at that point regardless.
+   */
+  chords?: Readonly<Record<string, readonly number[]>>,
+): void {
   const lengths = (id: string, s: string) => {
     if (s.length !== 16 && s.length !== 32) {
       throw new Error(`cell "${id}": pattern is ${s.length} steps, must be 16 or 32`);
@@ -194,6 +217,15 @@ export function validate(library: CellLibrary): void {
     if (cell.barsPerChord < 2) {
       throw new Error(`harmony "${cell.id}": chords must be held at least two bars`);
     }
+    if (chords) {
+      for (const chord of cell.chords) {
+        if (!chords[chord.quality]) {
+          throw new Error(
+            `harmony "${cell.id}": no chord shape "${chord.quality}" — the Score defines ${Object.keys(chords).join(', ')}`,
+          );
+        }
+      }
+    }
   }
 }
 
@@ -230,8 +262,11 @@ let extra: CellLibrary | null = null;
  * any cell fails — a half-loaded library is how you end up debugging a bar that
  * drifts a sixteenth every four bars.
  */
-export function setUserCells(library: CellLibrary | null): void {
-  if (library) validate(library);
+export function setUserCells(
+  library: CellLibrary | null,
+  chords?: Readonly<Record<string, readonly number[]>>,
+): void {
+  if (library) validate(library, chords);
   extra = library;
 }
 
@@ -239,17 +274,30 @@ export function userCells(): CellLibrary | null {
   return extra;
 }
 
-/** Everything the arranger may choose from, authored plus player-written. */
-export function pool(): CellLibrary {
-  if (!extra) return CELLS;
+/**
+ * Everything the arranger may choose from: the Score's library plus whatever the
+ * player has written.
+ *
+ * `base` is a parameter rather than the module's own `CELLS` — that is the whole
+ * of "a Score can *replace* the vocabulary rather than only add to it". Before
+ * this, user cells were appended to the authored library and the authored library
+ * could never be got out of the way, so a darker library would have competed with
+ * the bright one in the scorer instead of superseding it.
+ *
+ * Player cells still append, which is correct: §18.1 says the Engine is the
+ * arrangement, and widening the pool keeps that intact — you did not choose the
+ * song, you chose what the game is able to say.
+ */
+export function pool(base: CellLibrary): CellLibrary {
+  if (!extra) return base;
   return {
-    kicks: [...CELLS.kicks, ...extra.kicks],
-    backbeats: [...CELLS.backbeats, ...extra.backbeats],
-    hats: [...CELLS.hats, ...extra.hats],
-    basslines: [...CELLS.basslines, ...extra.basslines],
-    motifs: [...CELLS.motifs, ...extra.motifs],
-    stabs: [...CELLS.stabs, ...extra.stabs],
-    harmonies: [...CELLS.harmonies, ...extra.harmonies],
+    kicks: [...base.kicks, ...extra.kicks],
+    backbeats: [...base.backbeats, ...extra.backbeats],
+    hats: [...base.hats, ...extra.hats],
+    basslines: [...base.basslines, ...extra.basslines],
+    motifs: [...base.motifs, ...extra.motifs],
+    stabs: [...base.stabs, ...extra.stabs],
+    harmonies: [...base.harmonies, ...extra.harmonies],
   };
 }
 

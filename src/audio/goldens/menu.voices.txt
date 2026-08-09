@@ -1,0 +1,49 @@
+# voice calls — every note the sequencer asked for
+# bar:step (+offset into the step)   bus   voice   arguments
+
+  0:00         punchBus   kick         gain 1.330  voice punch
+  0:00         punchBus   sub          hz 13.750  gain 0.700  dur 1.071
+  0:04         punchBus   perc         gain 0.500  voice rim
+  0:08         punchBus   kick         gain 0.950  voice punch
+  0:12         punchBus   perc         gain 0.500  voice rim
+  1:00         punchBus   kick         gain 1.330  voice punch
+  1:00         punchBus   sub          hz 13.750  gain 0.700  dur 1.071
+  1:04         punchBus   perc         gain 0.500  voice rim
+  1:08         punchBus   kick         gain 0.950  voice punch
+  1:12         punchBus   perc         gain 0.500  voice rim
+  2:00         punchBus   kick         gain 1.330  voice punch
+  2:00         punchBus   sub          hz 13.750  gain 0.700  dur 1.071
+  2:04         punchBus   perc         gain 0.500  voice rim
+  2:08         punchBus   kick         gain 0.950  voice punch
+  2:12         punchBus   perc         gain 0.500  voice rim
+  3:00         punchBus   kick         gain 1.330  voice punch
+  3:00         punchBus   sub          hz 13.750  gain 0.700  dur 1.071
+  3:04         punchBus   perc         gain 0.500  voice rim
+  3:08         punchBus   kick         gain 0.950  voice punch
+  3:12         punchBus   perc         gain 0.500  voice rim
+  4:00         punchBus   kick         gain 1.330  voice punch
+  4:00         punchBus   sub          hz 13.750  gain 0.700  dur 1.071
+  4:04         punchBus   perc         gain 0.500  voice rim
+  4:06         musicBus   stab         tones [0.000 3.000 7.000]  gain 0.900  voice organ
+  4:08         punchBus   kick         gain 0.950  voice punch
+  4:12         punchBus   perc         gain 0.500  voice rim
+  5:00         punchBus   kick         gain 1.330  voice punch
+  5:00         punchBus   sub          hz 13.750  gain 0.700  dur 1.071
+  5:04         punchBus   perc         gain 0.500  voice rim
+  5:06         musicBus   stab         tones [0.000 3.000 7.000]  gain 0.900  voice organ
+  5:08         punchBus   kick         gain 0.950  voice punch
+  5:12         punchBus   perc         gain 0.500  voice rim
+  6:00         punchBus   kick         gain 1.330  voice punch
+  6:00         punchBus   sub          hz 13.750  gain 0.700  dur 1.071
+  6:04         punchBus   perc         gain 0.500  voice rim
+  6:06         musicBus   stab         tones [0.000 3.000 7.000]  gain 0.900  voice organ
+  6:08         punchBus   kick         gain 0.950  voice punch
+  6:12         punchBus   perc         gain 0.500  voice rim
+  7:00         punchBus   kick         gain 1.330  voice punch
+  7:00         punchBus   sub          hz 13.750  gain 0.700  dur 1.071
+  7:04         punchBus   perc         gain 0.500  voice rim
+  7:06         musicBus   stab         tones [0.000 3.000 7.000]  gain 0.900  voice organ
+  7:08         punchBus   kick         gain 0.950  voice punch
+  7:12         punchBus   perc         gain 0.500  voice rim
+
+# 44 calls over 128 steps

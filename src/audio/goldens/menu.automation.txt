@@ -1,0 +1,114 @@
+# scheduled automation, per parameter — the phrase filter, the sidechain, the crossfades
+# consecutive identical writes are collapsed to one line with a count
+
+delay.delayTime
+    pre         setTargetAtTime 0.402  tc 0.200   ×1017 (through 7:14 +15ms)
+
+echoSend.gain
+    pre         setTargetAtTime 0.000  tc 0.300   ×1017 (through 7:14 +15ms)
+
+fxDry.gain
+    pre         setTargetAtTime 1.000  tc 0.250   ×1017 (through 7:14 +15ms)
+
+fxWet.gain
+    pre         setTargetAtTime 0.000  tc 0.250   ×1017 (through 7:14 +15ms)
+
+musicBus.gain
+    pre         set 0.900   ×3 (through pre)
+    0:00         cancelScheduledValues
+    0:00         setValueAtTime 0.306
+    0:00 +7ms    set 0.900   ×24 (through 0:02 +122ms)
+    0:03         linearRampToValueAtTime 0.900
+    0:03 +5ms    set 0.900   ×40 (through 0:07 +119ms)
+    0:08         cancelScheduledValues
+    0:08         setValueAtTime 0.306
+    0:08 +2ms    set 0.900   ×24 (through 0:10 +117ms)
+    0:11         linearRampToValueAtTime 0.900
+    0:11         set 0.900   ×41 (through 0:15 +131ms)
+    1:00         cancelScheduledValues
+    1:00         setValueAtTime 0.306
+    1:00 +14ms   set 0.900   ×24 (through 1:02 +129ms)
+    1:03         linearRampToValueAtTime 0.900
+    1:03 +12ms   set 0.900   ×40 (through 1:07 +126ms)
+    1:08         cancelScheduledValues
+    1:08         setValueAtTime 0.306
+    1:08 +9ms    set 0.900   ×24 (through 1:10 +125ms)
+    1:11         linearRampToValueAtTime 0.900
+    1:11 +7ms    set 0.900   ×40 (through 1:15 +122ms)
+    2:00         cancelScheduledValues
+    2:00         setValueAtTime 0.306
+    2:00 +4ms    set 0.900   ×24 (through 2:02 +120ms)
+    2:03         linearRampToValueAtTime 0.900
+    2:03 +2ms    set 0.900   ×41 (through 2:07 +133ms)
+    2:08         cancelScheduledValues
+    2:08         setValueAtTime 0.306
+    2:08 +16ms   set 0.900   ×24 (through 2:10 +132ms)
+    2:11         linearRampToValueAtTime 0.900
+    2:11 +14ms   set 0.900   ×40 (through 2:15 +129ms)
+    3:00         cancelScheduledValues
+    3:00         setValueAtTime 0.306
+    3:00 +11ms   set 0.900   ×24 (through 3:02 +127ms)
+    3:03         linearRampToValueAtTime 0.900
+    3:03 +10ms   set 0.900   ×40 (through 3:07 +124ms)
+    3:08         cancelScheduledValues
+    3:08         setValueAtTime 0.306
+    3:08 +7ms    set 0.900   ×24 (through 3:10 +122ms)
+    3:11         linearRampToValueAtTime 0.900
+    3:11 +5ms    set 0.900   ×40 (through 3:15 +119ms)
+    4:00         cancelScheduledValues
+    4:00         setValueAtTime 0.306
+    4:00 +2ms    set 0.900   ×24 (through 4:02 +117ms)
+    4:03         linearRampToValueAtTime 0.900
+    4:03         set 0.900   ×41 (through 4:07 +131ms)
+    4:08         cancelScheduledValues
+    4:08         setValueAtTime 0.306
+    4:08 +14ms   set 0.900   ×24 (through 4:10 +129ms)
+    4:11         linearRampToValueAtTime 0.900
+    4:11 +12ms   set 0.900   ×40 (through 4:15 +126ms)
+    5:00         cancelScheduledValues
+    5:00         setValueAtTime 0.306
+    5:00 +9ms    set 0.900   ×24 (through 5:02 +125ms)
+    5:03         linearRampToValueAtTime 0.900
+    5:03 +7ms    set 0.900   ×40 (through 5:07 +122ms)
+    5:08         cancelScheduledValues
+    5:08         setValueAtTime 0.306
+    5:08 +4ms    set 0.900   ×24 (through 5:10 +120ms)
+    5:11         linearRampToValueAtTime 0.900
+    5:11 +3ms    set 0.900   ×41 (through 5:15 +133ms)
+    6:00         cancelScheduledValues
+    6:00         setValueAtTime 0.306
+    6:00 +16ms   set 0.900   ×24 (through 6:02 +132ms)
+    6:03         linearRampToValueAtTime 0.900
+    6:03 +14ms   set 0.900   ×40 (through 6:07 +129ms)
+    6:08         cancelScheduledValues
+    6:08         setValueAtTime 0.306
+    6:08 +11ms   set 0.900   ×24 (through 6:10 +127ms)
+    6:11         linearRampToValueAtTime 0.900
+    6:11 +10ms   set 0.900   ×40 (through 6:15 +124ms)
+    7:00         cancelScheduledValues
+    7:00         setValueAtTime 0.306
+    7:00 +7ms    set 0.900   ×24 (through 7:02 +122ms)
+    7:03         linearRampToValueAtTime 0.900
+    7:03 +5ms    set 0.900   ×40 (through 7:07 +119ms)
+    7:08         cancelScheduledValues
+    7:08         setValueAtTime 0.306
+    7:08 +2ms    set 0.900   ×24 (through 7:10 +117ms)
+    7:11         linearRampToValueAtTime 0.900
+    7:11         set 0.900   ×26 (through 7:14 +15ms)
+
+musicFilter.frequency
+    0:00         setTargetAtTime 1070.00  tc 0.080   ×16 (through 0:15)
+    1:00         setTargetAtTime 1191.88  tc 0.080   ×16 (through 1:15)
+    2:00         setTargetAtTime 1313.75  tc 0.080   ×16 (through 2:15)
+    3:00         setTargetAtTime 1435.63  tc 0.080   ×16 (through 3:15)
+    4:00         setTargetAtTime 1557.50  tc 0.080   ×16 (through 4:15)
+    5:00         setTargetAtTime 1679.38  tc 0.080   ×16 (through 5:15)
+    6:00         setTargetAtTime 1801.25  tc 0.080   ×16 (through 6:15)
+    7:00         setTargetAtTime 1923.13  tc 0.080   ×16 (through 7:15)
+
+scoreTrim.gain
+    pre         setTargetAtTime 1.000  tc 0.250   ×1017 (through 7:14 +15ms)
+
+siegeBus.gain
+    pre         setTargetAtTime 0.000  tc 0.250   ×1017 (through 7:14 +15ms)
+

@@ -17,6 +17,7 @@ import { Audio } from './audio/audio';
 import { applyEffects } from './app/visual';
 import { setGamma } from './app/gfx/display';
 import { installUserCells } from './meta/cellstore';
+import { validateScores } from './audio/score';
 import { describeRun, loadRuns, recoverPartial } from './meta/runstore';
 import { sealAbandoned } from './meta/outbox';
 import { StoryStore } from './story/store';
@@ -34,6 +35,12 @@ const story = new StoryStore();
 // hands it to the run, which keeps the AudioContext alive across the handover —
 // browsers only grant one per gesture, and losing it means a silent run.
 const audio = new Audio();
+// §18 — which Score the instrument plays. Every Score is checked against its own
+// chord table first, because a harmony naming a shape it does not define does not
+// throw, it silently falls back — and `?score=` must be switched *before*
+// `start()`, since the bus graph is built once from `score.graph`.
+validateScores();
+if (params.has('score')) audio.setScore(params.get('score')!);
 // §20.1 — a player's visual preferences apply before the first frame, not after
 // they have already seen the wrong one.
 applyEffects(library.snapshot.settings.fx);
@@ -50,7 +57,10 @@ audio.setSfxVolume(library.snapshot.settings.effects);
 // §18 — cells the player has written join the pool the arranger chooses from,
 // before anything asks it for an arrangement. Widening the vocabulary, not
 // picking the song: the Engine still decides which of them it wants.
-installUserCells();
+// Validated against the active Score's chord table, so a hand-written harmony
+// reaching for a shape this Score does not define is refused rather than silently
+// falling back to its first one.
+installUserCells(audio.activeScore.tonality.chords);
 // §14 — a run in progress is stashed every few seconds, so one still sitting
 // there means the last session ended without the run ending: a freeze, a crash,
 // or a closed tab. Promote it into the window, because that is exactly the

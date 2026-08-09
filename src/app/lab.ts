@@ -142,7 +142,7 @@ export class MusicLab {
 
   /** What the arranger chose, before the Lab argues with it. */
   private selected(): Arrangement {
-    return arrange(this.input());
+    return arrange(this.input(), this.audio.activeScore);
   }
 
   /** What actually plays. */
@@ -239,7 +239,7 @@ export class MusicLab {
   private renderArrangement(): string {
     const plan = this.plan();
     const chosen = this.selected();
-    const library = pool();
+    const library = pool(this.audio.activeScore.cells);
 
     const cells = CELL_SLOTS.map(([slot, group]) => {
       const list = library[group as CellGroup] as { id: string }[];
@@ -465,7 +465,9 @@ export class MusicLab {
     const chosen = this.selected() as unknown as Record<string, unknown>;
     const group = CELL_SLOTS.find(([s]) => s === slot)?.[1];
     if (group) {
-      const cell = (pool()[group as CellGroup] as { id: string }[]).find((c) => c.id === value);
+      const cell = (
+        pool(this.audio.activeScore.cells)[group as CellGroup] as { id: string }[]
+      ).find((c) => c.id === value);
       if (!cell) return;
       if ((chosen[slot] as { id: string }).id === value) delete this.overrides[slot as never];
       else (this.overrides as Record<string, unknown>)[slot] = cell;

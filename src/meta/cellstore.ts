@@ -108,10 +108,18 @@ export function saveUserCells(library: CellLibrary): void {
   }
 }
 
-/** Load from storage and hand to the arranger. Called once at boot. */
-export function installUserCells(): CellLibrary {
+/**
+ * Load from storage and hand to the arranger. Called once at boot.
+ *
+ * `chords` is the active Score's chord table. Without it a hand-written harmony
+ * naming a shape the Score does not define would be accepted here and then fall
+ * back at play time — silently, and only in the bars that harmony covers.
+ */
+export function installUserCells(
+  chords?: Readonly<Record<string, readonly number[]>>,
+): CellLibrary {
   const library = loadUserCells();
-  setUserCells(countCells(library) > 0 ? library : null);
+  setUserCells(countCells(library) > 0 ? library : null, chords);
   return library;
 }
 

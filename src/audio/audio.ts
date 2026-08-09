@@ -61,68 +61,17 @@ import {
 } from './cells';
 import { arrange, openingArrangement, type ArrangeInput, type Arrangement } from './arrange';
 import type { Part } from './parts';
+import { DEFAULT_SCORE, SCORES, resolveScore, type Score } from './score';
 
-/** Chord tones as semitones from the chord root. */
-const CHORD_TONES: Record<string, number[]> = {
-  min: [0, 3, 7],
-  maj: [0, 4, 7],
-  sus: [0, 5, 7],
-  min7: [0, 3, 7, 10],
-};
-
-/**
- * §18.4 — polyphony cap. Three, not ten: the point of an accent is that it is
- * rarer than the thing it accents.
- */
-const MAX_ACCENTS_PER_STEP = 3;
-
-/**
- * Your fullest gauge used to transpose the key. That was a mistake: it modulated
- * the track mid-phrase with no cadence, which is indistinguishable from the
- * chords being random. The hue is still a readout, but of *timbre* — how bright
- * the filter sits — which colours the track without moving it.
- */
-const HUE_COLOUR: Record<Hue, number> = { thermal: 1, voltaic: 1.45, void: 0.7 };
-
-/** §18 — techno moves in 16-bar phrases. Everything automated rides this. */
-const PHRASE_BARS = 16;
-
-/**
- * §21b.7 — what the siege screams, as a line rather than a note.
- *
- * The first version played one pitch on alternate bars and the report was that
- * it got annoying, which is exactly right: the ear files an unchanging shape as
- * furniture after about three repeats, however ugly the timbre is, and after
- * that it is only irritating. Something that keeps *moving* stays a threat.
- *
- * Degrees are semitones over the drone's root, from the Phrygian set — root, ♭2,
- * ♭3, 4, 5, ♭6, ♭7. Every interval in it is minor or flat, so the line can
- * wander without ever landing anywhere consoling, and the ♭2 against the drone
- * is the same semitone rub the Meltdown and breach voices are built on.
- *
- * Lengths and directions vary per entry, and the walk is ten long against a hold
- * that fires it maybe eight times, so it does not come back round inside one
- * gate. `up` is not a strict alternation, because that is itself a pattern.
- */
-const SIEGE_CRIES: readonly { deg: number; len: number; up: boolean }[] = [
-  { deg: 0, len: 3.4, up: true },
-  { deg: 8, len: 2.0, up: false },
-  { deg: 1, len: 4.2, up: true },
-  { deg: 5, len: 1.6, up: true },
-  { deg: 3, len: 2.8, up: false },
-  { deg: 10, len: 1.4, up: false },
-  { deg: 1, len: 5.0, up: true },
-  { deg: 7, len: 2.2, up: false },
-  { deg: 3, len: 3.0, up: true },
-  { deg: 0, len: 6.0, up: false },
-];
-/**
- * How many bars before the melodic material is reselected. Two phrases at 112
- * BPM is a little over a minute — long enough that the line is a hook rather
- * than a tour of the library, short enough that nobody sits through the same
- * two motifs for eleven minutes, which is exactly what one recorded run did.
- */
-const VARY_BARS = 32;
+// The constants that used to live here — the chord table, the polyphony cap, the
+// hue colours, the phrase and variation lengths, and the siege's line — are now
+// the active Score. See score.ts.
+//
+// The one thing worth repeating in place, because it is the only entry here that
+// was never taste: your fullest gauge used to transpose the *key*, and that was a
+// mistake. It modulated the track mid-phrase with no cadence, which is
+// indistinguishable from the chords being random. A hue is a readout of timbre —
+// how bright the filter sits — which colours the track without moving it.
 
 /**
  * **There is no saturation stage in this graph, and there must never be one.**
@@ -204,6 +153,36 @@ function step<T>(cell: (T | null)[], count: number): T | null {
 
 function clamp01(v: number): number {
   return Math.max(0, Math.min(1, v));
+}
+
+/**
+ * A reverb impulse, synthesized.
+ *
+ * Noise under an exponential decay, with the tail rolled off so late reflections
+ * arrive darker than early ones — which is what a real room does and what makes a
+ * synthetic tail stop sounding like a burst of hiss. Two channels, decorrelated,
+ * because a mono impulse puts the whole room in the middle of your head.
+ *
+ * Generated rather than loaded: §18.1 says no samples, and a reverb that shipped
+ * as a file would be the only asset in the game.
+ */
+function impulse(ctx: AudioContext, seconds: number, damp: number): AudioBuffer {
+  const frames = Math.max(1, Math.ceil(ctx.sampleRate * seconds));
+  const buffer = ctx.createBuffer(2, frames, ctx.sampleRate);
+  for (let channel = 0; channel < 2; channel++) {
+    const data = buffer.getChannelData(channel);
+    // A one-pole lowpass over the noise, with its corner falling across the tail.
+    let last = 0;
+    for (let i = 0; i < frames; i++) {
+      const t = i / frames;
+      const decay = Math.pow(1 - t, 2.6);
+      // Corner slides from `damp` down to a fifth of it by the end of the tail.
+      const k = Math.min(1, (damp * (1 - t * 0.8)) / (ctx.sampleRate * 0.5));
+      last += k * ((Math.random() * 2 - 1) * decay - last);
+      data[i] = last;
+    }
+  }
+  return buffer;
 }
 
 /** Which absolute semitone a melodic step lands on, over the current chord. */
@@ -312,6 +291,16 @@ export class Audio {
   private delayFeedback!: GainNode;
   private echoSend!: GainNode;
   /**
+   * Space. The one node this refactor added, and it arrives dark.
+   *
+   * Nothing else in this graph is reverberant, which is the largest single reason
+   * the mix reads as present and close rather than distant — and distance is what
+   * "moody" is mostly made of. `current` sends nothing here, so the schedule is
+   * byte-identical and this is inert until a Score raises `graph.reverb.send`.
+   */
+  private reverb!: ConvolverNode;
+  private reverbSend!: GainNode;
+  /**
    * Intensity used to raise gains, which is the wrong instrument entirely — a
    * track that gets *louder* as the game gets busier is uncomfortable and, at
    * the top, just clipping. Aggression is the thing that should climb, so it
@@ -342,7 +331,14 @@ export class Audio {
    * mid-phrase reads as a glitch rather than as a response — which is also just
    * how anyone mixing two records does it.
    */
-  private plan: Arrangement = openingArrangement('ignition');
+  /**
+   * The active Score. Everything below reads its taste from here.
+   *
+   * Assigned at construction rather than in `start()` because the opening
+   * arrangement is built from it in a field initialiser, which runs first.
+   */
+  private score: Score = SCORES[DEFAULT_SCORE]!;
+  private plan: Arrangement = openingArrangement('ignition', SCORES[DEFAULT_SCORE]!);
   private pendingPlan: Arrangement | null = null;
   /** Set by `beginRun`; makes the next `setEngine` skip the phrase boundary. */
   private freshRun = true;
@@ -351,7 +347,7 @@ export class Audio {
   private lastVaryBar = 0;
   /** The last Engine handed over, so the variation timer can re-arrange it. */
   private lastInput: ArrangeInput | null = null;
-  private cells = compile(openingArrangement('ignition'));
+  private cells = compile(openingArrangement('ignition', SCORES[DEFAULT_SCORE]!));
   /** Bars elapsed, for walking the progression. */
   private bar = 0;
   private silenced = false;
@@ -393,6 +389,38 @@ export class Audio {
     return this.ctx !== null && !this.muted;
   }
 
+  /** The active Score, for the Lab and for `arrange` call sites outside here. */
+  get activeScore(): Score {
+    return this.score;
+  }
+
+  /**
+   * Switch Score.
+   *
+   * Must be called before `start()` to take full effect: the bus graph is built
+   * once from `score.graph` and is not rebuilt, so a switch afterwards moves the
+   * cells, the feel and the mix but leaves the room it is playing in. That is
+   * enough for an A/B of everything except the reverb send, and rebuilding a live
+   * graph mid-run is a much worse trade than restarting with a different URL.
+   *
+   * The re-arrange is deliberate and so is its urgency: a Score change is not a
+   * Draft, so it does not wait for a phrase boundary.
+   */
+  setScore(score: string | Score): void {
+    // Accepts a Score object as well as a registry id, so a caller holding one
+    // that is not registered — a test, or an editor with unsaved changes — does
+    // not have to mutate the registry to hear it.
+    const next = typeof score === 'string' ? resolveScore(score) : score;
+    if (next.id === this.score.id) return;
+    this.score = next;
+    if (this.lastInput) {
+      this.setEngine(this.lastInput);
+      this.pendingUrgent = true;
+    } else {
+      this.adopt(openingArrangement('ignition', next));
+    }
+  }
+
   /**
    * Must be called from a user gesture — browsers refuse to start an
    * AudioContext otherwise, and a silent game with no error is a miserable bug
@@ -414,6 +442,7 @@ export class Audio {
 
     const ctx = new Ctor();
     this.ctx = ctx;
+    const G = this.score.graph;
 
     this.master = ctx.createGain();
     this.master.gain.value = this.muted ? 0 : this.volume;
@@ -422,18 +451,18 @@ export class Audio {
     // on down where the kick and bass live, which is where "oomph" comes from.
     this.lowShelf = ctx.createBiquadFilter();
     this.lowShelf.type = 'lowshelf';
-    this.lowShelf.frequency.value = 110;
-    this.lowShelf.gain.value = 5;
+    this.lowShelf.frequency.value = G.lowShelf.hz;
+    this.lowShelf.gain.value = G.lowShelf.gain;
 
     // Deliberately aggressive. This is a leveller, not a mastering compressor —
     // musical transparency is worth nothing next to the promise that the volume
     // never rises.
     this.limiter = ctx.createDynamicsCompressor();
-    this.limiter.threshold.value = -34;
-    this.limiter.knee.value = 4;
-    this.limiter.ratio.value = 20;
-    this.limiter.attack.value = 0.003;
-    this.limiter.release.value = 0.12;
+    this.limiter.threshold.value = G.limiter.threshold;
+    this.limiter.knee.value = G.limiter.knee;
+    this.limiter.ratio.value = G.limiter.ratio;
+    this.limiter.attack.value = G.limiter.attack;
+    this.limiter.release.value = G.limiter.release;
 
     // Driven into the limiter rather than merely caught by it, then brought
     // straight back down.
@@ -449,12 +478,12 @@ export class Audio {
     // failure this whole graph exists to prevent. The pair has to be read
     // together — drive in, trim out, limiter deciding what happens between.
     this.limiterDrive = ctx.createGain();
-    this.limiterDrive.gain.value = 12;
+    this.limiterDrive.gain.value = G.limiter.drive;
     this.limiterTrim = ctx.createGain();
     // Calibrated by measurement, not by arithmetic: with the limiter working
     // this hard the drive is not what sets the output, so `1/drive` is the
     // wrong number and produced a game nobody could hear.
-    this.limiterTrim.gain.value = 0.75;
+    this.limiterTrim.gain.value = G.limiter.trim;
 
     // Order matters. The drive sits *after* the shaper — feeding 12x into a
     // waveshaper clips against the ends of its curve, which is hard distortion
@@ -489,7 +518,7 @@ export class Audio {
 
     this.interfereFilter = ctx.createBiquadFilter();
     this.interfereFilter.type = 'lowpass';
-    this.interfereFilter.frequency.value = 20000;
+    this.interfereFilter.frequency.value = this.score.mix.interfere.open;
     this.interfereFilter.Q.value = 0.7;
     this.interfereFilter.connect(this.interfereGain);
 
@@ -514,7 +543,7 @@ export class Audio {
     this.scoreTrim.connect(this.musicGroup);
 
     this.punchBus = ctx.createGain();
-    this.punchBus.gain.value = 0.95;
+    this.punchBus.gain.value = G.busGains.punch;
     this.punchBus.connect(this.scoreTrim);
 
     // Chrome sits *after* the limiter, and it is the only thing that does.
@@ -532,21 +561,22 @@ export class Audio {
     // one hover every 45ms, and never more than a couple at once. It has no
     // mechanism to get louder. Nothing else may follow it here.
     this.uiBus = ctx.createGain();
-    this.uiBus.gain.value = 0.5;
+    this.uiBus.gain.value = G.busGains.ui;
     this.uiBus.connect(this.uiLevel);
 
     this.musicFilter = ctx.createBiquadFilter();
     this.musicFilter.type = 'lowpass';
+    // Opened properly on the first step; this is only where it starts.
     this.musicFilter.frequency.value = 2200;
-    this.musicFilter.Q.value = 1.1;
+    this.musicFilter.Q.value = this.score.mix.filter.q;
     this.musicFilter.connect(this.scoreTrim);
 
     this.musicBus = ctx.createGain();
-    this.musicBus.gain.value = 0.9;
+    this.musicBus.gain.value = G.busGains.music;
     this.musicBus.connect(this.musicFilter);
 
     this.siegeBus = ctx.createGain();
-    this.siegeBus.gain.value = 0;
+    this.siegeBus.gain.value = G.busGains.siege;
     this.siegeBus.connect(this.musicGroup);
 
     this.siegeDroneBus = ctx.createGain();
@@ -557,12 +587,12 @@ export class Audio {
     // than on them, so the echoes read as counter-rhythm instead of as a
     // stutter. Set properly once the tempo is known.
     this.delay = ctx.createDelay(2);
-    this.delay.delayTime.value = (60 / 112) * 0.75;
+    this.delay.delayTime.value = (60 / this.score.mix.tempo.base) * G.delay.note;
     this.delayFeedback = ctx.createGain();
-    this.delayFeedback.gain.value = 0.52;
+    this.delayFeedback.gain.value = G.delay.feedback;
     const delayDamp = ctx.createBiquadFilter();
     delayDamp.type = 'lowpass';
-    delayDamp.frequency.value = 1700;
+    delayDamp.frequency.value = G.delay.damp;
 
     this.delay.connect(delayDamp).connect(this.delayFeedback).connect(this.delay);
     this.delay.connect(this.musicFilter);
@@ -572,7 +602,7 @@ export class Audio {
     this.echoSend.connect(this.delay);
 
     this.engineBus = ctx.createGain();
-    this.engineBus.gain.value = 0.5;
+    this.engineBus.gain.value = G.busGains.engine;
 
     // Two paths out of the engine bus, summed. Dry is what the game has always
     // sounded like; wet is what it sounds like from inside a siege.
@@ -584,17 +614,17 @@ export class Audio {
     fxBand.type = 'bandpass';
     // Narrow and high. Everything below about 700Hz and above 3kHz goes, which
     // takes the body out of a shot and leaves the part that sounds broken.
-    fxBand.frequency.value = 1500;
-    fxBand.Q.value = 2.4;
+    fxBand.frequency.value = G.siegeFx.band;
+    fxBand.Q.value = G.siegeFx.q;
 
-    // Ring modulation at 180Hz — low enough that the sidebands land inside the
-    // band the filter kept, so it reads as the sound being torn rather than as a
-    // second tone playing underneath it.
+    // Ring modulation — low enough that the sidebands land inside the band the
+    // filter kept, so it reads as the sound being torn rather than as a second
+    // tone playing underneath it.
     const fxRing = ctx.createGain();
     fxRing.gain.value = 0;
     const fxMod = ctx.createOscillator();
     fxMod.type = 'square';
-    fxMod.frequency.value = 180;
+    fxMod.frequency.value = G.siegeFx.ringHz;
     const fxModDepth = ctx.createGain();
     fxModDepth.gain.value = 1;
     fxMod.connect(fxModDepth).connect(fxRing.gain);
@@ -603,6 +633,20 @@ export class Audio {
     this.fxWet = ctx.createGain();
     this.fxWet.gain.value = 0;
     this.engineBus.connect(fxBand).connect(fxRing).connect(this.fxWet).connect(this.sfxGroup);
+
+    // Space, at whatever send the Score asks for — which for `current` is none.
+    //
+    // There is no reverb anywhere else in this graph, and that is most of why the
+    // game sounds present and close. The bus exists so a Score that wants
+    // distance has somewhere to send to; wiring it in dark means the addition is
+    // reviewable now and silent until somebody turns it up on purpose.
+    this.reverb = ctx.createConvolver();
+    this.reverb.buffer = impulse(ctx, G.reverb.seconds, G.reverb.damp);
+    this.reverbSend = ctx.createGain();
+    this.reverbSend.gain.value = G.reverb.send;
+    const reverbDelay = ctx.createDelay(1);
+    reverbDelay.delayTime.value = G.reverb.predelay;
+    this.reverbSend.connect(reverbDelay).connect(this.reverb).connect(this.musicFilter);
 
     this.clock = new Clock(ctx);
     this.clock.onStep((step) => this.onStep(step.time, step.index, step.count));
@@ -712,10 +756,11 @@ export class Audio {
 
   private resumeBusses(): void {
     if (!this.ctx || !this.silenced) return;
+    const G = this.score.graph;
     this.silenced = false;
-    this.punchBus.gain.value = 0.95;
-    this.musicBus.gain.value = 0.9;
-    this.engineBus.gain.value = 0.5;
+    this.punchBus.gain.value = G.busGains.punch;
+    this.musicBus.gain.value = G.busGains.music;
+    this.engineBus.gain.value = G.busGains.engine;
     this.clock?.start();
   }
 
@@ -728,21 +773,24 @@ export class Audio {
     // Remembered so the variation timer can re-arrange the same Engine without
     // the caller having to hand it over again.
     this.lastInput = input;
-    const next = arrange({
-      ...input,
-      variation: this.variation,
-      // §13.2 — the phase is not the caller's business to remember. The audio
-      // layer already has it every frame, so it merges it in here.
-      meltdown: this.state.meltdown,
-      // What is playing right now, so a variation pass moves off it rather than
-      // reselecting the same cell and calling it a change.
-      avoid: {
-        motif: this.plan.motif.id,
-        bass: this.plan.bass.id,
-        stab: this.plan.stab.id,
-        hats: this.plan.hats.id,
+    const next = arrange(
+      {
+        ...input,
+        variation: this.variation,
+        // §13.2 — the phase is not the caller's business to remember. The audio
+        // layer already has it every frame, so it merges it in here.
+        meltdown: this.state.meltdown,
+        // What is playing right now, so a variation pass moves off it rather than
+        // reselecting the same cell and calling it a change.
+        avoid: {
+          motif: this.plan.motif.id,
+          bass: this.plan.bass.id,
+          stab: this.plan.stab.id,
+          hats: this.plan.hats.id,
+        },
       },
-    });
+      this.score,
+    );
     if (next.signature === this.plan.signature && next.harmony.id === this.plan.harmony.id) return;
     // The first arrangement of a run lands immediately; every later one waits
     // for a phrase boundary. The bar counter cannot stand in for "first" — it
@@ -766,7 +814,7 @@ export class Audio {
   private maybeVary(): void {
     if (!this.lastInput) return;
     if (this.bar === this.lastVaryBar) return;
-    if (this.bar - this.lastVaryBar < VARY_BARS) return;
+    if (this.bar - this.lastVaryBar < this.score.mix.varyBars) return;
     this.lastVaryBar = this.bar;
     this.variation++;
     this.setEngine(this.lastInput);
@@ -816,7 +864,7 @@ export class Audio {
   preview(input: ArrangeInput, parts: (Part | null)[] = [], intensity = 0.72): void {
     this.start();
     this.resumeBusses();
-    this.adopt(arrange({ ...input, intensity }));
+    this.adopt(arrange({ ...input, intensity }, this.score));
     this.setParts(parts);
     this.bar = 0;
     this.smoothed = intensity;
@@ -828,7 +876,7 @@ export class Audio {
       siege: 0,
       meltdown: 0,
     };
-    if (this.clock) this.clock.bpm = 112;
+    if (this.clock) this.clock.bpm = this.score.mix.tempo.base;
   }
 
   /**
@@ -846,7 +894,7 @@ export class Audio {
     this.setParts(parts);
     this.smoothed = intensity;
     this.state = { intensity, dominant: 'thermal', heat: 0, stalled: false, meltdown: 0, siege: 0 };
-    if (this.clock) this.clock.bpm = 112;
+    if (this.clock) this.clock.bpm = this.score.mix.tempo.base;
   }
 
   /**
@@ -861,25 +909,33 @@ export class Audio {
     const index = Math.floor(this.bar / harmony.barsPerChord) % harmony.chords.length;
     const c = harmony.chords[index]!;
     const base = this.plan.key + c.root;
-    return (CHORD_TONES[c.quality] ?? CHORD_TONES.min!).map((t) => base + t);
+    const shapes = this.score.tonality.chords;
+    // The fallback is the first shape the Score defines rather than a hardcoded
+    // minor triad: a Score is allowed to name its shapes whatever it likes, and
+    // `validate` has already refused any cell that reaches for one it does not
+    // have, so this only ever fires for a user cell that slipped through.
+    const shape = shapes[c.quality] ?? Object.values(shapes)[0]!;
+    return shape.map((t) => base + t);
   }
 
-  /** 0..1 across a 16-bar phrase. The genre's actual sense of going somewhere. */
+  /** 0..1 across a phrase. The genre's actual sense of going somewhere. */
   private get phrase(): number {
-    return (this.bar % PHRASE_BARS) / PHRASE_BARS;
+    const bars = this.score.mix.phraseBars;
+    return (this.bar % bars) / bars;
   }
 
   /** Called each frame with the run's mood and the cues it produced. */
   update(state: AudioState, cues: AudioCue[]): void {
     this.state = state;
     if (!this.ctx || !this.clock) return;
+    const M = this.score.mix;
     // A run always un-silences: STOP PREVIEW is a menu control, not a mute.
     this.resumeBusses();
 
     // Intensity is smoothed hard. A cascade spikes EPS for half a second, and an
     // arrangement that adds and drops a layer inside half a second sounds broken
     // rather than responsive.
-    this.smoothed += (state.intensity - this.smoothed) * 0.04;
+    this.smoothed += (state.intensity - this.smoothed) * M.intensitySmoothing;
 
     // §18.2 asked for 110 rising to 140. 140 is right for the *feeling* of
     // Meltdown and wrong as a continuous ramp: a groove needs a stable pulse,
@@ -904,32 +960,39 @@ export class Audio {
       }
     }
 
-    this.clock.bpm = 112 + state.meltdown * 12;
-    this.delay.delayTime.setTargetAtTime((60 / this.clock.bpm) * 0.75, this.ctx.currentTime, 0.2);
+    this.clock.bpm = M.tempo.base + state.meltdown * M.tempo.meltdown;
+    const G = this.score.graph;
+    this.delay.delayTime.setTargetAtTime(
+      (60 / this.clock.bpm) * G.delay.note,
+      this.ctx.currentTime,
+      G.delay.glide,
+    );
     this.echoSend.gain.setTargetAtTime(this.plan.echo, this.ctx.currentTime, 0.3);
 
     // §21b.7 — the handover, on two faders that belong to nobody else.
     const wanted = state.siege > 0.01 ? 1 : 0;
-    this.siegeMix += (wanted - this.siegeMix) * 0.06;
-    if (this.siegeMix < 0.002) this.siegeMix = 0;
+    this.siegeMix += (wanted - this.siegeMix) * M.siegeSmoothing;
+    if (this.siegeMix < M.siegeFloor) this.siegeMix = 0;
     const now = this.ctx.currentTime;
-    this.siegeBus.gain.setTargetAtTime(this.siegeMix, now, 0.25);
+    this.siegeBus.gain.setTargetAtTime(this.siegeMix, now, M.siege.crossfade);
     // All the way out.
     //
     // This kept 12% of the run's arrangement underneath, on the theory that a
     // trace of it made the siege read as something happening *to* your music. In
     // practice the two are in unrelated keys over unrelated pulses, and the
     // residue was mud under the drone — and the drone is the point.
-    this.scoreTrim.gain.setTargetAtTime(1 - this.siegeMix, now, 0.25);
+    this.scoreTrim.gain.setTargetAtTime(
+      1 - this.siegeMix * M.siege.scoreTrim,
+      now,
+      M.siege.crossfade,
+    );
     // The Engine's own sounds bend rather than vanish, and not all the way: a
     // little dry left in keeps a shot legible as *your shot*, which is the one
     // thing this must not take away.
-    this.fxDry.gain.setTargetAtTime(1 - this.siegeMix * 0.72, now, 0.25);
-    this.fxWet.gain.setTargetAtTime(this.siegeMix * 1.35, now, 0.25);
+    this.fxDry.gain.setTargetAtTime(1 - this.siegeMix * M.siege.fxDry, now, M.siege.crossfade);
+    this.fxWet.gain.setTargetAtTime(this.siegeMix * M.siege.fxWet, now, M.siege.crossfade);
 
-    // Busier means dirtier, not louder. Drive climbs with intensity while the
-    // trim comes down to pay for the layers that intensity added.
-    this.musicBus.gain.value = state.stalled ? 0.12 : 0.9;
+    this.musicBus.gain.value = state.stalled ? M.bus.stalled : M.bus.music;
 
     for (const cue of cues) {
       // Hurt is the exception to everything: unquantized, played the instant it
@@ -1007,7 +1070,7 @@ export class Audio {
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
     if (sound === 'hover') {
-      if (now - this.lastHover < 0.045) return;
+      if (now - this.lastHover < this.score.mix.hoverThrottle) return;
       this.lastHover = now;
     }
     uiVoice(this.voice(this.uiBus), now, sound);
@@ -1038,13 +1101,14 @@ export class Audio {
    */
   interfere(on: boolean): void {
     if (!this.ctx) return;
+    const I = this.score.mix.interfere;
     const now = this.ctx.currentTime;
-    const corner = on ? 200 : 20000;
-    const level = on ? 0.06 : 1;
+    const corner = on ? I.corner : I.open;
+    const level = on ? I.level : 1;
     // Fast in, slow out. The room stops working in a quarter of a second and
     // takes the best part of a second to come back, so it reads as something
     // being done to it rather than as a setting changing.
-    const over = on ? 0.2 : 0.9;
+    const over = on ? I.inSeconds : I.outSeconds;
     for (const [param, target] of [
       [this.interfereFilter.frequency, corner],
       [this.interfereGain.gain, level],
@@ -1074,12 +1138,13 @@ export class Audio {
     const plan = this.plan;
     const cells = this.cells;
     const i = this.smoothed;
-    const beat = 60 / (this.clock?.bpm ?? 112);
+    const M = this.score.mix;
+    const beat = 60 / (this.clock?.bpm ?? M.tempo.base);
 
     if (index === 0) {
       this.bar = Math.floor(count / 16);
       // A new arrangement lands on a phrase boundary and nowhere else.
-      if (this.pendingPlan && (this.pendingUrgent || this.bar % PHRASE_BARS === 0)) {
+      if (this.pendingPlan && (this.pendingUrgent || this.bar % M.phraseBars === 0)) {
         this.pendingUrgent = false;
         this.adopt(this.pendingPlan);
       }
@@ -1092,29 +1157,32 @@ export class Audio {
     // a filter and adding layers over sixteen bars, then dropping them and doing
     // it again. This is the number that makes a loop feel like an arrangement.
     const phrase = this.phrase;
-    const openness = 0.25 + phrase * 0.75;
-    const colour = HUE_COLOUR[this.state.dominant];
+    const openness = M.filter.opennessBase + phrase * M.filter.opennessSpan;
+    const colour = M.hueColour[this.state.dominant];
     this.musicFilter.frequency.setTargetAtTime(
-      420 + openness * colour * 5200 * (0.5 + i * 0.5),
+      M.filter.floor +
+        openness * colour * M.filter.span * (M.filter.intensityFloor + i * M.filter.intensitySpan),
       at,
-      0.08,
+      M.filter.glide,
     );
 
     // Swing: delay the offbeat sixteenths. A little of this is the whole
     // difference between a machine and a groove.
-    const swung = index % 2 === 1 ? at + beat * 0.25 * plan.swing : at;
+    const swung = index % 2 === 1 ? at + beat * M.swing * plan.swing : at;
 
     // A big detonation owns the next sixteenth. See `bigEvent`.
     const claimed = this.claim > 0;
     if (claimed) this.claim--;
 
     const bleak = this.state.meltdown > 0;
+    // Read once: whether this Score wants anything in the room at all.
+    const reverb = this.score.graph.reverb.send > 0.001;
 
 
 
     const kickStep = step(cells.kick, count);
     if (kickStep) {
-      kick(punch, at, 0.95 * kickStep.gain, plan.kickVoice);
+      kick(punch, at, M.gains.kick * kickStep.gain, plan.kickVoice);
       this.duck(at);
     }
 
@@ -1122,13 +1190,18 @@ export class Audio {
     // drops for the last bar of a phrase, which is what makes the next downbeat
     // land.
     const percStep = step(cells.backbeat, count);
-    if (percStep && this.bar % PHRASE_BARS !== PHRASE_BARS - 1) {
+    if (percStep && this.bar % M.phraseBars !== M.phraseBars - 1) {
       // Scaled by intensity, unlike before. The backbeat was the one loud voice
       // that ignored how much was happening, so the menu — an arrangement at
       // near-zero intensity with almost nothing else playing — got the same clap
       // as a full run, with no wall of engine to sit behind. It now opens up with
       // everything else instead of arriving fully grown.
-      perc(punch, at, (0.5 + 0.3 * i) * percStep.gain, plan.percVoice);
+      perc(
+        punch,
+        at,
+        (M.gains.backbeatBase + M.gains.backbeatPerIntensity * i) * percStep.gain,
+        plan.percVoice,
+      );
     }
 
     // §13.2 — Meltdown takes layers away rather than adding them.
@@ -1143,16 +1216,16 @@ export class Audio {
 
     const hatStep = step(cells.hats, count);
     const drive = i * plan.drive;
-    if (hatStep && drive > 0.08 && (!bleak || index % 8 === 4)) {
-      hat(music, swung, (bleak ? 0.45 : 0.8) * hatStep.gain, hatStep.open);
+    if (hatStep && drive > M.entry.hatDrive && (!bleak || index % 8 === 4)) {
+      hat(music, swung, (bleak ? M.gains.hatBleak : M.gains.hat) * hatStep.gain, hatStep.open);
     }
 
     // The bassline walks the chord: cell values index into its tones, so the
     // bass is always playing the harmony rather than a line beside it.
     const bassStep = step(cells.bass, count);
-    if (bassStep && !bassStep.hold && i > 0.03 && !claimed) {
-      const hz = semiHz(tone(tones, bassStep) - 12);
-      bass(music, swung, hz, 0.85, {
+    if (bassStep && !bassStep.hold && i > M.entry.bass && !claimed) {
+      const hz = semiHz(tone(tones, bassStep) + M.register.bass);
+      bass(music, swung, hz, M.gains.bass, {
         voice: plan.bassVoice,
         q: plan.bassQ,
         brightness: plan.bassBrightness * colour,
@@ -1164,16 +1237,19 @@ export class Audio {
       this.lastBassHz = 0;
     }
 
-    if (index === 0) sub(punch, at, semiHz(tones[0]! - 24), 0.7, beat * 2);
+    if (index === 0) {
+      sub(punch, at, semiHz(tones[0]! + M.register.sub), M.gains.sub, beat * M.length.sub);
+    }
 
     // The stab. Enters a quarter of the way into a phrase and is most of what
     // reads as melody in this genre.
     const stabStep = step(cells.stab, count);
-    if (stabStep && !bleak && (phrase > 0.24 || i > 0.5)) {
-      stab(music, swung, tones, 0.9 * stabStep.gain, plan.stabVoice);
+    if (stabStep && !bleak && (phrase > M.entry.stabPhrase || i > M.entry.stabIntensity)) {
+      stab(music, swung, tones, M.gains.stab * stabStep.gain, plan.stabVoice);
       if (plan.echo > 0.01) {
-        stab(this.voice(this.echoSend), swung, tones, 0.9 * stabStep.gain, plan.stabVoice);
+        stab(this.voice(this.echoSend), swung, tones, M.gains.stab * stabStep.gain, plan.stabVoice);
       }
+      this.send(reverb, (v) => stab(v, swung, tones, M.gains.stab * stabStep.gain, plan.stabVoice));
     }
 
     // The motif: one or two bars, and the hook is repetition rather than
@@ -1183,13 +1259,22 @@ export class Audio {
     // lead entirely. Same line, three shapes: statement, answer, silence. That
     // is the smallest amount of arrangement that stops a hook from wearing out,
     // and it costs nothing but a transposition.
-    const answering = phrase >= 0.5 && phrase < 0.875;
-    const resting = phrase >= 0.875;
+    const answering = phrase >= M.phrase.answerFrom && phrase < M.phrase.restFrom;
+    const resting = phrase >= M.phrase.restFrom;
     const motifStep = resting || bleak ? null : step(cells.motif, count);
-    if (motifStep && !motifStep.hold && (phrase > 0.48 || i > 0.65)) {
-      const hz = semiHz(tone(tones, motifStep) + (answering ? 36 : 24));
-      motif(music, swung, hz, 0.9, plan.leadVoice, this.lastLeadHz);
-      if (plan.echo > 0.01) motif(this.voice(this.echoSend), swung, hz, 0.9, plan.leadVoice);
+    if (
+      motifStep &&
+      !motifStep.hold &&
+      (phrase > M.entry.motifPhrase || i > M.entry.motifIntensity)
+    ) {
+      const hz = semiHz(
+        tone(tones, motifStep) + (answering ? M.register.motifAnswer : M.register.motif),
+      );
+      motif(music, swung, hz, M.gains.motif, plan.leadVoice, this.lastLeadHz);
+      if (plan.echo > 0.01) {
+        motif(this.voice(this.echoSend), swung, hz, M.gains.motif, plan.leadVoice);
+      }
+      this.send(reverb, (v) => motif(v, swung, hz, M.gains.motif, plan.leadVoice));
       this.lastLeadHz = hz;
     } else if (!motifStep) {
       this.lastLeadHz = 0;
@@ -1202,9 +1287,17 @@ export class Audio {
     // A gated chord is a rhythm part; the same notes sustained are a drone, and
     // with the lead gone that is the only thing left carrying the harmony.
     if (bleak) {
-      if (index === 0) gatedChord(music, swung, tones, 0.6, beat * 3.6, plan.padWave);
-    } else if (i > 0.3 && index % 8 === 4) {
-      gatedChord(music, swung, tones, 0.85, beat * 0.45, plan.padWave);
+      if (index === 0) {
+        gatedChord(music, swung, tones, M.gains.chordBleak, beat * M.length.chordBleak, plan.padWave);
+        this.send(reverb, (v) =>
+          gatedChord(v, swung, tones, M.gains.chordBleak, beat * M.length.chordBleak, plan.padWave),
+        );
+      }
+    } else if (i > M.entry.chordIntensity && index % 8 === 4) {
+      gatedChord(music, swung, tones, M.gains.chord, beat * M.length.chord, plan.padWave);
+      this.send(reverb, (v) =>
+        gatedChord(v, swung, tones, M.gains.chord, beat * M.length.chord, plan.padWave),
+      );
     }
 
     this.playParts(music, swung, index, tones);
@@ -1234,6 +1327,7 @@ export class Audio {
     if (this.siegeMix < 0.01 || !this.ctx) return;
     const v = this.voice(this.siegeBus);
     const s = this.state.siege;
+    const S = this.score.mix.siege;
 
     // The beat. Four on the floor, all four the same size: BAM BAM BAM BAM,
     // with nothing in between to soften it. The offbeat eighths are gone and
@@ -1246,7 +1340,7 @@ export class Audio {
     // is what actually makes it land: the drone owns the low band, so the kick
     // has to be given a hole in it rather than shouted over the top of it.
     if (index % 4 === 0) {
-      siegeHit(v, at, 0.62, true);
+      siegeHit(v, at, S.hitGain, true);
       this.duckDrone(at, beat);
     }
 
@@ -1259,7 +1353,14 @@ export class Audio {
       // than twice the loudest one-shot in the game — which would have pinned
       // the limiter flat for twenty-two seconds and ducked everything else to
       // nothing. Measured, not guessed.
-      siegeDrone({ ctx: this.ctx, out: this.siegeDroneBus }, at, beat * 4.2, 41.2, 0.28 + s * 0.12, s);
+      siegeDrone(
+        this.voice(this.siegeDroneBus),
+        at,
+        beat * S.droneLength,
+        S.droneHz,
+        S.droneGainBase + s * S.droneGainPerSiege,
+        s,
+      );
     }
 
     // And the line above it, from a third of the way in. Each entry is a
@@ -1269,17 +1370,33 @@ export class Audio {
     // The gains are large because a bandpass at Q 3.2 over an FM carrier throws
     // most of the energy away — at what looked like a reasonable 0.13 this
     // rendered at peak 0.05 and was inaudible.
-    if (index === 8 && s > 0.3) {
-      const cry = SIEGE_CRIES[this.siegeCry % SIEGE_CRIES.length]!;
+    if (index === 8 && s > S.screamFrom) {
+      const cry = S.cries[this.siegeCry % S.cries.length]!;
       this.siegeCry++;
       // Two octaves clear of the drone, so it is a separate register rather than
       // a melody the bass could be accompanying.
-      siegeScream(v, at, beat * cry.len * 0.6, semiHz(cry.deg + 4) * 8, 0.13 + s * 0.15, s, cry.up);
+      siegeScream(
+        v,
+        at,
+        beat * cry.len * S.screamLength,
+        semiHz(cry.deg + S.screamRegister) * S.screamOctaves,
+        S.screamGainBase + s * S.screamGainPerSiege,
+        s,
+        cry.up,
+      );
     }
     // Past three quarters it stops waiting its turn and answers itself.
-    if (index === 4 && s > 0.75) {
-      const cry = SIEGE_CRIES[(this.siegeCry + 3) % SIEGE_CRIES.length]!;
-      siegeScream(v, at, beat * 1.5, semiHz(cry.deg + 11) * 8, 0.11 + s * 0.12, s, !cry.up);
+    if (index === 4 && s > S.answerFrom) {
+      const cry = S.cries[(this.siegeCry + S.answerStride) % S.cries.length]!;
+      siegeScream(
+        v,
+        at,
+        beat * S.answerLength,
+        semiHz(cry.deg + S.answerRegister) * S.screamOctaves,
+        S.answerGainBase + s * S.answerGainPerSiege,
+        s,
+        !cry.up,
+      );
     }
   }
 
@@ -1294,10 +1411,11 @@ export class Audio {
    * the thing it competes with.
    */
   private duckDrone(at: number, beat: number): void {
+    const S = this.score.mix.siege;
     const g = this.siegeDroneBus.gain;
     g.cancelScheduledValues(at);
-    g.setValueAtTime(0.26, at);
-    g.linearRampToValueAtTime(1, at + beat * 0.42);
+    g.setValueAtTime(S.droneDuckDepth, at);
+    g.linearRampToValueAtTime(1, at + beat * S.droneDuckRecover);
   }
 
   /**
@@ -1333,12 +1451,13 @@ export class Audio {
     this.lastBigEvent = at;
 
     const tones = this.tones;
+    const B = this.score.mix.bigEvent;
     const voice = this.voice(this.punchBus);
-    sub(voice, at, semiHz(tones[0]! - 24), 0.9, 0.45);
-    gatedChord(this.voice(this.musicBus), at, tones, 1, 0.4, this.plan.padWave);
-    playHue(this.voice(this.engineBus), hue, at, semiHz(tones[0]! + 24), 0.8);
+    sub(voice, at, semiHz(tones[0]! + this.score.mix.register.sub), B.subGain, B.subLength);
+    gatedChord(this.voice(this.musicBus), at, tones, B.chordGain, B.chordLength, this.plan.padWave);
+    playHue(this.voice(this.engineBus), hue, at, semiHz(tones[0]! + B.hueRegister), B.hueGain);
     // Two steps of room. Any longer and the groove notices the hole.
-    this.claim = 2;
+    this.claim = B.claim;
   }
 
   /**
@@ -1360,7 +1479,9 @@ export class Audio {
       // in the chord; the contour moves it around inside that chord across the
       // bar. Both are chord degrees, so a part cannot step onto a wrong note.
       const degree = part.tone + (part.contour[index % part.contour.length] ?? 0);
-      const hz = semiHz(tones[degree % tones.length]! + 24 + part.register);
+      const hz = semiHz(
+        tones[degree % tones.length]! + this.score.mix.register.part + part.register,
+      );
       playPart(
         music,
         part.voice,
@@ -1387,12 +1508,13 @@ export class Audio {
    * one gain automation per beat.
    */
   private duck(at: number): void {
+    const M = this.score.mix;
     const g = this.musicBus.gain;
-    const target = this.state.stalled ? 0.12 : 0.9;
-    const beat = 60 / (this.clock?.bpm ?? 112);
+    const target = this.state.stalled ? M.bus.stalled : M.bus.music;
+    const beat = 60 / (this.clock?.bpm ?? M.tempo.base);
     g.cancelScheduledValues(at);
-    g.setValueAtTime(target * 0.34, at);
-    g.linearRampToValueAtTime(target, at + beat * 0.75);
+    g.setValueAtTime(target * M.duck.depth, at);
+    g.linearRampToValueAtTime(target, at + beat * M.duck.recover);
   }
 
   /**
@@ -1406,23 +1528,38 @@ export class Audio {
    */
   private flush(at: number, intensity: number): void {
     const voice = this.voice(this.engineBus);
+    const M = this.score.mix;
+    const O = M.occasion;
+    const A = M.accents;
 
     // Occasions first, and never dropped. A level-up chord that loses its slot
     // to the 300th kill note is the system defeating its own purpose.
-    for (const occasion of this.occasions.splice(0, 2)) {
+    for (const occasion of this.occasions.splice(0, O.perStep)) {
       const tones = this.tones;
-      const beat = 60 / (this.clock?.bpm ?? 112);
+      const beat = 60 / (this.clock?.bpm ?? M.tempo.base);
       if (occasion.kind === 'overheat') {
         // Overheat resolves *down* a fourth: the one chord in the game that
         // sounds like something went wrong rather than right. Quieter than a
         // level-up, not louder — it is already the most stressful moment in the
         // run and does not need volume to say so.
-        sub(voice, at, semiHz(tones[0]! - 29), 0.55, 1.1);
-        this.hitChord(voice, at, tones.map((x) => x - 5), 0.45, beat);
+        sub(
+          voice,
+          at,
+          semiHz(tones[0]! + O.overheatSubShift),
+          O.overheatSubGain,
+          O.overheatSubLength,
+        );
+        this.hitChord(
+          voice,
+          at,
+          tones.map((x) => x + O.overheatShift),
+          O.overheatGain,
+          beat,
+        );
       } else {
         // Three hits on the beat rather than one long swell — an occasion should
         // land *in* the track, not float above it.
-        this.hitChord(voice, at, tones, 1, beat);
+        this.hitChord(voice, at, tones, O.gain, beat);
       }
     }
 
@@ -1433,18 +1570,18 @@ export class Audio {
     // As the arrangement takes over, individual events step back. This one is a
     // *reduction*, which is the direction that stays comfortable: the engine
     // layer thins out rather than everything else getting louder to bury it.
-    const duckToArrangement = 1 - Math.min(0.75, intensity * 0.95);
-    if (duckToArrangement < 0.3) return;
+    const duckToArrangement = 1 - Math.min(A.duckCap, intensity * A.duckPerIntensity);
+    if (duckToArrangement < A.duckFloor) return;
 
     batch.sort((a, b) => b.weight - a.weight);
 
     let played = 0;
     const heard = new Set<string>();
     for (const cue of batch) {
-      if (played >= MAX_ACCENTS_PER_STEP) break;
+      if (played >= M.maxAccentsPerStep) break;
 
       // Quiet events stop being worth a note once the track is carrying itself.
-      if (cue.weight < intensity * 0.55) continue;
+      if (cue.weight < intensity * A.weightGate) continue;
 
       // One note per (kind, hue, depth) per step. Twelve identical bolts on one
       // sixteenth is one note played twelve times — a louder note with phasing.
@@ -1452,11 +1589,11 @@ export class Audio {
       if (heard.has(key)) continue;
       heard.add(key);
 
-      const gain = (0.3 + cue.weight * 0.6) * duckToArrangement;
+      const gain = (A.gainBase + cue.weight * A.gainSpan) * duckToArrangement;
       // Every accent is a *chord tone*. A cascade is therefore the current chord
       // being hammered, and cannot clash with the track by construction - which
       // is the only way forty simultaneous notes were ever going to work.
-      const base = cue.kind === 'kill' ? 2 : cue.kind === 'pickup' ? 4 : 0;
+      const base = A.base[cue.kind] ?? 0;
       playHue(voice, cue.hue, at, this.chordNote(base + cue.depth), gain);
       played++;
     }
@@ -1465,13 +1602,38 @@ export class Audio {
   // ---------------------------------------------------------------- utilities
 
   private voice(out: AudioNode): VoiceCtx {
-    return { ctx: this.ctx!, out };
+    return { ctx: this.ctx!, out, tuning: this.score.voices };
+  }
+
+  /**
+   * Play a voice into the reverb as well, when the Score asks for space.
+   *
+   * A send rather than an insert, and only from the melodic voices — the stab,
+   * the lead and the chord. Reverberating the whole music bus is the obvious
+   * shortcut and it is how a mix turns to mud: the kick and the sub are the two
+   * things that have to stay dry, because a tail under the low end smears the
+   * one part of the track the body is reading as time.
+   *
+   * Costs nothing when a Score sends nothing. `current` sends nothing, so this
+   * branch never runs and the schedule golden is untouched — which is the point
+   * of adding it this way rather than turning the reverb on for everyone.
+   */
+  private send(on: boolean, play: (v: VoiceCtx) => void): void {
+    if (on) play(this.voice(this.reverbSend));
   }
 
   /** An occasion chord: three hits on the beat, so it lands in the track. */
   private hitChord(voice: VoiceCtx, at: number, tones: number[], gain: number, beat: number): void {
-    for (let i = 0; i < 3; i++) {
-      gatedChord(voice, at + beat * i * 0.5, tones, gain * (1 - i * 0.18), beat * 0.42, this.plan.padWave);
+    const O = this.score.mix.occasion;
+    for (let i = 0; i < O.hits; i++) {
+      gatedChord(
+        voice,
+        at + beat * i * O.spacing,
+        tones,
+        gain * (1 - i * O.decay),
+        beat * O.length,
+        this.plan.padWave,
+      );
     }
   }
 
@@ -1483,10 +1645,11 @@ export class Audio {
    * construction rather than by luck.
    */
   private chordNote(n: number): number {
+    const M = this.score.mix;
     const tones = this.tones;
-    const clamped = Math.max(0, Math.min(11, n));
+    const clamped = Math.max(0, Math.min(M.accents.maxDegree, n));
     const octave = Math.floor(clamped / tones.length);
-    return semiHz(tones[clamped % tones.length]! + 24 + octave * 12);
+    return semiHz(tones[clamped % tones.length]! + M.register.part + octave * 12);
   }
 
 

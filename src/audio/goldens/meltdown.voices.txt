@@ -1,0 +1,333 @@
+# voice calls — every note the sequencer asked for
+# bar:step (+offset into the step)   bus   voice   arguments
+
+  0:00         punchBus   kick         gain 0.950  voice punch
+  0:00         musicBus   bass         hz 21.827  gain 0.850  opts {accent=true brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  0:00         punchBus   sub          hz 10.913  gain 0.700  dur 0.968
+  0:00         musicBus   gatedChord   tones [-4.000 -1.000 3.000]  gain 0.600  dur 1.742  wave sawtooth
+  0:00         musicBus   playPart     voice drone  hz 174.61  gain 1.000  length 2.200  bite 0.000  glideFrom 0.000
+  0:00         musicBus   playPart     voice pluck  hz 207.65  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  0:00         musicBus   playPart     voice riser  hz 207.65  gain 1.000  length 1.000  bite 0.000  glideFrom 0.000
+  0:02         musicBus   bass         hz 21.827  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  0:02         musicBus   playPart     voice pluck  hz 207.65  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  0:02         musicBus   playPart     voice drone  hz 43.654  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  0:03         punchBus   kick         gain 0.950  voice punch
+  0:03 +22ms   musicBus   playPart     voice drone  hz 43.654  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  0:04         punchBus   kick         gain 0.950  voice punch
+  0:04         punchBus   perc         gain 0.933  voice clap
+  0:04         musicBus   bass         hz 21.827  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  0:04         musicBus   playPart     voice drone  hz 174.61  gain 1.000  length 2.200  bite 0.000  glideFrom 0.000
+  0:04         musicBus   playPart     voice pluck  hz 207.65  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  0:06         musicBus   bass         hz 21.827  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  0:06         musicBus   playPart     voice pluck  hz 207.65  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  0:06         musicBus   playPart     voice drone  hz 43.654  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  0:07 +22ms   musicBus   playPart     voice bell  hz 830.61  gain 1.000  length 1.000  bite 0.000  glideFrom 0.000
+  0:07 +22ms   echoSend   playPart     voice bell  hz 830.61  gain 0.550  length 1.000  bite 0.000
+  0:08         punchBus   kick         gain 0.950  voice punch
+  0:08         musicBus   bass         hz 21.827  gain 0.850  opts {accent=true brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  0:08         musicBus   playPart     voice drone  hz 207.65  gain 1.000  length 2.200  bite 0.000  glideFrom 0.000
+  0:08         musicBus   playPart     voice pluck  hz 207.65  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  0:10         musicBus   bass         hz 21.827  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  0:10         musicBus   playPart     voice pluck  hz 207.65  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  0:10         musicBus   playPart     voice drone  hz 65.406  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  0:11 +22ms   musicBus   playPart     voice drone  hz 65.406  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  0:12         punchBus   kick         gain 0.950  voice punch
+  0:12         punchBus   perc         gain 1.045  voice clap
+  0:12         musicBus   bass         hz 21.827  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  0:12         musicBus   playPart     voice drone  hz 207.65  gain 1.000  length 2.200  bite 0.000  glideFrom 0.000
+  0:12         musicBus   playPart     voice pluck  hz 207.65  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  0:14         punchBus   kick         gain 0.950  voice punch
+  0:14         musicBus   bass         hz 32.703  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  0:14         musicBus   playPart     voice pluck  hz 207.65  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  0:14         musicBus   playPart     voice drone  hz 65.406  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  0:15 +22ms   musicBus   playPart     voice bell  hz 830.61  gain 1.000  length 1.000  bite 0.000  glideFrom 0.000
+  0:15 +22ms   echoSend   playPart     voice bell  hz 830.61  gain 0.550  length 1.000  bite 0.000
+  1:00         punchBus   kick         gain 0.950  voice punch
+  1:00         musicBus   bass         hz 21.827  gain 0.850  opts {accent=true brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  1:00         punchBus   sub          hz 10.913  gain 0.700  dur 0.968
+  1:00         musicBus   gatedChord   tones [-4.000 -1.000 3.000]  gain 0.600  dur 1.742  wave sawtooth
+  1:00         musicBus   playPart     voice drone  hz 174.61  gain 1.000  length 2.200  bite 0.000  glideFrom 0.000
+  1:00         musicBus   playPart     voice pluck  hz 207.65  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  1:00         musicBus   playPart     voice riser  hz 207.65  gain 1.000  length 1.000  bite 0.000  glideFrom 0.000
+  1:02         musicBus   bass         hz 21.827  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  1:02         musicBus   playPart     voice pluck  hz 207.65  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  1:02         musicBus   playPart     voice drone  hz 43.654  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  1:03         punchBus   kick         gain 0.950  voice punch
+  1:03 +22ms   musicBus   playPart     voice drone  hz 43.654  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  1:04         punchBus   kick         gain 0.950  voice punch
+  1:04         punchBus   perc         gain 1.056  voice clap
+  1:04         musicBus   bass         hz 21.827  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  1:04         musicBus   playPart     voice drone  hz 174.61  gain 1.000  length 2.200  bite 0.000  glideFrom 0.000
+  1:04         musicBus   playPart     voice pluck  hz 207.65  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  1:06         musicBus   bass         hz 21.827  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  1:06         musicBus   playPart     voice pluck  hz 207.65  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  1:06         musicBus   playPart     voice drone  hz 43.654  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  1:07 +22ms   musicBus   playPart     voice bell  hz 830.61  gain 1.000  length 1.000  bite 0.000  glideFrom 0.000
+  1:07 +22ms   echoSend   playPart     voice bell  hz 830.61  gain 0.550  length 1.000  bite 0.000
+  1:08         punchBus   kick         gain 0.950  voice punch
+  1:08         musicBus   bass         hz 21.827  gain 0.850  opts {accent=true brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  1:08         musicBus   playPart     voice drone  hz 207.65  gain 1.000  length 2.200  bite 0.000  glideFrom 0.000
+  1:08         musicBus   playPart     voice pluck  hz 207.65  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  1:10         musicBus   bass         hz 21.827  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  1:10         musicBus   playPart     voice pluck  hz 207.65  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  1:10         musicBus   playPart     voice drone  hz 65.406  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  1:11 +22ms   musicBus   playPart     voice drone  hz 65.406  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  1:12         punchBus   kick         gain 0.950  voice punch
+  1:12         punchBus   perc         gain 1.057  voice clap
+  1:12         musicBus   bass         hz 21.827  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  1:12         musicBus   playPart     voice drone  hz 207.65  gain 1.000  length 2.200  bite 0.000  glideFrom 0.000
+  1:12         musicBus   playPart     voice pluck  hz 207.65  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  1:14         punchBus   kick         gain 0.950  voice punch
+  1:14         musicBus   bass         hz 32.703  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  1:14         musicBus   playPart     voice pluck  hz 207.65  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  1:14         musicBus   playPart     voice drone  hz 65.406  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  1:15 +22ms   musicBus   playPart     voice bell  hz 830.61  gain 1.000  length 1.000  bite 0.000  glideFrom 0.000
+  1:15 +22ms   echoSend   playPart     voice bell  hz 830.61  gain 0.550  length 1.000  bite 0.000
+  2:00         punchBus   kick         gain 0.950  voice punch
+  2:00         musicBus   bass         hz 21.827  gain 0.850  opts {accent=true brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  2:00         punchBus   sub          hz 10.913  gain 0.700  dur 0.968
+  2:00         musicBus   gatedChord   tones [-4.000 -1.000 3.000]  gain 0.600  dur 1.742  wave sawtooth
+  2:00         musicBus   playPart     voice drone  hz 174.61  gain 1.000  length 2.200  bite 0.000  glideFrom 0.000
+  2:00         musicBus   playPart     voice pluck  hz 207.65  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  2:00         musicBus   playPart     voice riser  hz 207.65  gain 1.000  length 1.000  bite 0.000  glideFrom 0.000
+  2:02         musicBus   bass         hz 21.827  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  2:02         musicBus   playPart     voice pluck  hz 207.65  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  2:02         musicBus   playPart     voice drone  hz 43.654  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  2:03         punchBus   kick         gain 0.950  voice punch
+  2:03 +22ms   musicBus   playPart     voice drone  hz 43.654  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  2:04         punchBus   kick         gain 0.950  voice punch
+  2:04         punchBus   perc         gain 1.057  voice clap
+  2:04         musicBus   bass         hz 21.827  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  2:04         musicBus   playPart     voice drone  hz 174.61  gain 1.000  length 2.200  bite 0.000  glideFrom 0.000
+  2:04         musicBus   playPart     voice pluck  hz 207.65  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  2:06         musicBus   bass         hz 21.827  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  2:06         musicBus   playPart     voice pluck  hz 207.65  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  2:06         musicBus   playPart     voice drone  hz 43.654  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  2:07 +22ms   musicBus   playPart     voice bell  hz 830.61  gain 1.000  length 1.000  bite 0.000  glideFrom 0.000
+  2:07 +22ms   echoSend   playPart     voice bell  hz 830.61  gain 0.550  length 1.000  bite 0.000
+  2:08         punchBus   kick         gain 0.950  voice punch
+  2:08         musicBus   bass         hz 21.827  gain 0.850  opts {accent=true brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  2:08         musicBus   playPart     voice drone  hz 207.65  gain 1.000  length 2.200  bite 0.000  glideFrom 0.000
+  2:08         musicBus   playPart     voice pluck  hz 207.65  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  2:10         musicBus   bass         hz 21.827  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  2:10         musicBus   playPart     voice pluck  hz 207.65  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  2:10         musicBus   playPart     voice drone  hz 65.406  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  2:11 +22ms   musicBus   playPart     voice drone  hz 65.406  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  2:12         punchBus   kick         gain 0.950  voice punch
+  2:12         punchBus   perc         gain 1.057  voice clap
+  2:12         musicBus   bass         hz 21.827  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  2:12         musicBus   playPart     voice drone  hz 207.65  gain 1.000  length 2.200  bite 0.000  glideFrom 0.000
+  2:12         musicBus   playPart     voice pluck  hz 207.65  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  2:14         punchBus   kick         gain 0.950  voice punch
+  2:14         musicBus   bass         hz 32.703  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  2:14         musicBus   playPart     voice pluck  hz 207.65  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  2:14         musicBus   playPart     voice drone  hz 65.406  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  2:15 +22ms   musicBus   playPart     voice bell  hz 830.61  gain 1.000  length 1.000  bite 0.000  glideFrom 0.000
+  2:15 +22ms   echoSend   playPart     voice bell  hz 830.61  gain 0.550  length 1.000  bite 0.000
+  3:00         punchBus   kick         gain 0.950  voice punch
+  3:00         musicBus   bass         hz 21.827  gain 0.850  opts {accent=true brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  3:00         punchBus   sub          hz 10.913  gain 0.700  dur 0.968
+  3:00         musicBus   gatedChord   tones [-4.000 -1.000 3.000]  gain 0.600  dur 1.742  wave sawtooth
+  3:00         musicBus   playPart     voice drone  hz 174.61  gain 1.000  length 2.200  bite 0.000  glideFrom 0.000
+  3:00         musicBus   playPart     voice pluck  hz 207.65  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  3:00         musicBus   playPart     voice riser  hz 207.65  gain 1.000  length 1.000  bite 0.000  glideFrom 0.000
+  3:02         musicBus   bass         hz 21.827  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  3:02         musicBus   playPart     voice pluck  hz 207.65  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  3:02         musicBus   playPart     voice drone  hz 43.654  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  3:03         punchBus   kick         gain 0.950  voice punch
+  3:03 +22ms   musicBus   playPart     voice drone  hz 43.654  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  3:04         punchBus   kick         gain 0.950  voice punch
+  3:04         punchBus   perc         gain 1.057  voice clap
+  3:04         musicBus   bass         hz 21.827  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  3:04         musicBus   playPart     voice drone  hz 174.61  gain 1.000  length 2.200  bite 0.000  glideFrom 0.000
+  3:04         musicBus   playPart     voice pluck  hz 207.65  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  3:06         musicBus   bass         hz 21.827  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  3:06         musicBus   playPart     voice pluck  hz 207.65  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  3:06         musicBus   playPart     voice drone  hz 43.654  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  3:07 +22ms   musicBus   playPart     voice bell  hz 830.61  gain 1.000  length 1.000  bite 0.000  glideFrom 0.000
+  3:07 +22ms   echoSend   playPart     voice bell  hz 830.61  gain 0.550  length 1.000  bite 0.000
+  3:08         punchBus   kick         gain 0.950  voice punch
+  3:08         musicBus   bass         hz 21.827  gain 0.850  opts {accent=true brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  3:08         musicBus   playPart     voice drone  hz 207.65  gain 1.000  length 2.200  bite 0.000  glideFrom 0.000
+  3:08         musicBus   playPart     voice pluck  hz 207.65  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  3:10         musicBus   bass         hz 21.827  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  3:10         musicBus   playPart     voice pluck  hz 207.65  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  3:10         musicBus   playPart     voice drone  hz 65.406  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  3:11 +22ms   musicBus   playPart     voice drone  hz 65.406  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  3:12         punchBus   kick         gain 0.950  voice punch
+  3:12         punchBus   perc         gain 1.057  voice clap
+  3:12         musicBus   bass         hz 21.827  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  3:12         musicBus   playPart     voice drone  hz 207.65  gain 1.000  length 2.200  bite 0.000  glideFrom 0.000
+  3:12         musicBus   playPart     voice pluck  hz 207.65  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  3:14         punchBus   kick         gain 0.950  voice punch
+  3:14         musicBus   bass         hz 32.703  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  3:14         musicBus   playPart     voice pluck  hz 207.65  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  3:14         musicBus   playPart     voice drone  hz 65.406  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  3:15 +22ms   musicBus   playPart     voice bell  hz 830.61  gain 1.000  length 1.000  bite 0.000  glideFrom 0.000
+  3:15 +22ms   echoSend   playPart     voice bell  hz 830.61  gain 0.550  length 1.000  bite 0.000
+  4:00         punchBus   kick         gain 0.950  voice punch
+  4:00         musicBus   bass         hz 29.135  gain 0.850  opts {accent=true brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  4:00         punchBus   sub          hz 14.568  gain 0.700  dur 0.968
+  4:00         musicBus   gatedChord   tones [1.000 4.000 8.000]  gain 0.600  dur 1.742  wave sawtooth
+  4:00         musicBus   playPart     voice drone  hz 233.08  gain 1.000  length 2.200  bite 0.000  glideFrom 0.000
+  4:00         musicBus   playPart     voice pluck  hz 277.18  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  4:00         musicBus   playPart     voice riser  hz 277.18  gain 1.000  length 1.000  bite 0.000  glideFrom 0.000
+  4:02         musicBus   bass         hz 29.135  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  4:02         musicBus   playPart     voice pluck  hz 277.18  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  4:02         musicBus   playPart     voice drone  hz 58.270  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  4:03         punchBus   kick         gain 0.950  voice punch
+  4:03 +22ms   musicBus   playPart     voice drone  hz 58.270  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  4:04         punchBus   kick         gain 0.950  voice punch
+  4:04         punchBus   perc         gain 1.057  voice clap
+  4:04         musicBus   bass         hz 29.135  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  4:04         musicBus   playPart     voice drone  hz 233.08  gain 1.000  length 2.200  bite 0.000  glideFrom 0.000
+  4:04         musicBus   playPart     voice pluck  hz 277.18  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  4:06         musicBus   bass         hz 29.135  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  4:06         musicBus   playPart     voice pluck  hz 277.18  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  4:06         musicBus   playPart     voice drone  hz 58.270  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  4:07 +22ms   musicBus   playPart     voice bell  hz 1108.73  gain 1.000  length 1.000  bite 0.000  glideFrom 0.000
+  4:07 +22ms   echoSend   playPart     voice bell  hz 1108.73  gain 0.550  length 1.000  bite 0.000
+  4:08         punchBus   kick         gain 0.950  voice punch
+  4:08         musicBus   bass         hz 29.135  gain 0.850  opts {accent=true brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  4:08         musicBus   playPart     voice drone  hz 277.18  gain 1.000  length 2.200  bite 0.000  glideFrom 0.000
+  4:08         musicBus   playPart     voice pluck  hz 277.18  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  4:10         musicBus   bass         hz 29.135  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  4:10         musicBus   playPart     voice pluck  hz 277.18  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  4:10         musicBus   playPart     voice drone  hz 87.307  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  4:11 +22ms   musicBus   playPart     voice drone  hz 87.307  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  4:12         punchBus   kick         gain 0.950  voice punch
+  4:12         punchBus   perc         gain 1.057  voice clap
+  4:12         musicBus   bass         hz 29.135  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  4:12         musicBus   playPart     voice drone  hz 277.18  gain 1.000  length 2.200  bite 0.000  glideFrom 0.000
+  4:12         musicBus   playPart     voice pluck  hz 277.18  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  4:14         punchBus   kick         gain 0.950  voice punch
+  4:14         musicBus   bass         hz 43.654  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  4:14         musicBus   playPart     voice pluck  hz 277.18  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  4:14         musicBus   playPart     voice drone  hz 87.307  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  4:15 +22ms   musicBus   playPart     voice bell  hz 1108.73  gain 1.000  length 1.000  bite 0.000  glideFrom 0.000
+  4:15 +22ms   echoSend   playPart     voice bell  hz 1108.73  gain 0.550  length 1.000  bite 0.000
+  5:00         punchBus   kick         gain 0.950  voice punch
+  5:00         musicBus   bass         hz 29.135  gain 0.850  opts {accent=true brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  5:00         punchBus   sub          hz 14.568  gain 0.700  dur 0.968
+  5:00         musicBus   gatedChord   tones [1.000 4.000 8.000]  gain 0.600  dur 1.742  wave sawtooth
+  5:00         musicBus   playPart     voice drone  hz 233.08  gain 1.000  length 2.200  bite 0.000  glideFrom 0.000
+  5:00         musicBus   playPart     voice pluck  hz 277.18  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  5:00         musicBus   playPart     voice riser  hz 277.18  gain 1.000  length 1.000  bite 0.000  glideFrom 0.000
+  5:02         musicBus   bass         hz 29.135  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  5:02         musicBus   playPart     voice pluck  hz 277.18  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  5:02         musicBus   playPart     voice drone  hz 58.270  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  5:03         punchBus   kick         gain 0.950  voice punch
+  5:03 +22ms   musicBus   playPart     voice drone  hz 58.270  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  5:04         punchBus   kick         gain 0.950  voice punch
+  5:04         punchBus   perc         gain 1.057  voice clap
+  5:04         musicBus   bass         hz 29.135  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  5:04         musicBus   playPart     voice drone  hz 233.08  gain 1.000  length 2.200  bite 0.000  glideFrom 0.000
+  5:04         musicBus   playPart     voice pluck  hz 277.18  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  5:06         musicBus   bass         hz 29.135  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  5:06         musicBus   playPart     voice pluck  hz 277.18  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  5:06         musicBus   playPart     voice drone  hz 58.270  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  5:07 +22ms   musicBus   playPart     voice bell  hz 1108.73  gain 1.000  length 1.000  bite 0.000  glideFrom 0.000
+  5:07 +22ms   echoSend   playPart     voice bell  hz 1108.73  gain 0.550  length 1.000  bite 0.000
+  5:08         punchBus   kick         gain 0.950  voice punch
+  5:08         musicBus   bass         hz 29.135  gain 0.850  opts {accent=true brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  5:08         musicBus   playPart     voice drone  hz 277.18  gain 1.000  length 2.200  bite 0.000  glideFrom 0.000
+  5:08         musicBus   playPart     voice pluck  hz 277.18  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  5:10         musicBus   bass         hz 29.135  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  5:10         musicBus   playPart     voice pluck  hz 277.18  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  5:10         musicBus   playPart     voice drone  hz 87.307  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  5:11 +22ms   musicBus   playPart     voice drone  hz 87.307  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  5:12         punchBus   kick         gain 0.950  voice punch
+  5:12         punchBus   perc         gain 1.057  voice clap
+  5:12         musicBus   bass         hz 29.135  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  5:12         musicBus   playPart     voice drone  hz 277.18  gain 1.000  length 2.200  bite 0.000  glideFrom 0.000
+  5:12         musicBus   playPart     voice pluck  hz 277.18  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  5:14         punchBus   kick         gain 0.950  voice punch
+  5:14         musicBus   bass         hz 43.654  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  5:14         musicBus   playPart     voice pluck  hz 277.18  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  5:14         musicBus   playPart     voice drone  hz 87.307  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  5:15 +22ms   musicBus   playPart     voice bell  hz 1108.73  gain 1.000  length 1.000  bite 0.000  glideFrom 0.000
+  5:15 +22ms   echoSend   playPart     voice bell  hz 1108.73  gain 0.550  length 1.000  bite 0.000
+  6:00         punchBus   kick         gain 0.950  voice punch
+  6:00         musicBus   bass         hz 29.135  gain 0.850  opts {accent=true brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  6:00         punchBus   sub          hz 14.568  gain 0.700  dur 0.968
+  6:00         musicBus   gatedChord   tones [1.000 4.000 8.000]  gain 0.600  dur 1.742  wave sawtooth
+  6:00         musicBus   playPart     voice drone  hz 233.08  gain 1.000  length 2.200  bite 0.000  glideFrom 0.000
+  6:00         musicBus   playPart     voice pluck  hz 277.18  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  6:00         musicBus   playPart     voice riser  hz 277.18  gain 1.000  length 1.000  bite 0.000  glideFrom 0.000
+  6:02         musicBus   bass         hz 29.135  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  6:02         musicBus   playPart     voice pluck  hz 277.18  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  6:02         musicBus   playPart     voice drone  hz 58.270  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  6:03         punchBus   kick         gain 0.950  voice punch
+  6:03 +22ms   musicBus   playPart     voice drone  hz 58.270  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  6:04         punchBus   kick         gain 0.950  voice punch
+  6:04         punchBus   perc         gain 1.057  voice clap
+  6:04         musicBus   bass         hz 29.135  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  6:04         musicBus   playPart     voice drone  hz 233.08  gain 1.000  length 2.200  bite 0.000  glideFrom 0.000
+  6:04         musicBus   playPart     voice pluck  hz 277.18  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  6:06         musicBus   bass         hz 29.135  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  6:06         musicBus   playPart     voice pluck  hz 277.18  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  6:06         musicBus   playPart     voice drone  hz 58.270  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  6:07 +22ms   musicBus   playPart     voice bell  hz 1108.73  gain 1.000  length 1.000  bite 0.000  glideFrom 0.000
+  6:07 +22ms   echoSend   playPart     voice bell  hz 1108.73  gain 0.550  length 1.000  bite 0.000
+  6:08         punchBus   kick         gain 0.950  voice punch
+  6:08         musicBus   bass         hz 29.135  gain 0.850  opts {accent=true brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  6:08         musicBus   playPart     voice drone  hz 277.18  gain 1.000  length 2.200  bite 0.000  glideFrom 0.000
+  6:08         musicBus   playPart     voice pluck  hz 277.18  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  6:10         musicBus   bass         hz 29.135  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  6:10         musicBus   playPart     voice pluck  hz 277.18  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  6:10         musicBus   playPart     voice drone  hz 87.307  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  6:11 +22ms   musicBus   playPart     voice drone  hz 87.307  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  6:12         punchBus   kick         gain 0.950  voice punch
+  6:12         punchBus   perc         gain 1.057  voice clap
+  6:12         musicBus   bass         hz 29.135  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  6:12         musicBus   playPart     voice drone  hz 277.18  gain 1.000  length 2.200  bite 0.000  glideFrom 0.000
+  6:12         musicBus   playPart     voice pluck  hz 277.18  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  6:14         punchBus   kick         gain 0.950  voice punch
+  6:14         musicBus   bass         hz 43.654  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  6:14         musicBus   playPart     voice pluck  hz 277.18  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  6:14         musicBus   playPart     voice drone  hz 87.307  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  6:15 +22ms   musicBus   playPart     voice bell  hz 1108.73  gain 1.000  length 1.000  bite 0.000  glideFrom 0.000
+  6:15 +22ms   echoSend   playPart     voice bell  hz 1108.73  gain 0.550  length 1.000  bite 0.000
+  7:00         punchBus   kick         gain 0.950  voice punch
+  7:00         musicBus   bass         hz 29.135  gain 0.850  opts {accent=true brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  7:00         punchBus   sub          hz 14.568  gain 0.700  dur 0.968
+  7:00         musicBus   gatedChord   tones [1.000 4.000 8.000]  gain 0.600  dur 1.742  wave sawtooth
+  7:00         musicBus   playPart     voice drone  hz 233.08  gain 1.000  length 2.200  bite 0.000  glideFrom 0.000
+  7:00         musicBus   playPart     voice pluck  hz 277.18  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  7:00         musicBus   playPart     voice riser  hz 277.18  gain 1.000  length 1.000  bite 0.000  glideFrom 0.000
+  7:02         musicBus   bass         hz 29.135  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  7:02         musicBus   playPart     voice pluck  hz 277.18  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  7:02         musicBus   playPart     voice drone  hz 58.270  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  7:03         punchBus   kick         gain 0.950  voice punch
+  7:03 +22ms   musicBus   playPart     voice drone  hz 58.270  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  7:04         punchBus   kick         gain 0.950  voice punch
+  7:04         punchBus   perc         gain 1.057  voice clap
+  7:04         musicBus   bass         hz 29.135  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  7:04         musicBus   playPart     voice drone  hz 233.08  gain 1.000  length 2.200  bite 0.000  glideFrom 0.000
+  7:04         musicBus   playPart     voice pluck  hz 277.18  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  7:06         musicBus   bass         hz 29.135  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  7:06         musicBus   playPart     voice pluck  hz 277.18  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  7:06         musicBus   playPart     voice drone  hz 58.270  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  7:07 +22ms   musicBus   playPart     voice bell  hz 1108.73  gain 1.000  length 1.000  bite 0.000  glideFrom 0.000
+  7:07 +22ms   echoSend   playPart     voice bell  hz 1108.73  gain 0.550  length 1.000  bite 0.000
+  7:08         punchBus   kick         gain 0.950  voice punch
+  7:08         musicBus   bass         hz 29.135  gain 0.850  opts {accent=true brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  7:08         musicBus   playPart     voice drone  hz 277.18  gain 1.000  length 2.200  bite 0.000  glideFrom 0.000
+  7:08         musicBus   playPart     voice pluck  hz 277.18  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  7:10         musicBus   bass         hz 29.135  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  7:10         musicBus   playPart     voice pluck  hz 277.18  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  7:10         musicBus   playPart     voice drone  hz 87.307  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  7:11 +22ms   musicBus   playPart     voice drone  hz 87.307  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  7:12         punchBus   kick         gain 0.950  voice punch
+  7:12         punchBus   perc         gain 1.057  voice clap
+  7:12         musicBus   bass         hz 29.135  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  7:12         musicBus   playPart     voice drone  hz 277.18  gain 1.000  length 2.200  bite 0.000  glideFrom 0.000
+  7:12         musicBus   playPart     voice pluck  hz 277.18  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  7:14         punchBus   kick         gain 0.950  voice punch
+  7:14         musicBus   bass         hz 43.654  gain 0.850  opts {accent=false brightness=0.735 glideFrom=0.000 q=7.000 voice=sub}
+  7:14         musicBus   playPart     voice pluck  hz 277.18  gain 1.450  length 1.000  bite 0.600  glideFrom 0.000
+  7:14         musicBus   playPart     voice drone  hz 87.307  gain 0.700  length 1.000  bite 0.000  glideFrom 0.000
+  7:15 +22ms   musicBus   playPart     voice bell  hz 1108.73  gain 1.000  length 1.000  bite 0.000  glideFrom 0.000
+  7:15 +22ms   echoSend   playPart     voice bell  hz 1108.73  gain 0.550  length 1.000  bite 0.000
+
+# 328 calls over 128 steps

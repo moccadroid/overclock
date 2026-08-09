@@ -1,0 +1,68 @@
+# the bus graph, as built by start() — nodes, their configuration, their wiring
+
+destination        AudioDestinationNode
+master             GainNode                 gain=0.700
+                     → destination
+lowShelf           BiquadFilterNode         type=lowshelf frequency=110.00 gain=5.000
+                     → limiterDrive
+limiter            DynamicsCompressorNode   threshold=-34.000 knee=4.000 ratio=20.000 attack=0.003 release=0.120
+                     → limiterTrim
+limiterDrive       GainNode                 gain=12.000
+                     → limiter
+limiterTrim        GainNode                 gain=0.750
+                     → master
+interfereGain      GainNode                 gain=1.000
+                     → lowShelf
+interfereFilter    BiquadFilterNode         type=lowpass frequency=20000.00 Q=0.700
+                     → interfereGain
+musicGroup         GainNode                 gain=1.000
+                     → interfereFilter
+sfxGroup           GainNode                 gain=1.000
+                     → lowShelf
+uiLevel            GainNode                 gain=1.000
+                     → master
+scoreTrim          GainNode                 gain=1.000
+                     → musicGroup
+punchBus           GainNode                 gain=0.950
+                     → scoreTrim
+uiBus              GainNode                 gain=0.500
+                     → uiLevel
+musicFilter        BiquadFilterNode         type=lowpass frequency=2200.00 Q=1.100
+                     → scoreTrim
+musicBus           GainNode                 gain=0.900
+                     → musicFilter
+siegeBus           GainNode                 gain=0.000
+                     → musicGroup
+siegeDroneBus      GainNode                 gain=1.000
+                     → siegeBus
+delay              DelayNode                delayTime=0.402
+                     → BiquadFilterNode#4
+                     → musicFilter
+delayFeedback      GainNode                 gain=0.520
+                     → delay
+BiquadFilterNode#4 BiquadFilterNode         type=lowpass frequency=1700.00
+                     → delayFeedback
+echoSend           GainNode                 gain=0.000
+                     → delay
+engineBus          GainNode                 gain=0.500
+                     → fxDry
+                     → BiquadFilterNode#5
+fxDry              GainNode                 gain=1.000
+                     → sfxGroup
+BiquadFilterNode#5 BiquadFilterNode         type=bandpass frequency=1500.00 Q=2.400
+                     → GainNode#18
+GainNode#18        GainNode                 gain=0.000
+                     → fxWet
+OscillatorNode#1   OscillatorNode           type=square frequency=180.00
+                     → GainNode#19
+                     started
+GainNode#19        GainNode                 gain=1.000
+                     → gain (param of GainNode#18)
+fxWet              GainNode                 gain=0.000
+                     → sfxGroup
+reverb             ConvolverNode
+                     → musicFilter
+reverbSend         GainNode                 gain=0.000
+                     → DelayNode#2
+DelayNode#2        DelayNode                delayTime=0.020
+                     → reverb

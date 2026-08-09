@@ -30,6 +30,7 @@ import {
   type Space,
   type StabCell,
 } from './cells';
+import type { FeelTuning, Score } from './score';
 import type { BassVoice, KickVoice, LeadVoice, PercVoice, StabVoice } from './voices';
 
 export type ArrangeHue = 'thermal' | 'voltaic' | 'void';
@@ -105,52 +106,10 @@ export interface Arrangement {
   signature: string;
 }
 
-/**
- * The Axiom's contribution: a key, a default feel, and how much the track
- * shuffles. Small on purpose — three numbers, against a build that contributes
- * a dozen decisions.
- */
-const AXIOM_BIAS: Record<string, { key: number; feel: Feel; swing: number }> = {
-  ignition: { key: 0, feel: 'straight', swing: 0 },
-  circuit: { key: 3, feel: 'rolling', swing: 0 },
-  feedback: { key: -4, feel: 'swung', swing: 0.18 },
-};
-
-/** §16.3's hue discipline, applied to the drum kit. */
-const HUE_KICK: Record<ArrangeHue, KickVoice> = {
-  thermal: 'punch',
-  voltaic: 'tight',
-  void: 'deep',
-};
-const HUE_PERC: Record<ArrangeHue, PercVoice> = {
-  thermal: 'clap',
-  voltaic: 'snare',
-  void: 'rim',
-};
-const HUE_STAB: Record<ArrangeHue, StabVoice> = {
-  thermal: 'organ',
-  voltaic: 'saw',
-  void: 'dub',
-};
-
-/** Where each Action primitive sits, which is also where it sits on screen. */
-const PRIMITIVE_REGISTER: Record<string, number> = {
-  burst: 0,
-  zone: 0,
-  delayed: 0,
-  knockback: 1,
-  vortex: 1,
-  chain: 1,
-  beam: 1,
-  convert: 1,
-  mine: 1,
-  projectile: 2,
-  orbital: 2,
-  buff: 2,
-};
-
-/** Triggers that fire on your own output — the ones that make a loop. */
-const CASCADE_TRIGGERS = new Set(['on_hit', 'on_kill', 'on_crit']);
+// The tables that used to live here — the Axiom bias, the three hue-to-voice
+// maps, the primitive registers and the cascade triggers — are now
+// `score.feel`. See score.ts: they were the taste in this file, and taste is the
+// thing a Score exists to hold. What is left is mechanism.
 
 /** Stable hash, so identical builds tie-break identically. */
 function hash(text: string): number {
@@ -180,6 +139,7 @@ interface Want {
  * available.
  */
 function pick<T extends { id: string; energy: number }>(
+  weights: FeelTuning['weights'],
   candidates: readonly T[],
   want: Want,
   seed: number,
@@ -203,15 +163,15 @@ function pick<T extends { id: string; energy: number }>(
     const c = cell as T & { feel?: Feel; space?: Space; register?: string; needsSeventh?: boolean };
     if (c.needsSeventh && want.seventhAvailable === false) continue;
 
-    let score = -Math.abs(cell.energy - want.energy) * 2;
-    if (want.feel && c.feel === want.feel) score += 3;
-    if (want.space && c.space === want.space) score += 2;
-    if (want.register && c.register === want.register) score += 4;
-    if (avoid && cell.id === avoid) score -= 2.5;
+    let score = -Math.abs(cell.energy - want.energy) * weights.energy;
+    if (want.feel && c.feel === want.feel) score += weights.feel;
+    if (want.space && c.space === want.space) score += weights.space;
+    if (want.register && c.register === want.register) score += weights.register;
+    if (avoid && cell.id === avoid) score -= weights.avoid;
     // A deterministic jitter, small enough never to beat a real preference but
     // large enough that two equally good cells do not always resolve the same
     // way for every build in the game.
-    score += (hash(cell.id + seed) % 100) / 120;
+    score += (hash(cell.id + seed) % 100) / weights.jitterScale;
 
     if (score > bestScore) {
       bestScore = score;
@@ -232,24 +192,41 @@ function dominantHue(rows: readonly EngineRow[]): ArrangeHue {
   return best;
 }
 
-export function arrange(input: ArrangeInput): Arrangement {
-  const bias = AXIOM_BIAS[input.axiomId] ?? AXIOM_BIAS.ignition!;
+export function arrange(input: ArrangeInput, score: Score): Arrangement {
+  const T = score.feel;
+  const bias = T.axiomBias[input.axiomId] ?? T.axiomBias[T.defaultAxiom]!;
   const rows = input.rows;
   // The variation counter is part of the signature: `setEngine` refuses a plan
   // whose signature it already has, so a pass that changed nothing but the
   // melodic seeds would be silently dropped.
   const vary = input.variation ?? 0;
-  const signature =
+
+  /**
+   * The build, as a string. This is what the selection seed is derived from, and
+   * it deliberately says nothing about the Score.
+   *
+   * Two strings rather than one, and the reason is worth writing down because the
+   * first attempt got it wrong and the schedule golden caught it. The *signature*
+   * is a dedupe key — "is this the same thing that is already playing" — so it has
+   * to include the Score, or switching Score on an unchanged build produces a
+   * matching fingerprint and the switch is silently dropped. The *seed* is a
+   * deterministic tie-break — "same build, same arrangement" — and mixing the
+   * Score into that would reshuffle which cell a build gets for no reason, which
+   * is exactly what happened: one prepended field moved a Meltdown harmony from
+   * `lament` to `drone` and transposed the whole bar by five semitones.
+   */
+  const build =
     `${input.axiomId}|v${vary}|${input.meltdown ? 'm' : ''}` +
     rows.map((r) => `${r.triggerId}:${r.primitive}:${r.hue}:${r.modifiers.join(',')}`).join(';');
-  const seed = hash(signature);
+  const signature = `${score.id}|${build}`;
+  const seed = hash(build);
   // The drums keep the *build's* seed, so the kit and the groove are stable for
   // as long as the Engine is. Everything melodic moves with the variation.
   const kitSeed = hash(`${input.axiomId}|` + rows.map((r) => `${r.triggerId}:${r.primitive}:${r.hue}`).join(';'));
 
-  // Authored cells plus whatever the player has written. Read once, so a cell
+  // The Score's cells plus whatever the player has written. Read once, so a cell
   // added mid-audition cannot change the arrangement halfway through building it.
-  const CELLS = pool();
+  const CELLS = pool(score.cells);
 
   const hue = dominantHue(rows);
   const modifiers = rows.flatMap((r) => r.modifiers);
@@ -269,85 +246,77 @@ export function arrange(input: ArrangeInput): Arrangement {
   // denser, the next a little sparser. That is what a section *is* in this
   // genre, and it opens the library without ever asking for a cell that does
   // not fit the Engine.
-  const lift = [0, 1, 0, -1][vary % 4] ?? 0;
-  const shiftSpace = (base: Space): Space => {
-    if (lift > 0) return base === 'sparse' ? 'mid' : 'busy';
-    if (lift < 0) return base === 'busy' ? 'mid' : 'sparse';
-    return base;
-  };
+  const lift = T.lift[vary % T.lift.length] ?? 0;
+  const shiftSpace = (base: Space): Space => T.shiftSpace(base, lift);
 
   // ---- harmony ------------------------------------------------------------
   //
-  // Read off what the Engine is *for*. A build that feeds on its own output
-  // never resolves, so neither does its harmony; an economy build sits
-  // suspended; a metronome build stays dark and modal.
-  const hasCascade = rows.some((r) => CASCADE_TRIGGERS.has(r.triggerId));
+  // What the Engine is *for* — the Score decides how that reads. See
+  // `feel.chooseMood`.
+  const hasCascade = rows.some((r) => T.cascadeTriggers.has(r.triggerId));
   const hasConvert = rows.some(
     (r) => r.triggerId === 'on_convert' || r.primitive === 'convert',
   );
-  // Meltdown overrides all of it. Whatever the Engine is for stops being the
-  // most interesting fact about the run the moment the containment goes, and
-  // `dark` is the two modal cells — a single held minor, and i-iv with no way
-  // out of it. Neither goes anywhere, which is the point.
-  const mood: Mood = input.meltdown
-    ? 'dark'
-    : hasConvert
-      ? 'suspended'
-      : hasCascade
-        ? 'driving'
-        : size >= 3
-          ? 'lifting'
-          : 'dark';
+  const mood: Mood = T.chooseMood({
+    size,
+    meltdown: input.meltdown ?? 0,
+    hasCascade,
+    hasConvert,
+  });
   const inMood = CELLS.harmonies.filter((h) => h.mood === mood);
   const harmony = inMood[(seed + vary * 3) % Math.max(1, inMood.length)] ?? CELLS.harmonies[0]!;
-  const seventhAvailable = harmony.chords.some((c) => c.quality === 'min7');
+  // Whether any chord in the progression has a fourth tone to reach for.
+  //
+  // Was `quality === 'min7'`, which is the same answer for every Score that only
+  // defines the four original shapes and the wrong one for any Score that adds a
+  // ninth or a sixth. The rule was always "is there a tone at that index", so it
+  // now asks that.
+  const seventhAvailable = harmony.chords.some(
+    (c) => (score.tonality.chords[c.quality]?.length ?? 0) > 3,
+  );
 
   // ---- drums --------------------------------------------------------------
-  //
-  // Accelerate makes a row fire more often, so it makes the kick roll. That is
-  // the most direct build-to-beat mapping in here and the easiest to hear.
-  //
-  // Ricochet asks for `broken`, and it has to ask for something: no Axiom bias
-  // is broken, so before this every cross-rhythm in the library was unreachable
-  // — present in the pool, tagged, validated, and never once selected. A bounce
-  // that lands somewhere other than where it was aimed is the one thing in the
-  // grammar that already means "off the grid", so it is what gets to break it.
-  const feel: Feel =
-    count('accelerate') > 0 ? 'rolling' : count('ricochet') > 0 ? 'broken' : bias.feel;
+  const feel: Feel = T.chooseFeel(count, bias.feel);
 
-  const kick = pick(CELLS.kicks, { energy: 1 + Math.min(4, size), feel, space: 'sparse' }, kitSeed);
+  const kick = pick(
+    T.weights,
+    CELLS.kicks,
+    { energy: T.ask.kickEnergy(size), feel, space: 'sparse' },
+    kitSeed,
+  );
   const backbeat = pick(
+    T.weights,
     CELLS.backbeats,
-    { energy: Math.max(1, Math.round(1 + i * 4)), feel },
+    { energy: T.ask.backbeatEnergy(i), feel },
     kitSeed + 1,
   );
   const hats = pick(
+    T.weights,
     CELLS.hats,
-    { energy: Math.max(1, Math.round(1 + i * 4) + lift), feel, space: shiftSpace(i > 0.6 ? 'busy' : 'mid') },
+    { energy: T.ask.hatEnergy(i, lift), feel, space: shiftSpace(T.ask.hatSpace(i)) },
     seed + 2,
     input.avoid?.hats,
   );
 
   // ---- bass ---------------------------------------------------------------
-  //
-  // The lowest Action you own picks the bass voice, because that is the one
-  // competing with it for the same octave. A Nova build gets a sub that stays
-  // out of its way; an Arc build gets a 303 that answers it.
   const lowest = rows
-    .map((r) => PRIMITIVE_REGISTER[r.primitive] ?? 1)
+    .map((r) => T.primitiveRegister[r.primitive] ?? 1)
     .reduce((a, b) => Math.min(a, b), 2);
-  const bassVoice: BassVoice = lowest === 0 ? 'sub' : hue === 'voltaic' ? 'acid' : 'pluck';
+  const highest = rows
+    .map((r) => T.primitiveRegister[r.primitive] ?? 1)
+    .reduce((a, b) => Math.max(a, b), 0);
+  const hasOrbital = rows.some((r) => r.primitive === 'orbital');
+  const registers = { hue, lowest, highest, hasOrbital };
 
-  // More rows means less room, so the bass gets sparser as the Engine fills up.
-  // This is the single most important rule in the file: without it, a five-row
-  // build and a busy bassline are competing for the same bar.
-  const bassSpace: Space = size >= 4 ? 'sparse' : size >= 2 ? 'mid' : 'busy';
+  const bassVoice: BassVoice = T.bassVoice(registers);
+
   const bass = pick(
+    T.weights,
     CELLS.basslines,
     {
-      energy: Math.max(1, Math.round(1 + i * 3) + lift),
+      energy: T.ask.bassEnergy(i, lift),
       register: 'low',
-      space: shiftSpace(bassSpace),
+      space: shiftSpace(T.ask.space(size)),
       seventhAvailable,
     },
     seed + 3,
@@ -355,21 +324,18 @@ export function arrange(input: ArrangeInput): Arrangement {
   );
 
   // ---- lead and stab ------------------------------------------------------
-  const highest = rows
-    .map((r) => PRIMITIVE_REGISTER[r.primitive] ?? 1)
-    .reduce((a, b) => Math.max(a, b), 0);
-  const hasOrbital = rows.some((r) => r.primitive === 'orbital');
-  const leadVoice: LeadVoice = hasOrbital ? 'bell' : hue === 'voltaic' ? 'acid' : 'pluck';
+  const leadVoice: LeadVoice = T.leadVoice(registers);
 
   const motif = pick(
+    T.weights,
     CELLS.motifs,
     {
-      energy: Math.max(1, Math.round(1 + i * 3) + lift),
-      register: highest === 2 ? 'high' : 'mid',
+      energy: T.ask.motifEnergy(i, lift),
+      register: T.ask.motifRegister(highest),
       // Same ladder the bass uses, for the same reason — and because asking only
       // ever for sparse or mid made every busy motif in the library unreachable.
       // A one-row Engine has room for a two-bar line; a five-row one does not.
-      space: shiftSpace(size >= 4 ? 'sparse' : size >= 2 ? 'mid' : 'busy'),
+      space: shiftSpace(T.ask.space(size)),
       seventhAvailable,
     },
     seed + 4,
@@ -377,19 +343,12 @@ export function arrange(input: ArrangeInput): Arrangement {
   );
 
   const stab = pick(
+    T.weights,
     CELLS.stabs,
-    { energy: Math.max(1, Math.min(4, size) + lift), space: shiftSpace(size >= 4 ? 'sparse' : 'mid') },
+    { energy: T.ask.stabEnergy(size, lift), space: shiftSpace(T.ask.stabSpace(size)) },
     seed + 5,
     input.avoid?.stab,
   );
-
-  // ---- timbre -------------------------------------------------------------
-  //
-  // Every one of these is a modifier you can point at. Draft Echo and the room
-  // opens up; draft Ground and the bass goes dark. Immediate, and legible.
-  const echo = Math.min(0.85, count('echo') * 0.4 + count('ricochet') * 0.2);
-  const brightness =
-    1 + count('overdrive') * 0.35 + count('amplify') * 0.2 - count('ground') * 0.3;
 
   return {
     key: bias.key,
@@ -401,29 +360,21 @@ export function arrange(input: ArrangeInput): Arrangement {
     motif,
     stab,
     swing: bias.swing,
-    kickVoice: HUE_KICK[hue],
-    // An Engine with no rows gets the rim, whatever its hue.
-    //
-    // The menu is this case, and it is the first thing anybody hears: a bed with
-    // no Engine behind it, so the backbeat is the loudest thing in a nearly empty
-    // mix, and a clap in an empty mix is a hand clapping in your ear. The rim is
-    // the same beat played by the quietest voice in the kit. It also earns its
-    // keep in a run's first minute — the drums now fill in as the Engine does,
-    // rather than arriving complete before you own anything.
-    percVoice: size === 0 ? 'rim' : HUE_PERC[hue],
+    kickVoice: T.hueKick[hue],
+    percVoice: size === 0 ? T.emptyPercVoice : T.huePerc[hue],
     bassVoice,
-    stabVoice: HUE_STAB[hue],
+    stabVoice: T.hueStab[hue],
     leadVoice,
-    padWave: hue === 'voltaic' ? 'square' : 'sawtooth',
-    bassQ: bassVoice === 'acid' ? 14 + count('overdrive') * 3 : 7,
-    bassBrightness: Math.max(0.4, Math.min(1.9, brightness)),
-    echo,
-    drive: 0.6 + Math.min(1, size / 4) * 0.8,
+    padWave: T.huePadWave[hue],
+    bassQ: T.bassQ(bassVoice, count),
+    bassBrightness: T.brightness(count),
+    echo: T.echo(count),
+    drive: T.drive(size),
     signature,
   };
 }
 
 /** The arrangement for an Engine that has not been built yet. */
-export function openingArrangement(axiomId: string): Arrangement {
-  return arrange({ axiomId, rows: [], intensity: 0 });
+export function openingArrangement(axiomId: string, score: Score): Arrangement {
+  return arrange({ axiomId, rows: [], intensity: 0 }, score);
 }

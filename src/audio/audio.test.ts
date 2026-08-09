@@ -8,7 +8,18 @@ import { SIM_DT } from '../sim/tunables';
 import { noteHz } from './voices';
 import { derivePart } from './parts';
 import { CELLS, GROUPS, parseMelodic, parsePerc, validate } from './cells';
-import { arrange, openingArrangement } from './arrange';
+import { arrange as arrangeWith, openingArrangement, type ArrangeInput } from './arrange';
+import { current } from './scores/current';
+
+/**
+ * `arrange` bound to the current Score.
+ *
+ * Every test below is about how *this* Score selects — which cell a cascade build
+ * gets, which register a five-row Engine leaves for the bass — so the Score is
+ * bound once here rather than threaded through seventeen call sites. A test that
+ * wants to compare two Scores calls `arrangeWith` directly.
+ */
+const arrange = (input: ArrangeInput) => arrangeWith(input, current);
 import { explain } from './explain';
 import { emptyLibrary, setUserCells } from './cells';
 import { countCells, parseLibrary } from '../meta/cellstore';
@@ -599,7 +610,7 @@ describe('the arranger (GDD §18.1)', () => {
   it('an Engine with nothing in it still has a floor', () => {
     // Run one, before the first Draft. A kick and a chord at minimum, or the
     // opening seconds are silence.
-    const opening = openingArrangement('ignition');
+    const opening = openingArrangement('ignition', current);
     expect(opening.kick.pattern).toMatch(/[xX]/);
     expect(opening.harmony.chords.length).toBeGreaterThan(0);
   });

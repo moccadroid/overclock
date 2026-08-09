@@ -18,6 +18,7 @@
  */
 import type { Hue } from '../sim/types';
 import type { PartVoice } from './parts';
+import type { VoiceTuning } from './score';
 
 /** A minor pentatonic, in semitones. Every note in the game is from this set,
  *  which is why simultaneous events never sound wrong together. */
@@ -41,9 +42,23 @@ export function noteHz(degree: number): number {
   return ROOT * Math.pow(2, (octave * 12 + step) / 12);
 }
 
+/**
+ * Where a voice plays, and how it is tuned.
+ *
+ * `tuning` rides along here rather than being a parameter on every voice, and
+ * that is the whole reason this refactor did not have to touch thirty
+ * signatures and their call sites: `VoiceCtx` already threads through every
+ * voice in the file, and `Audio.voice()` builds it in one place.
+ *
+ * A module-level `setVoiceTuning()` would have been the other option — there is
+ * precedent for it in `setUserCells` — but a hidden global that every voice
+ * silently depends on is exactly the thing that makes two Scores hard to reason
+ * about. Required rather than optional so nothing can forget it.
+ */
 export interface VoiceCtx {
   ctx: AudioContext;
   out: AudioNode;
+  tuning: VoiceTuning;
 }
 
 function env(
@@ -294,40 +309,42 @@ export function stab(
   voice: StabVoice = 'saw',
 ): void {
   const { ctx } = v;
+  const S = v.tuning.stab;
 
   if (voice === 'organ') {
-    const dur = 0.17;
-    const g = env(ctx, at, 0.004, dur, gain * 0.1);
+    const O = S.organ;
+    const dur = O.length;
+    const g = env(ctx, at, O.attack, dur, gain * O.gain);
     g.connect(v.out);
     for (const semi of semitones) {
       // Drawbar registration: fundamental, octave, and the fifth above that.
-      for (const [mult, level] of [[1, 1], [2, 0.5], [3, 0.28]] as const) {
-        const o = osc(ctx, 'sine', semiHz(semi + 24) * mult, at, at + dur + 0.05);
+      for (const [mult, level] of O.drawbar) {
+        const o = osc(ctx, 'sine', semiHz(semi + O.register) * mult, at, at + dur + 0.05);
         const vg = ctx.createGain();
-        vg.gain.value = level * 0.33;
+        vg.gain.value = level * O.level;
         o.connect(vg).connect(g);
       }
     }
     return;
   }
 
-  const dub = voice === 'dub';
-  const dur = dub ? 0.1 : 0.14;
-  const g = env(ctx, at, 0.003, dur, gain * (dub ? 0.16 : 0.13));
+  const F = S.filtered[voice === 'dub' ? 'dub' : 'saw'];
+  const dur = F.length;
+  const g = env(ctx, at, S.attack, dur, gain * F.gain);
 
   const filter = ctx.createBiquadFilter();
   filter.type = 'lowpass';
-  filter.frequency.setValueAtTime(dub ? 1500 : 5200, at);
-  filter.frequency.exponentialRampToValueAtTime(dub ? 500 : 1100, at + dur);
-  filter.Q.value = dub ? 2 : 4;
+  filter.frequency.setValueAtTime(F.open, at);
+  filter.frequency.exponentialRampToValueAtTime(F.close, at + dur);
+  filter.Q.value = F.q;
   filter.connect(g).connect(v.out);
 
   for (const semi of semitones) {
-    const hz = semiHz(semi + 24);
-    for (const cents of [-6, 6]) {
-      const o = osc(ctx, dub ? 'triangle' : 'sawtooth', hz * Math.pow(2, cents / 1200), at, at + dur + 0.05);
+    const hz = semiHz(semi + S.register);
+    for (const cents of [-S.detune, S.detune]) {
+      const o = osc(ctx, F.wave, hz * Math.pow(2, cents / 1200), at, at + dur + 0.05);
       const vg = ctx.createGain();
-      vg.gain.value = 0.4;
+      vg.gain.value = S.level;
       o.connect(vg).connect(filter);
     }
   }
@@ -367,40 +384,45 @@ export function motif(
     // Now: a harmonic ratio, an index around 1 that collapses in the first fifth
     // of the note, and a ceiling. That is a struck bell — bright in the attack,
     // a tone immediately after — rather than a tone that keeps screaming.
-    const dur = 0.75;
-    const g = env(ctx, at, 0.006, dur, gain * 0.07);
+    const L = v.tuning.lead.bell;
+    const dur = L.length;
+    const g = env(ctx, at, L.attack, dur, gain * L.gain);
     const carrier = osc(ctx, 'sine', hz, at, at + dur + 0.1);
-    const mod = osc(ctx, 'sine', hz * 2, at, at + dur + 0.1);
+    const mod = osc(ctx, 'sine', hz * L.ratio, at, at + dur + 0.1);
     const depth = ctx.createGain();
-    depth.gain.setValueAtTime(hz * 1.05, at);
-    depth.gain.exponentialRampToValueAtTime(hz * 0.02, at + dur * 0.2);
+    depth.gain.setValueAtTime(hz * L.depth, at);
+    depth.gain.exponentialRampToValueAtTime(hz * L.depthEnd, at + dur * L.collapse);
     mod.connect(depth);
     depth.connect(carrier.frequency);
 
     // The ceiling every other voice in here already had.
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass';
-    lp.frequency.value = Math.min(4800, hz * 5);
-    lp.Q.value = 0.6;
+    lp.frequency.value = Math.min(L.ceiling, hz * L.cutoff);
+    lp.Q.value = L.q;
     carrier.connect(lp).connect(g).connect(v.out);
     return;
   }
 
   if (voice === 'acid') {
-    const dur = 0.22;
-    const g = env(ctx, at, 0.004, dur, gain * 0.075);
+    const L = v.tuning.lead.acid;
+    const dur = L.length;
+    const g = env(ctx, at, L.attack, dur, gain * L.gain);
     const filter = ctx.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.Q.value = 14;
-    filter.frequency.setValueAtTime(hz * 1.6, at);
-    filter.frequency.exponentialRampToValueAtTime(Math.min(9000, hz * 9), at + 0.02);
-    filter.frequency.exponentialRampToValueAtTime(hz * 2, at + dur * 0.7);
+    filter.Q.value = L.q;
+    filter.frequency.setValueAtTime(hz * L.start, at);
+    filter.frequency.exponentialRampToValueAtTime(
+      Math.min(L.peakCeiling, hz * L.peak),
+      at + L.rise,
+    );
+    filter.frequency.exponentialRampToValueAtTime(hz * L.land, at + dur * L.fall);
 
     const o = ctx.createOscillator();
     o.type = 'sawtooth';
     if (glideFrom > 0) {
       o.frequency.setValueAtTime(glideFrom, at);
-      o.frequency.exponentialRampToValueAtTime(hz, at + 0.05);
+      o.frequency.exponentialRampToValueAtTime(hz, at + L.glide);
     } else {
       o.frequency.setValueAtTime(hz, at);
     }
@@ -410,18 +432,19 @@ export function motif(
     return;
   }
 
-  const dur = 0.19;
-  const g = env(ctx, at, 0.004, dur, gain * 0.09);
+  const L = v.tuning.lead.pluck;
+  const dur = L.length;
+  const g = env(ctx, at, L.attack, dur, gain * L.gain);
   const filter = ctx.createBiquadFilter();
   filter.type = 'lowpass';
-  filter.frequency.setValueAtTime(hz * 6, at);
-  filter.frequency.exponentialRampToValueAtTime(hz * 1.5, at + dur);
-  filter.Q.value = 7;
+  filter.frequency.setValueAtTime(hz * L.open, at);
+  filter.frequency.exponentialRampToValueAtTime(hz * L.close, at + dur);
+  filter.Q.value = L.q;
 
   const o = osc(ctx, 'sawtooth', hz, at, at + dur + 0.05);
-  const o2 = osc(ctx, 'square', hz * 2.002, at, at + dur + 0.05);
+  const o2 = osc(ctx, 'square', hz * L.octave, at, at + dur + 0.05);
   const og = ctx.createGain();
-  og.gain.value = 0.35;
+  og.gain.value = L.octaveLevel;
   o.connect(filter);
   o2.connect(og).connect(filter);
   filter.connect(g).connect(v.out);
@@ -443,13 +466,10 @@ export type KickVoice = 'punch' | 'tight' | 'deep';
  */
 export function kick(v: VoiceCtx, at: number, gain: number, voice: KickVoice = 'punch'): void {
   const { ctx } = v;
-  const spec = {
-    punch: { from: 190, to: 35, drop: 0.075, decay: 0.42, click: 0.5, clickHz: 900 },
-    tight: { from: 220, to: 44, drop: 0.045, decay: 0.19, click: 0.85, clickHz: 1600 },
-    deep: { from: 120, to: 28, drop: 0.13, decay: 0.85, click: 0.12, clickHz: 420 },
-  }[voice];
+  const K = v.tuning.kick;
+  const spec = K.spec[voice];
 
-  const body = env(ctx, at, 0.003, spec.decay, gain * 1.15);
+  const body = env(ctx, at, K.attack, spec.decay, gain * K.gain);
   const o = ctx.createOscillator();
   o.type = 'sine';
   o.frequency.setValueAtTime(spec.from, at);
@@ -458,11 +478,11 @@ export function kick(v: VoiceCtx, at: number, gain: number, voice: KickVoice = '
   o.stop(at + spec.decay + 0.08);
   o.connect(body).connect(v.out);
 
-  const tick = env(ctx, at, 0.001, 0.012, gain * spec.click);
+  const tick = env(ctx, at, K.clickAttack, K.clickDecay, gain * spec.click);
   const t = osc(ctx, 'triangle', spec.clickHz, at, at + 0.03);
   const hp = ctx.createBiquadFilter();
   hp.type = 'highpass';
-  hp.frequency.value = 400;
+  hp.frequency.value = K.clickHp;
   t.connect(hp).connect(tick).connect(v.out);
 }
 
@@ -499,14 +519,15 @@ export function bass(
   dur = 0.16,
 ): void {
   const { ctx } = v;
+  const B = v.tuning.bass;
 
   if (spec.voice === 'sub') {
-    const long = dur * 3.2;
-    const g = env(ctx, at, 0.02, long, gain * 0.75);
+    const long = dur * B.sub.length;
+    const g = env(ctx, at, B.sub.attack, long, gain * B.sub.gain);
     const o = osc(ctx, 'sine', hz, at, at + long + 0.1);
     const o2 = osc(ctx, 'triangle', hz, at, at + long + 0.1);
     const og = ctx.createGain();
-    og.gain.value = 0.25;
+    og.gain.value = B.sub.triangle;
     o.connect(g);
     o2.connect(og).connect(g);
     g.connect(v.out);
@@ -514,28 +535,32 @@ export function bass(
   }
 
   if (spec.voice === 'acid') {
+    const A = B.acid;
     const accented = spec.accent === true;
-    const length = accented ? dur * 1.35 : dur;
-    const g = env(ctx, at, 0.004, length, gain * (accented ? 0.75 : 0.5));
+    const length = accented ? dur * A.accentLength : dur;
+    const g = env(ctx, at, A.attack, length, gain * (accented ? A.accentGain : A.gain));
 
     const filter = ctx.createBiquadFilter();
     filter.type = 'lowpass';
     filter.Q.value = spec.q;
     // The envelope is the sound: snap wide open, collapse fast. An accent
     // opens further and decays slower, which is the whole 303 vocabulary.
-    const peak = Math.min(7000, hz * (accented ? 26 : 15) * spec.brightness);
-    filter.frequency.setValueAtTime(Math.max(90, hz * 1.4), at);
-    filter.frequency.exponentialRampToValueAtTime(peak, at + 0.012);
+    const peak = Math.min(
+      A.peakCeiling,
+      hz * (accented ? A.accentPeak : A.peak) * spec.brightness,
+    );
+    filter.frequency.setValueAtTime(Math.max(A.startFloor, hz * A.start), at);
+    filter.frequency.exponentialRampToValueAtTime(peak, at + A.rise);
     filter.frequency.exponentialRampToValueAtTime(
-      Math.max(80, hz * 1.6),
-      at + length * (accented ? 0.9 : 0.55),
+      Math.max(A.landFloor, hz * A.land),
+      at + length * (accented ? A.accentFall : A.fall),
     );
 
     const o = ctx.createOscillator();
     o.type = 'sawtooth';
     if (spec.glideFrom) {
       o.frequency.setValueAtTime(spec.glideFrom, at);
-      o.frequency.exponentialRampToValueAtTime(hz, at + 0.055);
+      o.frequency.exponentialRampToValueAtTime(hz, at + A.glide);
     } else {
       o.frequency.setValueAtTime(hz, at);
     }
@@ -545,20 +570,24 @@ export function bass(
     return;
   }
 
-  const g = env(ctx, at, 0.006, dur, gain * 0.6);
+  const P = B.pluck;
+  const g = env(ctx, at, P.attack, dur, gain * P.gain);
   const filter = ctx.createBiquadFilter();
   filter.type = 'lowpass';
-  filter.frequency.setValueAtTime(Math.min(4200, hz * 14 * spec.brightness), at);
+  filter.frequency.setValueAtTime(
+    Math.min(P.cutoffCeiling, hz * P.cutoff * spec.brightness),
+    at,
+  );
   filter.frequency.exponentialRampToValueAtTime(
-    Math.max(70, hz * 2.2 * spec.brightness),
-    at + dur * 0.8,
+    Math.max(P.landFloor, hz * P.land * spec.brightness),
+    at + dur * P.fall,
   );
   filter.Q.value = spec.q;
 
   const o = osc(ctx, 'sawtooth', hz, at, at + dur + 0.06);
   const o2 = osc(ctx, 'square', hz / 2, at, at + dur + 0.06);
   const subGain = ctx.createGain();
-  subGain.gain.value = 0.5;
+  subGain.gain.value = P.subLevel;
   o.connect(filter);
   o2.connect(subGain).connect(filter);
   filter.connect(g).connect(v.out);
@@ -640,7 +669,8 @@ export function pad(
 /** Filtered noise burst. `open` lengthens it into an open hat. */
 export function hat(v: VoiceCtx, at: number, gain: number, open = false): void {
   const { ctx } = v;
-  const dur = open ? 0.16 : 0.035;
+  const H = v.tuning.hat;
+  const dur = open ? H.open : H.closed;
   const frames = Math.ceil(ctx.sampleRate * (dur + 0.02));
   const buf = ctx.createBuffer(1, frames, ctx.sampleRate);
   const data = buf.getChannelData(0);
@@ -652,9 +682,9 @@ export function hat(v: VoiceCtx, at: number, gain: number, open = false): void {
 
   const filter = ctx.createBiquadFilter();
   filter.type = 'highpass';
-  filter.frequency.value = 7000;
+  filter.frequency.value = H.hz;
 
-  const g = env(ctx, at, 0.001, dur, gain * 0.16);
+  const g = env(ctx, at, H.attack, dur, gain * H.gain);
   src.connect(filter).connect(g).connect(v.out);
   src.start(at);
   src.stop(at + dur + 0.02);
@@ -663,7 +693,8 @@ export function hat(v: VoiceCtx, at: number, gain: number, open = false): void {
 /** Sub pulse under the kick — the low end that makes it feel like a room. */
 export function sub(v: VoiceCtx, at: number, hz: number, gain: number, dur = 0.5): void {
   const { ctx } = v;
-  const g = env(ctx, at, 0.02, dur, gain * 0.45);
+  const S = v.tuning.sub;
+  const g = env(ctx, at, S.attack, dur, gain * S.gain);
   const o = osc(ctx, 'sine', hz, at, at + dur + 0.1);
   o.connect(g).connect(v.out);
 }
@@ -891,21 +922,22 @@ export function gatedChord(
   wave: OscillatorType = 'sawtooth',
 ): void {
   const { ctx } = v;
-  const g = env(ctx, at, 0.006, dur, gain * 0.13);
+  const C = v.tuning.chord;
+  const g = env(ctx, at, C.attack, dur, gain * C.gain);
 
   const filter = ctx.createBiquadFilter();
   filter.type = 'lowpass';
-  filter.frequency.setValueAtTime(3400, at);
-  filter.frequency.exponentialRampToValueAtTime(900, at + dur);
-  filter.Q.value = 2.2;
+  filter.frequency.setValueAtTime(C.open, at);
+  filter.frequency.exponentialRampToValueAtTime(C.close, at + dur);
+  filter.Q.value = C.q;
   filter.connect(g).connect(v.out);
 
   for (const semi of semitones) {
-    const hz = semiHz(semi + 24);
-    for (const cents of [-5, 5]) {
+    const hz = semiHz(semi + C.register);
+    for (const cents of [-C.detune, C.detune]) {
       const o = osc(ctx, wave, hz * Math.pow(2, cents / 1200), at, at + dur + 0.05);
       const vg = ctx.createGain();
-      vg.gain.value = 0.3;
+      vg.gain.value = C.level;
       o.connect(vg).connect(filter);
     }
   }
