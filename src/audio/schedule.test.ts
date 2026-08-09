@@ -64,6 +64,7 @@ import { derivePart, type Part } from './parts';
 import { current } from './scores/current';
 import { deep } from './scores/deep';
 import { vault } from './scores/vault';
+import { basin, furnace, lattice, marrow } from './scores/playlist';
 import { SCORES, validateScores, type Score } from './score';
 import { fromScoreData, parseScoreData, stringifyScoreData, toScoreData } from './scoredata';
 import {
@@ -487,6 +488,34 @@ describe('the schedule (goldens — a diff is a sound change)', () => {
     });
 
     /**
+     * The saved song, as a document you can load.
+     *
+     * This is what the format is *for*, and until now nothing wrote one — the
+     * only artifact on disk describing a kept song was a checksum of its output,
+     * which is a fingerprint, not a song. You cannot load a digest. You can load
+     * this: `fromScoreData` turns it back into the Score, and the test below
+     * proves the Score it turns back into plays the same 192 bars.
+     *
+     * It also makes a *readable* review artifact, which the digest deliberately
+     * is not. When a saved song changes, the diff here says `hueStab: dub ->
+     * organ` in the language the song is written in. The digest only says a hash
+     * moved. They cover different questions and it takes both: this one holds the
+     * song's own numbers, the digest holds everything underneath it — the
+     * sequencer, the voices, `deep` — none of which a document can see.
+     *
+     * Written through the snapshot mechanism so it cannot rot: the TypeScript
+     * stays canonical, because behaviour is functions and JSON cannot hold a
+     * `chooseMood`, and this file is the export. Edit the Score without
+     * regenerating and the test fails.
+     */
+    it(`${name} is saved as a document`, async () => {
+      const document = toScoreData(score, SCORES['deep']!, SCORES, 'deep');
+      await expect(stringifyScoreData(document)).toMatchFileSnapshot(
+        `scores/${name}.score.json`,
+      );
+    });
+
+    /**
      * The document is the Score, and this is what makes that claim true rather
      * than hopeful.
      *
@@ -515,6 +544,38 @@ describe('the schedule (goldens — a diff is a sound change)', () => {
       const base = SCRIPTS.find((s) => s.name === 'run')!;
       const before = formatVoices(drive({ ...base, name, bars: 192 }, score).rec);
       const after = formatVoices(drive({ ...base, name, bars: 192 }, reloaded).rec);
+      expect(after).toBe(before);
+    });
+  }
+
+  /**
+   * The other four, through the same mill — but not frozen.
+   *
+   * The playlist is still being tuned, so it gets no golden: a file that has to
+   * be regenerated on every adjustment trains you to regenerate without looking,
+   * which is worse than having no file. What it does get is proof that the format
+   * carries it — each Score serialises, reloads, and plays back note for note.
+   * If a Score grows something the format silently drops, this is where it shows,
+   * on the Scores most likely to grow it.
+   */
+  const KEPT: readonly (readonly [string, Score, string])[] = [
+    ['furnace', furnace, 'current'],
+    ['lattice', lattice, 'deep'],
+    ['basin', basin, 'deep'],
+    ['marrow', marrow, 'deep'],
+  ];
+
+  for (const [name, score, baseId] of KEPT) {
+    it(`${name} survives a round trip through JSON`, () => {
+      const text = stringifyScoreData(toScoreData(score, SCORES[baseId]!, SCORES, baseId));
+      const parsed = parseScoreData(text);
+      expect('data' in parsed, 'error' in parsed ? parsed.error : '').toBe(true);
+      if (!('data' in parsed)) return;
+
+      const reloaded = fromScoreData(parsed.data, (id) => SCORES[id]);
+      const base = SCRIPTS.find((s) => s.name === 'run')!;
+      const before = formatVoices(drive({ ...base, name }, score).rec);
+      const after = formatVoices(drive({ ...base, name }, reloaded).rec);
       expect(after).toBe(before);
     });
   }

@@ -1,0 +1,95 @@
+{
+  "format": 1,
+  "id": "vault",
+  "name": "Vault",
+  "extends": "deep",
+  "rules": {
+    "bassVoice": "vault",
+    "brightness": "vault"
+  },
+  "feel": {
+    "axiomBias": {
+      "ignition": {
+        "key": -1
+      },
+      "circuit": {
+        "key": 2
+      },
+      "feedback": {
+        "key": -3,
+        "swing": 0.16
+      }
+    },
+    "hueKick": {
+      "thermal": "slam",
+      "voltaic": "punch",
+      "void": "slam"
+    },
+    "huePerc": {
+      "thermal": "rim"
+    },
+    "hueStab": {
+      "thermal": "dub"
+    },
+    "weights": {
+      "spread": 0
+    },
+    "kitVaries": false
+  },
+  "mix": {
+    "tempo": {
+      "base": 104
+    },
+    "hueColour": {
+      "thermal": 0.9,
+      "void": 0.62
+    },
+    "filter": {
+      "floor": 320,
+      "span": 3000,
+      "q": 2.6,
+      "intensityFloor": 0.4
+    },
+    "gains": {
+      "kick": 0.92,
+      "backbeatBase": 0.4,
+      "backbeatPerIntensity": 0.22,
+      "hat": 0.5,
+      "bass": 1.05,
+      "stab": 0.7,
+      "motif": 0.72,
+      "sub": 0.3,
+      "chord": 0.6
+    },
+    "entry": {
+      "bass": 0,
+      "stabPhrase": 0.3,
+      "motifPhrase": 0.5,
+      "motifIntensity": 0.7
+    },
+    "register": {
+      "bass": 0,
+      "sub": -12
+    },
+    "duck": {
+      "depth": 0.2,
+      "recover": 0.88
+    }
+  },
+  "graph": {
+    "lowShelf": {
+      "hz": 80,
+      "gain": 3
+    },
+    "delay": {
+      "feedback": 0.5,
+      "damp": 1500
+    },
+    "reverb": {
+      "send": 0.18,
+      "seconds": 2.2,
+      "damp": 2600,
+      "predelay": 0.018
+    }
+  }
+}
